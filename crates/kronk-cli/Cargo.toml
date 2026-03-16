@@ -1,0 +1,16 @@
+[package]
+name = "kronk"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "kronk"
+path = "src/main.rs"
+
+[dependencies]
+kronk-core = { path = "../kronk-core" }
+tokio.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
