@@ -80,11 +80,15 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
     }
 
     let models_dir = config.models_dir()?;
-    // Split repo_id into components so path separators are correct on Windows
-    // "Tesslate/OmniCoder-9B-GGUF" -> models_dir/Tesslate/OmniCoder-9B-GGUF
-    let model_dir = repo_id
-        .split('/')
-        .fold(models_dir.clone(), |acc, part| acc.join(part));
+    // Strip -GGUF suffix from directory name (cleaner paths)
+    // "Tesslate/OmniCoder-9B-GGUF" -> models_dir/Tesslate/OmniCoder-9B
+    let model_dir = repo_id.split('/').fold(models_dir.clone(), |acc, part| {
+        let clean = part
+            .strip_suffix("-GGUF")
+            .or_else(|| part.strip_suffix("-gguf"))
+            .unwrap_or(part);
+        acc.join(clean)
+    });
     std::fs::create_dir_all(&model_dir)
         .with_context(|| format!("Failed to create directory: {}", model_dir.display()))?;
 
