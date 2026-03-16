@@ -17,6 +17,12 @@
 - [x] **Inno Setup installer** — Windows installer that adds to PATH, creates Start Menu entries, cleans up on uninstall
 - [x] **GitHub Actions release** — Triggers on version tags, builds Windows (exe + installer) and Linux (.deb + .rpm) packages
 - [x] **Mock backend** — Testable fake LLM server with crash simulation and hang detection
+- [x] **Use case system** — Per-profile use case presets (coding, chat, analysis, creative, custom) with sampling parameter auto-tuning and merge logic
+- [x] **Model registry** — `~/.kronk/models/{company}/{model}/` with TOML model cards, `kronk model` subcommand (pull, ls, ps, create, rm, scan)
+- [x] **HuggingFace pull** — `kronk model pull <repo>` downloads GGUFs with interactive quant selection, auto-resolves `-GGUF` repo suffix
+- [x] **Community model cards** — Curated sampling presets fetched from GitHub on pull (e.g. Tesslate/OmniCoder-9B)
+- [x] **3-layer sampling merge** — UseCase defaults → model card overrides → profile overrides, applied in all run/service paths
+- [x] **Model-linked profiles** — `kronk model create` builds profiles from model cards with `--backend`, `--quant`, `--use-case` flags
 
 ## In Progress
 
@@ -25,11 +31,12 @@
 ## Planned
 
 - [ ] **TUI Dashboard** — `kronk-tui` crate with ratatui. War Room view: live VRAM, tokens/sec, temperature, logs
+- [ ] **Windows service polling** — Replace fixed sleeps with proper SCM status polling and backoff ([plan](docs/superpowers/plans/2026-03-16-windows-service-polling.md))
+- [ ] **Windows service SID ACL** — Use installer's SID instead of IU for service permissions ([plan](docs/superpowers/plans/2026-03-16-windows-service-sid.md))
 - [ ] **System tray** — Windows tray icon for quick service toggle (start/stop)
 - [ ] **`kronk remove <profile>`** — Delete a profile from config
 - [ ] **`kronk list`** — List all profiles with their backends and status
 - [ ] **Multi-port support** — Different profiles on different ports, firewall rules per profile
 - [ ] **Log viewer** — `kronk logs` to tail service log files
 - [ ] **Health check customization** — Per-profile health check URLs and intervals
-- [ ] **Model download** — `kronk pull <huggingface-url>` to download GGUF models
 - [ ] **Tauri GUI** — Lightweight Windows frontend for non-CLI users

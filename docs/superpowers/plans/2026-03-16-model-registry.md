@@ -1,5 +1,7 @@
 # Model Registry & HuggingFace Pull Implementation Plan
 
+> **Status: COMPLETED** — Implemented on 2026-03-16 on branch `feat/model-registry`.
+
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Centralised model management with `~/.kronk/models/` directory, TOML model cards, HuggingFace pull with interactive quant selection, and profile creation from model cards with a 3-layer sampling merge chain.
