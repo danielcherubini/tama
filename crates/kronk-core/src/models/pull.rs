@@ -1,3 +1,4 @@
+use crate::models::card::ModelCard;
 use anyhow::{Context, Result};
 use hf_hub::api::tokio::Api;
 use std::path::PathBuf;
@@ -12,28 +13,48 @@ pub struct RemoteGguf {
 }
 
 /// List GGUF files available in a HuggingFace model repository.
-pub async fn list_gguf_files(repo_id: &str) -> Result<Vec<RemoteGguf>> {
+/// Returns the resolved repo_id (which may differ from input if `-GGUF` was appended)
+/// and the list of available GGUF files.
+///
+/// Auto-resolves repos: if `repo_id` doesn't end with `-GGUF` and the initial
+/// fetch finds no GGUF files (or the repo doesn't exist), retries with `-GGUF` appended.
+pub async fn list_gguf_files(repo_id: &str) -> Result<(String, Vec<RemoteGguf>)> {
     let api = Api::new().context("Failed to initialise HuggingFace API client")?;
-    let repo = api.model(repo_id.to_string());
-    let info = repo
-        .info()
-        .await
-        .with_context(|| format!("Failed to fetch repo info for '{}'", repo_id))?;
 
-    let ggufs: Vec<RemoteGguf> = info
-        .siblings
-        .into_iter()
-        .filter(|s| s.rfilename.ends_with(".gguf"))
-        .map(|s| {
-            let quant = infer_quant_from_filename(&s.rfilename);
-            RemoteGguf {
-                filename: s.rfilename,
-                quant,
+    // Try the repo_id as given first
+    let candidates = if repo_id.to_uppercase().ends_with("-GGUF") {
+        vec![repo_id.to_string()]
+    } else {
+        vec![repo_id.to_string(), format!("{}-GGUF", repo_id)]
+    };
+
+    for candidate in &candidates {
+        let repo = api.model(candidate.clone());
+        match repo.info().await {
+            Ok(info) => {
+                let ggufs: Vec<RemoteGguf> = info
+                    .siblings
+                    .into_iter()
+                    .filter(|s| s.rfilename.ends_with(".gguf"))
+                    .map(|s| {
+                        let quant = infer_quant_from_filename(&s.rfilename);
+                        RemoteGguf {
+                            filename: s.rfilename,
+                            quant,
+                        }
+                    })
+                    .collect();
+
+                if !ggufs.is_empty() {
+                    return Ok((candidate.clone(), ggufs));
+                }
+                // Repo exists but no GGUFs — try next candidate
             }
-        })
-        .collect();
+            Err(_) => continue, // Repo not found — try next candidate
+        }
+    }
 
-    Ok(ggufs)
+    anyhow::bail!("No GGUF files found. Tried: {}", candidates.join(", "))
 }
 
 /// Download a specific GGUF file from a HuggingFace repo to the given model directory.
@@ -81,6 +102,53 @@ pub async fn download_gguf(
     }
 
     Ok(dest_path)
+}
+
+const MODELCARDS_BASE_URL: &str =
+    "https://raw.githubusercontent.com/danielcherubini/kronk/main/modelcards";
+
+/// Try to fetch a community model card from the kronk repository.
+///
+/// Attempts several name variants derived from the repo_id:
+/// 1. Exact: `{company}/{model}.toml` (e.g. `Tesslate/OmniCoder-9B-GGUF.toml`)
+/// 2. Strip `-GGUF` suffix: `Tesslate/OmniCoder-9B.toml`
+/// 3. Strip `-gguf` suffix (lowercase)
+///
+/// Returns `None` silently on network errors or 404s.
+pub async fn fetch_community_card(repo_id: &str) -> Option<ModelCard> {
+    let parts: Vec<&str> = repo_id.splitn(2, '/').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let (company, model) = (parts[0], parts[1]);
+
+    // Build candidate names: exact, then stripped variants
+    let mut candidates = vec![model.to_string()];
+    for suffix in ["-GGUF", "-gguf", "-Gguf"] {
+        if let Some(stripped) = model.strip_suffix(suffix) {
+            candidates.push(stripped.to_string());
+        }
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .ok()?;
+
+    for name in &candidates {
+        let url = format!("{}/{}/{}.toml", MODELCARDS_BASE_URL, company, name);
+        if let Ok(resp) = client.get(&url).send().await {
+            if resp.status().is_success() {
+                if let Ok(body) = resp.text().await {
+                    if let Ok(card) = toml::from_str::<ModelCard>(&body) {
+                        return Some(card);
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Try to infer the quantisation type from a GGUF filename.

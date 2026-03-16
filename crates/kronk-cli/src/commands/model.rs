@@ -50,11 +50,14 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
     println!();
     println!("  Fetching file list from {}...", repo_id);
 
-    let ggufs = pull::list_gguf_files(repo_id).await?;
+    let (resolved_repo, ggufs) = pull::list_gguf_files(repo_id).await?;
 
-    if ggufs.is_empty() {
-        anyhow::bail!("No GGUF files found in repository '{}'", repo_id);
+    if resolved_repo != repo_id {
+        println!("  Resolved to: {}", resolved_repo);
     }
+
+    // Use the resolved repo_id for all subsequent operations
+    let repo_id = &resolved_repo;
 
     let options: Vec<String> = ggufs
         .iter()
@@ -84,16 +87,45 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
     let mut card = if card_path.exists() {
         ModelCard::load(&card_path)?
     } else {
-        let name = repo_id.rsplit('/').next().unwrap_or(repo_id).to_string();
-        ModelCard {
-            model: ModelMeta {
-                name,
-                source: repo_id.to_string(),
-                default_context_length: Some(8192),
-                default_gpu_layers: Some(999),
-            },
-            sampling: HashMap::new(),
-            quants: HashMap::new(),
+        // Try to fetch a community model card with curated sampling presets
+        println!("  Checking for community model card...");
+        if let Some(mut community_card) = pull::fetch_community_card(repo_id).await {
+            println!(
+                "  Found community card for {} (context: {}, gpu-layers: {})",
+                community_card.model.name,
+                community_card
+                    .model
+                    .default_context_length
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "default".to_string()),
+                community_card
+                    .model
+                    .default_gpu_layers
+                    .map(|g| g.to_string())
+                    .unwrap_or_else(|| "default".to_string()),
+            );
+            if !community_card.sampling.is_empty() {
+                let presets: Vec<&str> =
+                    community_card.sampling.keys().map(|s| s.as_str()).collect();
+                println!("  Sampling presets: {}", presets.join(", "));
+            }
+            // Ensure source matches the repo we're pulling from
+            community_card.model.source = repo_id.to_string();
+            // Clear quants — we'll populate from what the user actually downloads
+            community_card.quants.clear();
+            community_card
+        } else {
+            let name = repo_id.rsplit('/').next().unwrap_or(repo_id).to_string();
+            ModelCard {
+                model: ModelMeta {
+                    name,
+                    source: repo_id.to_string(),
+                    default_context_length: Some(8192),
+                    default_gpu_layers: Some(999),
+                },
+                sampling: HashMap::new(),
+                quants: HashMap::new(),
+            }
         }
     };
 
