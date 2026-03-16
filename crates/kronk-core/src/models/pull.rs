@@ -121,52 +121,36 @@ pub async fn download_gguf(
         .build()
         .context("Failed to create HTTP client")?;
 
-    // Get file size via HEAD
-    let head = client
+    // Try HEAD to get file size for skip-if-exists check
+    let head_size = client
         .head(&url)
         .send()
         .await
-        .with_context(|| format!("HEAD request failed for {}", url))?;
-
-    // Follow redirects — HuggingFace redirects to CDN
-    let total_size = head.content_length().unwrap_or(0);
+        .ok()
+        .and_then(|r| r.content_length());
 
     // Check if already downloaded with matching size
-    if dest_path.exists() {
-        if let Ok(meta) = std::fs::metadata(&dest_path) {
-            if total_size > 0 && meta.len() == total_size {
-                return Ok(DownloadResult {
-                    path: dest_path,
-                    size_bytes: total_size,
-                });
+    if let Some(total) = head_size {
+        if dest_path.exists() {
+            if let Ok(meta) = std::fs::metadata(&dest_path) {
+                if meta.len() == total {
+                    return Ok(DownloadResult {
+                        path: dest_path,
+                        size_bytes: total,
+                    });
+                }
             }
+            // Size mismatch — re-download
+            std::fs::remove_file(&dest_path).ok();
         }
-        // Size mismatch or unknown — re-download
-        std::fs::remove_file(&dest_path).ok();
     }
 
     // Download with progress bar and retry
     const MAX_RETRIES: u32 = 3;
     let mut attempt = 0;
     let mut downloaded: u64 = 0;
-
-    let pb = if total_size > 0 {
-        let pb = ProgressBar::new(total_size);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template(
-                    "{msg} [{elapsed_precise}] [{bar:40}] {bytes}/{total_bytes} ({bytes_per_sec})",
-                )
-                .unwrap_or_else(|_| ProgressStyle::default_bar())
-                .progress_chars("=>-"),
-        );
-        pb.set_message(filename.to_string());
-        pb
-    } else {
-        let pb = ProgressBar::new_spinner();
-        pb.set_message(filename.to_string());
-        pb
-    };
+    let mut total_size: u64 = 0;
+    let mut pb: Option<ProgressBar> = None;
 
     loop {
         attempt += 1;
@@ -175,23 +159,22 @@ pub async fn download_gguf(
         let mut request = client.get(&url);
         if downloaded > 0 {
             request = request.header("Range", format!("bytes={}-", downloaded));
-            pb.set_position(downloaded);
         }
 
         let response = match request.send().await {
             Ok(r) => r,
             Err(e) if attempt <= MAX_RETRIES => {
-                pb.suspend(|| {
-                    println!(
-                        "  Download stalled (attempt {}/{}), retrying... ({})",
-                        attempt, MAX_RETRIES, e
-                    );
-                });
+                println!(
+                    "  Download stalled (attempt {}/{}), retrying... ({})",
+                    attempt, MAX_RETRIES, e
+                );
                 tokio::time::sleep(Duration::from_secs(2u64.pow(attempt - 1))).await;
                 continue;
             }
             Err(e) => {
-                pb.finish_and_clear();
+                if let Some(ref p) = pb {
+                    p.finish_and_clear();
+                }
                 return Err(e).with_context(|| {
                     format!(
                         "Failed to download '{}' after {} attempts",
@@ -203,23 +186,50 @@ pub async fn download_gguf(
 
         if !response.status().is_success() && response.status().as_u16() != 206 {
             if attempt <= MAX_RETRIES {
-                pb.suspend(|| {
-                    println!(
-                        "  Server returned {}, retrying ({}/{})...",
-                        response.status(),
-                        attempt,
-                        MAX_RETRIES
-                    );
-                });
+                println!(
+                    "  Server returned {}, retrying ({}/{})...",
+                    response.status(),
+                    attempt,
+                    MAX_RETRIES
+                );
                 tokio::time::sleep(Duration::from_secs(2u64.pow(attempt - 1))).await;
                 continue;
             }
-            pb.finish_and_clear();
+            if let Some(ref p) = pb {
+                p.finish_and_clear();
+            }
             anyhow::bail!(
                 "Download failed with status {} after {} attempts",
                 response.status(),
                 attempt
             );
+        }
+
+        // Create progress bar from GET response Content-Length (available after redirect)
+        if pb.is_none() {
+            if let Some(content_len) = response.content_length() {
+                total_size = content_len + downloaded; // account for resumed bytes
+                let p = ProgressBar::new(total_size);
+                p.set_style(
+                    ProgressStyle::default_bar()
+                        .template("{msg} [{elapsed_precise}] [{bar:40}] {bytes}/{total_bytes} ({bytes_per_sec})")
+                        .unwrap_or_else(|_| ProgressStyle::default_bar())
+                        .progress_chars("=>-"),
+                );
+                p.set_message(filename.to_string());
+                p.set_position(downloaded);
+                pb = Some(p);
+            } else {
+                // No Content-Length at all — use a bytes counter
+                let p = ProgressBar::new_spinner();
+                p.set_style(
+                    ProgressStyle::default_spinner()
+                        .template("{msg} [{elapsed_precise}] {bytes} ({bytes_per_sec})")
+                        .unwrap_or_else(|_| ProgressStyle::default_spinner()),
+                );
+                p.set_message(filename.to_string());
+                pb = Some(p);
+            }
         }
 
         // Open file for append (resume) or create — use sync I/O for Windows compat
@@ -242,23 +252,29 @@ pub async fn download_gguf(
                     file.write_all(&chunk)
                         .with_context(|| format!("Failed to write to {}", dest_path.display()))?;
                     downloaded += chunk.len() as u64;
-                    pb.set_position(downloaded);
+                    if let Some(ref p) = pb {
+                        p.set_position(downloaded);
+                    }
                 }
                 Err(e) if attempt <= MAX_RETRIES => {
-                    pb.suspend(|| {
-                        println!(
-                            "  Stream interrupted at {:.1} MiB (attempt {}/{}), resuming... ({})",
-                            downloaded as f64 / 1_048_576.0,
-                            attempt,
-                            MAX_RETRIES,
-                            e
-                        );
-                    });
+                    if let Some(ref p) = pb {
+                        p.suspend(|| {
+                            println!(
+                                "  Stream interrupted at {:.1} MiB (attempt {}/{}), resuming... ({})",
+                                downloaded as f64 / 1_048_576.0,
+                                attempt,
+                                MAX_RETRIES,
+                                e
+                            );
+                        });
+                    }
                     stream_failed = true;
                     break;
                 }
                 Err(e) => {
-                    pb.finish_and_clear();
+                    if let Some(ref p) = pb {
+                        p.finish_and_clear();
+                    }
                     return Err(e.into());
                 }
             }
@@ -278,15 +294,17 @@ pub async fn download_gguf(
         }
         // Unexpected short read — retry
         if attempt <= MAX_RETRIES {
-            pb.suspend(|| {
-                println!(
-                    "  Short read ({:.1}/{:.1} MiB), retrying ({}/{})...",
-                    downloaded as f64 / 1_048_576.0,
-                    total_size as f64 / 1_048_576.0,
-                    attempt,
-                    MAX_RETRIES
-                );
-            });
+            if let Some(ref p) = pb {
+                p.suspend(|| {
+                    println!(
+                        "  Short read ({:.1}/{:.1} MiB), retrying ({}/{})...",
+                        downloaded as f64 / 1_048_576.0,
+                        total_size as f64 / 1_048_576.0,
+                        attempt,
+                        MAX_RETRIES
+                    );
+                });
+            }
             tokio::time::sleep(Duration::from_secs(2u64.pow(attempt - 1))).await;
             continue;
         }
@@ -297,7 +315,9 @@ pub async fn download_gguf(
         );
     }
 
-    pb.finish_and_clear();
+    if let Some(ref p) = pb {
+        p.finish_and_clear();
+    }
 
     let final_size = std::fs::metadata(&dest_path)
         .map(|m| m.len())
