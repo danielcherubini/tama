@@ -30,13 +30,12 @@
 
 ## Planned
 
-- [ ] **TUI Dashboard** — `kronk-tui` crate with ratatui. War Room view: live VRAM, tokens/sec, temperature, logs ([plan](docs/superpowers/plans/2026-03-16-tui-dashboard.md))
+- [ ] **Profile management** — `kronk profile` subcommand: ls, add, edit, rm with service safety checks ([plan](docs/superpowers/plans/2026-03-16-profile-management.md))
+- [ ] **Multi-port support** — Per-profile port config, auto `--port` injection, per-port firewall rules ([plan](docs/superpowers/plans/2026-03-16-multi-port.md))
+- [ ] **Log viewer** — `kronk logs` with `--follow`, log rotation, ProcessSupervisor file output ([plan](docs/superpowers/plans/2026-03-16-log-viewer.md))
+- [ ] **Health check customization** — Per-profile health check URL, interval, timeout, retries ([plan](docs/superpowers/plans/2026-03-16-health-check-customization.md))
 - [ ] **Windows service polling** — Replace fixed sleeps with proper SCM status polling and backoff ([plan](docs/superpowers/plans/2026-03-16-windows-service-polling.md))
 - [ ] **Windows service SID ACL** — Use installer's SID instead of IU for service permissions ([plan](docs/superpowers/plans/2026-03-16-windows-service-sid.md))
-- [ ] **System tray** — Windows tray icon for quick service toggle (start/stop)
-- [ ] **`kronk remove <profile>`** — Delete a profile from config
-- [ ] **`kronk list`** — List all profiles with their backends and status
-- [ ] **Multi-port support** — Different profiles on different ports, firewall rules per profile
-- [ ] **Log viewer** — `kronk logs` to tail service log files
-- [ ] **Health check customization** — Per-profile health check URLs and intervals
-- [ ] **Tauri GUI** — Lightweight Windows frontend for non-CLI users
+- [ ] **TUI Dashboard** — `kronk-tui` crate with ratatui. War Room view: live VRAM, tokens/sec, temperature, logs ([plan](docs/superpowers/plans/2026-03-16-tui-dashboard.md))
+- [ ] **System tray** — Windows tray icon for quick service toggle (start/stop) ([plan](docs/superpowers/plans/2026-03-16-system-tray.md))
+- [ ] **Tauri GUI** — Lightweight desktop frontend for non-CLI users ([plan](docs/superpowers/plans/2026-03-16-tauri-gui.md))
