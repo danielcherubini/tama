@@ -10,6 +10,9 @@
 - [x] **CLI commands** — run, stop, status, service (install/start/stop/remove), config (show/edit/path), add, update
 - [x] **Profile management** — `kronk add <name> <command...>` creates profiles from raw command lines, `kronk update` modifies existing
 - [x] **Firewall rules** — Auto-added on service install, removed on service remove (Windows)
+- [x] **VRAM monitoring** — `kronk status` shows GPU VRAM usage via nvidia-smi
+- [x] **User-level service control** — Interactive Users granted start/stop permissions, no admin needed after install
+- [x] **Clean process shutdown** — Service stop properly kills child processes via shutdown channel + kill_on_drop
 - [x] **Kronk personality** — Quotes throughout CLI ("Pull the lever!", "Wrong lever!", "Oh yeah, it's all coming together.")
 - [x] **Inno Setup installer** — Windows installer that adds to PATH, creates Start Menu entries, cleans up on uninstall
 - [x] **GitHub Actions release** — Triggers on version tags, builds Windows (exe + installer) and Linux (.deb + .rpm) packages

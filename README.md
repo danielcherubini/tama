@@ -7,7 +7,7 @@
 
 A local AI service manager written in Rust. Kronk turns your `llama-server.exe` (or any LLM backend) into a proper, supervised system service with health checks, auto-restart, and easy configuration.
 
-No wrappers. No NSSM. No batch files. Just a native Windows Service or systemd unit.
+No wrappers. No NSSM. No batch files. Just a native Windows Service or systemd unit. After a one-time admin install, start and stop services as a regular user.
 
 ---
 
@@ -57,8 +57,7 @@ That's it. Kronk supervises the process, streams logs, checks health, and restar
 
 ```
 kronk run [--profile name]           Run a profile in the foreground
-kronk stop [--profile name]          Stop a running service
-kronk status                         Show all profiles and health status
+kronk status                         Show all profiles, health, and VRAM usage
 kronk service install [--profile]    Install as a system service
 kronk service start [--profile]      Start an installed service
 kronk service stop [--profile]       Stop a running service
@@ -157,6 +156,8 @@ See [PLAN.md](PLAN.md) for the full development plan.
 - [x] Native Windows Service (no NSSM)
 - [x] Linux systemd support
 - [x] Process supervision with health checks
+- [x] VRAM monitoring in status output
+- [x] User-level service control (no admin after install)
 - [x] Profile management from CLI
 - [x] GitHub Actions CI/CD with Windows installer + .deb + .rpm
 - [ ] TUI Dashboard (ratatui)
