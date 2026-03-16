@@ -212,16 +212,14 @@ impl Config {
     }
 
     /// Resolve the models directory path.
-    /// Uses `general.models_dir` if set, otherwise defaults to `~/.kronk/models/`.
+    /// Uses `general.models_dir` if set, otherwise defaults to `<config_dir>/models/`.
+    /// On Windows: `%APPDATA%/kronk/models/`
+    /// On Linux: `~/.config/kronk/models/`
     pub fn models_dir(&self) -> Result<PathBuf> {
         if let Some(ref dir) = self.general.models_dir {
             Ok(PathBuf::from(dir))
         } else {
-            let home =
-                directories::UserDirs::new().context("Failed to determine home directory")?;
-            let models_dir = home.home_dir().join(".kronk").join("models");
-            // Return the path even if it doesn't exist yet
-            Ok(models_dir)
+            Ok(Self::config_dir()?.join("models"))
         }
     }
 
