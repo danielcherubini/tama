@@ -93,74 +93,220 @@ pub struct DownloadResult {
 
 /// Download a specific GGUF file from a HuggingFace repo to the given model directory.
 /// Returns the local path and file size.
-/// Uses hf-hub's built-in caching + progress bar (indicatif).
+/// Downloads directly via reqwest with timeouts and retry (bypasses hf-hub's downloader).
 pub async fn download_gguf(
     repo_id: &str,
     filename: &str,
     dest_dir: &std::path::Path,
 ) -> Result<DownloadResult> {
-    let api = hf_api().await?;
-    let repo = api.model(repo_id.to_string());
-
-    // hf-hub downloads to its own cache with built-in progress
-    let cached_path = repo
-        .download(filename)
-        .await
-        .with_context(|| format!("Failed to download '{}' from '{}'", filename, repo_id))?;
-
-    // Get file size from the cached file (always exists after successful download)
-    let size_bytes = std::fs::metadata(&cached_path)
-        .with_context(|| format!("Failed to stat cached file: {}", cached_path.display()))?
-        .len();
+    use futures_util::StreamExt;
+    use indicatif::{ProgressBar, ProgressStyle};
+    use std::time::Duration;
+    use tokio::io::AsyncWriteExt;
 
     std::fs::create_dir_all(dest_dir)
         .with_context(|| format!("Failed to create model directory: {}", dest_dir.display()))?;
 
     let dest_path = dest_dir.join(filename);
+    let url = format!(
+        "https://huggingface.co/{}/resolve/main/{}",
+        repo_id, filename
+    );
 
-    // Check if destination already exists with matching size (already downloaded)
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(30))
+        .read_timeout(Duration::from_secs(30))
+        .build()
+        .context("Failed to create HTTP client")?;
+
+    // Get file size via HEAD
+    let head = client
+        .head(&url)
+        .send()
+        .await
+        .with_context(|| format!("HEAD request failed for {}", url))?;
+
+    // Follow redirects — HuggingFace redirects to CDN
+    let total_size = head.content_length().unwrap_or(0);
+
+    // Check if already downloaded with matching size
     if dest_path.exists() {
-        if let Ok(dest_meta) = std::fs::metadata(&dest_path) {
-            if dest_meta.len() == size_bytes {
+        if let Ok(meta) = std::fs::metadata(&dest_path) {
+            if total_size > 0 && meta.len() == total_size {
                 return Ok(DownloadResult {
                     path: dest_path,
-                    size_bytes,
+                    size_bytes: total_size,
                 });
             }
         }
-        // Size mismatch — remove stale file before re-linking
+        // Size mismatch or unknown — re-download
         std::fs::remove_file(&dest_path).ok();
     }
 
-    // Try hard link first (same filesystem = instant, no extra space)
-    let linked = std::fs::hard_link(&cached_path, &dest_path).is_ok();
+    // Download with progress bar and retry
+    const MAX_RETRIES: u32 = 3;
+    let mut attempt = 0;
+    let mut downloaded: u64 = 0;
 
-    if !linked || !dest_path.exists() {
-        // Hard link failed or didn't produce a real file — fall back to copy
-        if dest_path.exists() {
-            std::fs::remove_file(&dest_path).ok();
+    let pb = if total_size > 0 {
+        let pb = ProgressBar::new(total_size);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{msg} [{elapsed_precise}] [{bar:40}] {bytes}/{total_bytes} ({bytes_per_sec})",
+                )
+                .unwrap_or_else(|_| ProgressStyle::default_bar())
+                .progress_chars("=>-"),
+        );
+        pb.set_message(filename.to_string());
+        pb
+    } else {
+        let pb = ProgressBar::new_spinner();
+        pb.set_message(filename.to_string());
+        pb
+    };
+
+    loop {
+        attempt += 1;
+
+        // Resume from where we left off
+        let mut request = client.get(&url);
+        if downloaded > 0 {
+            request = request.header("Range", format!("bytes={}-", downloaded));
+            pb.set_position(downloaded);
         }
-        std::fs::copy(&cached_path, &dest_path).with_context(|| {
-            format!(
-                "Failed to copy downloaded file from {} to {}",
-                cached_path.display(),
-                dest_path.display()
-            )
-        })?;
-    }
 
-    // Final sanity check
-    if !dest_path.exists() {
+        let response = match request.send().await {
+            Ok(r) => r,
+            Err(e) if attempt <= MAX_RETRIES => {
+                pb.suspend(|| {
+                    println!(
+                        "  Download stalled (attempt {}/{}), retrying... ({})",
+                        attempt, MAX_RETRIES, e
+                    );
+                });
+                tokio::time::sleep(Duration::from_secs(2u64.pow(attempt - 1))).await;
+                continue;
+            }
+            Err(e) => {
+                pb.finish_and_clear();
+                return Err(e).with_context(|| {
+                    format!(
+                        "Failed to download '{}' after {} attempts",
+                        filename, attempt
+                    )
+                });
+            }
+        };
+
+        if !response.status().is_success() && response.status().as_u16() != 206 {
+            if attempt <= MAX_RETRIES {
+                pb.suspend(|| {
+                    println!(
+                        "  Server returned {}, retrying ({}/{})...",
+                        response.status(),
+                        attempt,
+                        MAX_RETRIES
+                    );
+                });
+                tokio::time::sleep(Duration::from_secs(2u64.pow(attempt - 1))).await;
+                continue;
+            }
+            pb.finish_and_clear();
+            anyhow::bail!(
+                "Download failed with status {} after {} attempts",
+                response.status(),
+                attempt
+            );
+        }
+
+        // Open file for append (resume) or create
+        let mut file = if downloaded > 0 {
+            tokio::fs::OpenOptions::new()
+                .append(true)
+                .open(&dest_path)
+                .await
+                .with_context(|| format!("Failed to open {} for append", dest_path.display()))?
+        } else {
+            tokio::fs::File::create(&dest_path)
+                .await
+                .with_context(|| format!("Failed to create {}", dest_path.display()))?
+        };
+
+        let mut stream = response.bytes_stream();
+        let mut stream_failed = false;
+
+        while let Some(chunk_result) = stream.next().await {
+            match chunk_result {
+                Ok(chunk) => {
+                    file.write_all(&chunk)
+                        .await
+                        .with_context(|| format!("Failed to write to {}", dest_path.display()))?;
+                    downloaded += chunk.len() as u64;
+                    pb.set_position(downloaded);
+                }
+                Err(e) if attempt <= MAX_RETRIES => {
+                    pb.suspend(|| {
+                        println!(
+                            "  Stream interrupted at {:.1} MiB (attempt {}/{}), resuming... ({})",
+                            downloaded as f64 / 1_048_576.0,
+                            attempt,
+                            MAX_RETRIES,
+                            e
+                        );
+                    });
+                    stream_failed = true;
+                    break;
+                }
+                Err(e) => {
+                    pb.finish_and_clear();
+                    return Err(e.into());
+                }
+            }
+        }
+
+        file.flush().await.ok();
+        drop(file);
+
+        if stream_failed {
+            tokio::time::sleep(Duration::from_secs(2u64.pow(attempt - 1))).await;
+            continue;
+        }
+
+        // Stream ended cleanly — check if download is complete
+        if total_size == 0 || downloaded >= total_size {
+            break;
+        }
+        // Unexpected short read — retry
+        if attempt <= MAX_RETRIES {
+            pb.suspend(|| {
+                println!(
+                    "  Short read ({:.1}/{:.1} MiB), retrying ({}/{})...",
+                    downloaded as f64 / 1_048_576.0,
+                    total_size as f64 / 1_048_576.0,
+                    attempt,
+                    MAX_RETRIES
+                );
+            });
+            tokio::time::sleep(Duration::from_secs(2u64.pow(attempt - 1))).await;
+            continue;
+        }
         anyhow::bail!(
-            "Download completed but file not found at {}. Cache path: {}",
-            dest_path.display(),
-            cached_path.display()
+            "Download incomplete: got {} of {} bytes",
+            downloaded,
+            total_size
         );
     }
 
+    pb.finish_and_clear();
+
+    let final_size = std::fs::metadata(&dest_path)
+        .map(|m| m.len())
+        .unwrap_or(downloaded);
+
     Ok(DownloadResult {
         path: dest_path,
-        size_bytes,
+        size_bytes: final_size,
     })
 }
 
