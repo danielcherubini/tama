@@ -5,7 +5,6 @@ build:
 
 install:
 	cargo install --path crates/kronk-cli --force
-	cargo install --path crates/kronk-mock --force
 
 test:
 	cargo test --workspace
