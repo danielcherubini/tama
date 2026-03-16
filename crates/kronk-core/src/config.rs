@@ -18,6 +18,8 @@ pub struct Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct General {
     pub log_level: String,
+    #[serde(default)]
+    pub models_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +40,12 @@ pub struct ProfileConfig {
     pub use_case: Option<UseCase>,
     #[serde(default)]
     pub sampling: Option<SamplingParams>,
+    /// Model card reference in "company/modelname" format.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Which quant to use from the model card (e.g. "Q4_K_M").
+    #[serde(default)]
+    pub quant: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,8 +137,77 @@ impl Config {
         }
     }
 
+    /// Resolve effective sampling with the 3-layer merge chain:
+    /// 1. UseCase built-in defaults
+    /// 2. Model card per-use-case sampling overrides
+    /// 3. Profile-level sampling overrides
+    pub fn effective_sampling_with_card(
+        &self,
+        profile: &ProfileConfig,
+        card: Option<&crate::models::card::ModelCard>,
+    ) -> Option<SamplingParams> {
+        // Layer 1: Use case base params
+        let base = match &profile.use_case {
+            Some(UseCase::Custom { name }) => self
+                .custom_use_cases
+                .as_ref()
+                .and_then(|m| m.get(name))
+                .cloned(),
+            Some(uc) => Some(uc.params()),
+            None => None,
+        };
+
+        // Layer 2: Model card sampling overrides for this use case
+        let use_case_name = profile.use_case.as_ref().map(|uc| uc.to_string());
+        let with_model = match (base, card, use_case_name) {
+            (Some(base), Some(card), Some(ref uc_name)) => {
+                if let Some(model_sampling) = card.sampling_for(uc_name) {
+                    Some(base.merge(model_sampling))
+                } else {
+                    Some(base)
+                }
+            }
+            (Some(base), _, _) => Some(base),
+            (None, Some(card), Some(ref uc_name)) => card.sampling_for(uc_name).cloned(),
+            (None, _, _) => None,
+        };
+
+        // Layer 3: Profile-level overrides
+        match (with_model, &profile.sampling) {
+            (Some(base), Some(overrides)) => Some(base.merge(overrides)),
+            (Some(base), None) => Some(base),
+            (None, Some(sampling)) => Some(sampling.clone()),
+            (None, None) => None,
+        }
+    }
+
     pub fn service_name(profile: &str) -> String {
         format!("kronk-{}", profile)
+    }
+
+    /// Resolve the models directory path.
+    /// Uses `general.models_dir` if set, otherwise defaults to `~/.kronk/models/`.
+    pub fn models_dir(&self) -> Result<PathBuf> {
+        if let Some(ref dir) = self.general.models_dir {
+            Ok(PathBuf::from(dir))
+        } else {
+            let home =
+                directories::UserDirs::new().context("Failed to determine home directory")?;
+            let models_dir = home.home_dir().join(".kronk").join("models");
+            // Return the path even if it doesn't exist yet
+            Ok(models_dir)
+        }
+    }
+
+    pub fn with_models_dir(&self, dir: impl Into<PathBuf>) -> Self {
+        let dir = dir.into();
+        Self {
+            general: General {
+                models_dir: Some(dir.to_string_lossy().to_string()),
+                ..self.general.clone()
+            },
+            ..self.clone()
+        }
     }
 
     pub fn save(&self) -> Result<()> {
@@ -175,12 +252,15 @@ impl Default for Config {
                 .collect(),
                 use_case: Some(UseCase::Coding),
                 sampling: None,
+                model: None,
+                quant: None,
             },
         );
 
         Config {
             general: General {
                 log_level: "info".to_string(),
+                models_dir: None,
             },
             backends,
             profiles,
@@ -208,6 +288,8 @@ mod tests {
             args: vec![],
             use_case: Some(UseCase::Coding),
             sampling: None,
+            model: None,
+            quant: None,
         };
         let params = config.effective_sampling(&profile).unwrap();
         assert_eq!(params.temperature, Some(0.3));
@@ -224,6 +306,8 @@ mod tests {
                 temperature: Some(0.5),
                 ..Default::default()
             }),
+            model: None,
+            quant: None,
         };
         let params = config.effective_sampling(&profile).unwrap();
         assert_eq!(params.temperature, Some(0.5)); // override won
@@ -238,6 +322,8 @@ mod tests {
             args: vec![],
             use_case: None,
             sampling: None,
+            model: None,
+            quant: None,
         };
         assert!(config.effective_sampling(&profile).is_none());
     }
@@ -258,5 +344,100 @@ mod tests {
         let loaded: Config = toml::from_str(&toml_str).unwrap();
         let profile = loaded.profiles.get("default").unwrap();
         assert_eq!(profile.use_case, Some(UseCase::Coding));
+    }
+
+    #[test]
+    fn test_profile_with_model_fields_roundtrip() {
+        let profile = ProfileConfig {
+            backend: "llama_cpp".to_string(),
+            args: vec![],
+            use_case: Some(UseCase::Coding),
+            sampling: None,
+            model: Some("bartowski/OmniCoder".to_string()),
+            quant: Some("Q4_K_M".to_string()),
+        };
+        let toml_str = toml::to_string_pretty(&profile).unwrap();
+        let loaded: ProfileConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(loaded.model, Some("bartowski/OmniCoder".to_string()));
+        assert_eq!(loaded.quant, Some("Q4_K_M".to_string()));
+    }
+
+    #[test]
+    fn test_profile_without_model_fields_still_works() {
+        let toml_str = r#"
+backend = "llama_cpp"
+args = ["--host", "0.0.0.0"]
+"#;
+        let profile: ProfileConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(profile.model, None);
+        assert_eq!(profile.quant, None);
+    }
+
+    #[test]
+    fn test_effective_sampling_with_model_card() {
+        use crate::models::card::{ModelCard, ModelMeta};
+
+        let config = Config::default();
+
+        let mut sampling = HashMap::new();
+        sampling.insert(
+            "coding".to_string(),
+            SamplingParams {
+                temperature: Some(0.2),
+                top_k: Some(40),
+                ..Default::default()
+            },
+        );
+
+        let card = ModelCard {
+            model: ModelMeta {
+                name: "TestModel".to_string(),
+                source: "test/model".to_string(),
+                default_context_length: None,
+                default_gpu_layers: None,
+            },
+            sampling,
+            quants: HashMap::new(),
+        };
+
+        let profile = ProfileConfig {
+            backend: "test".to_string(),
+            args: vec![],
+            use_case: Some(UseCase::Coding),
+            sampling: Some(SamplingParams {
+                top_p: Some(0.85),
+                ..Default::default()
+            }),
+            model: Some("test/model".to_string()),
+            quant: None,
+        };
+
+        // 3-layer merge: UseCase::Coding (temp=0.3) -> model card (temp=0.2, top_k=40) -> profile (top_p=0.85)
+        let params = config
+            .effective_sampling_with_card(&profile, Some(&card))
+            .unwrap();
+        assert_eq!(params.temperature, Some(0.2)); // model card override won over use case default
+        assert_eq!(params.top_k, Some(40)); // model card override
+        assert_eq!(params.top_p, Some(0.85)); // profile override won over everything
+        assert_eq!(params.min_p, Some(0.05)); // from UseCase::Coding base (not overridden)
+    }
+
+    #[test]
+    fn test_effective_sampling_backward_compat() {
+        let config = Config::default();
+        let profile = ProfileConfig {
+            backend: "test".to_string(),
+            args: vec![],
+            use_case: Some(UseCase::Coding),
+            sampling: Some(SamplingParams {
+                temperature: Some(0.5),
+                ..Default::default()
+            }),
+            model: None,
+            quant: None,
+        };
+        let params = config.effective_sampling_with_card(&profile, None).unwrap();
+        assert_eq!(params.temperature, Some(0.5)); // profile override
+        assert_eq!(params.top_k, Some(50)); // from UseCase::Coding
     }
 }

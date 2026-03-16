@@ -17,7 +17,7 @@ pub struct ModelCard {
     pub quants: HashMap<String, QuantInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct ModelMeta {
     pub name: String,
     /// HuggingFace repo identifier, e.g. "bartowski/OmniCoder-8B-GGUF"
@@ -28,7 +28,7 @@ pub struct ModelMeta {
     pub default_gpu_layers: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct QuantInfo {
     /// Filename of the GGUF file relative to the model directory.
     pub file: String,
@@ -40,25 +40,33 @@ pub struct QuantInfo {
     pub context_length: Option<u32>,
 }
 
+pub fn load(path: &std::path::Path) -> anyhow::Result<ModelCard> {
+    let contents = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read model card at {}", path.display()))?;
+    toml::from_str(&contents)
+        .with_context(|| format!("Failed to parse model card at {}", path.display()))
+}
+
+pub fn save(card: &ModelCard, path: &std::path::Path) -> anyhow::Result<()> {
+    let toml_str = toml::to_string_pretty(card).context("Failed to serialize model card")?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+    }
+    std::fs::write(path, &toml_str)
+        .with_context(|| format!("Failed to write model card to {}", path.display()))?;
+    Ok(())
+}
+
 impl ModelCard {
     /// Load a model card from a TOML file.
     pub fn load(path: &std::path::Path) -> anyhow::Result<Self> {
-        let contents = std::fs::read_to_string(path)
-            .with_context(|| format!("Failed to read model card at {}", path.display()))?;
-        toml::from_str(&contents)
-            .with_context(|| format!("Failed to parse model card at {}", path.display()))
+        load(path)
     }
 
     /// Save a model card to a TOML file.
     pub fn save(&self, path: &std::path::Path) -> anyhow::Result<()> {
-        let toml_str = toml::to_string_pretty(self).context("Failed to serialize model card")?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-        }
-        std::fs::write(path, &toml_str)
-            .with_context(|| format!("Failed to write model card to {}", path.display()))?;
-        Ok(())
+        save(self, path)
     }
 
     /// Get the effective context length for a specific quant.
@@ -156,8 +164,8 @@ context_length = 16384
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("model.toml");
 
-        card.save(&path).unwrap();
-        let loaded = ModelCard::load(&path).unwrap();
+        super::save(&card, &path).unwrap();
+        let loaded = super::load(&path).unwrap();
         assert_eq!(card, loaded);
 
         std::fs::remove_dir_all(&dir).unwrap();

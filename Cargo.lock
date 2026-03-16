@@ -928,6 +928,7 @@ dependencies = [
  "directories",
  "hf-hub",
  "indicatif 0.17.11",
+ "inquire",
  "reqwest",
  "serde",
  "serde_json",

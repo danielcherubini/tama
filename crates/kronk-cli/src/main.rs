@@ -6,6 +6,8 @@ use kronk_core::use_cases::SamplingParams;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
+mod commands;
+
 #[derive(Parser, Debug)]
 #[command(name = "kronk")]
 #[command(version = "0.1.0")]
@@ -61,6 +63,45 @@ enum Commands {
         #[command(subcommand)]
         command: ConfigCommands,
     },
+    /// Manage models — pull, list, create profiles
+    Model {
+        #[command(subcommand)]
+        command: ModelCommands,
+    },
+}
+
+#[derive(Parser, Debug)]
+pub enum ModelCommands {
+    /// Pull a model from HuggingFace
+    Pull {
+        /// HuggingFace repo ID, e.g. "bartowski/OmniCoder-8B-GGUF"
+        repo: String,
+    },
+    /// List installed models
+    Ls,
+    /// Show running model processes
+    Ps,
+    /// Create a profile from an installed model
+    Create {
+        /// Profile name to create
+        name: String,
+        /// Model ID in "company/modelname" format
+        #[arg(long)]
+        model: String,
+        /// Quant to use (e.g. "Q4_K_M"). Interactive picker if omitted.
+        #[arg(long)]
+        quant: Option<String>,
+        /// Use case preset: coding, chat, analysis, creative
+        #[arg(long)]
+        use_case: Option<String>,
+    },
+    /// Remove an installed model
+    Rm {
+        /// Model ID in "company/modelname" format
+        model: String,
+    },
+    /// Scan for untracked GGUF files and update model cards
+    Scan,
 }
 
 #[derive(Parser, Debug)]
@@ -173,6 +214,7 @@ fn main() -> Result<()> {
             Commands::Status => cmd_status(&config).await,
             Commands::UseCase { command } => cmd_use_case(&config, command),
             Commands::Config { command } => cmd_config(&config, command),
+            Commands::Model { command } => commands::model::run(&config, command).await,
         }
     })
 }
@@ -310,7 +352,22 @@ fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
             }
         };
 
-        let args = config.build_args(prof, backend);
+        let card = if let Some(ref model_id) = prof.model {
+            config.models_dir().ok().and_then(|dir| {
+                kronk_core::models::ModelRegistry::new(dir)
+                    .find(model_id)
+                    .ok()
+                    .flatten()
+                    .map(|m| m.card)
+            })
+        } else {
+            None
+        };
+        let mut args = backend.default_args.clone();
+        args.extend(prof.args.clone());
+        if let Some(sampling) = config.effective_sampling_with_card(prof, card.as_ref()) {
+            args.extend(sampling.to_args());
+        }
         let supervisor = ProcessSupervisor::new(
             backend.path.clone(),
             args,
@@ -375,7 +432,22 @@ fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
 
 async fn cmd_run(config: &Config, profile_name: &str) -> Result<()> {
     let (profile, backend) = config.resolve_profile(profile_name)?;
-    let args = config.build_args(profile, backend);
+
+    // Load model card if profile references a model
+    let card = if let Some(ref model_id) = profile.model {
+        let models_dir = config.models_dir()?;
+        let registry = kronk_core::models::ModelRegistry::new(models_dir);
+        registry.find(model_id)?.map(|m| m.card)
+    } else {
+        None
+    };
+
+    // Build args with 3-layer sampling merge
+    let mut args = backend.default_args.clone();
+    args.extend(profile.args.clone());
+    if let Some(sampling) = config.effective_sampling_with_card(profile, card.as_ref()) {
+        args.extend(sampling.to_args());
+    }
 
     println!("Oh yeah, it's all coming together.");
     println!();
@@ -440,7 +512,22 @@ fn cmd_service(config: &Config, command: ServiceCommands) -> Result<()> {
 
             #[cfg(target_os = "linux")]
             {
-                let args = config.build_args(prof, backend);
+                let card = if let Some(ref model_id) = prof.model {
+                    config.models_dir().ok().and_then(|dir| {
+                        kronk_core::models::ModelRegistry::new(dir)
+                            .find(model_id)
+                            .ok()
+                            .flatten()
+                            .map(|m| m.card)
+                    })
+                } else {
+                    None
+                };
+                let mut args = backend.default_args.clone();
+                args.extend(prof.args.clone());
+                if let Some(sampling) = config.effective_sampling_with_card(prof, card.as_ref()) {
+                    args.extend(sampling.to_args());
+                }
                 kronk_core::platform::linux::install_service(&service_name, &backend.path, &args)?;
             }
 
@@ -648,6 +735,8 @@ fn cmd_add(config: &Config, name: &str, command: Vec<String>, overwrite: bool) -
             args,
             use_case: None,
             sampling: None,
+            model: None,
+            quant: None,
         },
     );
 
