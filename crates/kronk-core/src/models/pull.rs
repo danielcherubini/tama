@@ -101,13 +101,15 @@ pub async fn download_gguf(
 ) -> Result<DownloadResult> {
     use futures_util::StreamExt;
     use indicatif::{ProgressBar, ProgressStyle};
+    use std::io::Write;
     use std::time::Duration;
-    use tokio::io::AsyncWriteExt;
 
-    std::fs::create_dir_all(dest_dir)
-        .with_context(|| format!("Failed to create model directory: {}", dest_dir.display()))?;
-
+    // Ensure the full directory path exists (sync — confirmed works on Windows)
     let dest_path = dest_dir.join(filename);
+    if let Some(parent) = dest_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory: {}", parent.display()))?;
+    }
     let url = format!(
         "https://huggingface.co/{}/resolve/main/{}",
         repo_id, filename
@@ -220,16 +222,14 @@ pub async fn download_gguf(
             );
         }
 
-        // Open file for append (resume) or create
+        // Open file for append (resume) or create — use sync I/O for Windows compat
         let mut file = if downloaded > 0 {
-            tokio::fs::OpenOptions::new()
+            std::fs::OpenOptions::new()
                 .append(true)
                 .open(&dest_path)
-                .await
                 .with_context(|| format!("Failed to open {} for append", dest_path.display()))?
         } else {
-            tokio::fs::File::create(&dest_path)
-                .await
+            std::fs::File::create(&dest_path)
                 .with_context(|| format!("Failed to create {}", dest_path.display()))?
         };
 
@@ -240,7 +240,6 @@ pub async fn download_gguf(
             match chunk_result {
                 Ok(chunk) => {
                     file.write_all(&chunk)
-                        .await
                         .with_context(|| format!("Failed to write to {}", dest_path.display()))?;
                     downloaded += chunk.len() as u64;
                     pb.set_position(downloaded);
@@ -265,7 +264,7 @@ pub async fn download_gguf(
             }
         }
 
-        file.flush().await.ok();
+        file.flush().ok();
         drop(file);
 
         if stream_failed {
