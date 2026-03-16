@@ -1,26 +1,44 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use kronk_core::config::Config;
+use kronk_core::process::{ProcessEvent, ProcessSupervisor};
+use tokio::sync::mpsc;
 
 #[derive(Parser, Debug)]
 #[command(name = "kronk")]
-#[command(author = "Kronk Team")]
 #[command(version = "0.1.0")]
-#[command(about = "The Heavy-Lifting Henchman for Local AI", long_about = None)]
+#[command(about = "Oh yeah, it's all coming together. -- Local AI Service Manager")]
 struct Args {
     #[command(subcommand)]
-    command: Option<Commands>,
+    command: Commands,
 }
 
 #[derive(Parser, Debug)]
 enum Commands {
-    Run { profile: String },
-    Pull { model: String },
+    /// Pull the lever! Run a profile in the foreground
+    Run {
+        #[arg(short, long, default_value = "default")]
+        profile: String,
+    },
+    /// Manage Windows services
     Service {
         #[command(subcommand)]
         command: ServiceCommands,
     },
+    /// Internal: called by Windows SCM (do not use directly)
+    #[command(hide = true)]
+    ServiceRun {
+        #[arg(short, long)]
+        profile: String,
+    },
+    /// Wrong lever! Stop a running service
+    Stop {
+        #[arg(short, long, default_value = "default")]
+        profile: String,
+    },
+    /// Show status of all profiles
     Status,
+    /// View or edit configuration
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
@@ -29,24 +47,440 @@ enum Commands {
 
 #[derive(Parser, Debug)]
 enum ServiceCommands {
-    Install { profile: String },
-    Remove { profile: String },
-    Start { profile: String },
-    Stop { profile: String },
+    /// Oh right, the service. Install a profile as a Windows service
+    Install {
+        #[arg(short, long, default_value = "default")]
+        profile: String,
+    },
+    /// Start an installed service
+    Start {
+        #[arg(short, long, default_value = "default")]
+        profile: String,
+    },
+    /// Stop a running service
+    Stop {
+        #[arg(short, long, default_value = "default")]
+        profile: String,
+    },
+    /// No touchy! Remove an installed service
+    Remove {
+        #[arg(short, long, default_value = "default")]
+        profile: String,
+    },
 }
 
 #[derive(Parser, Debug)]
 enum ConfigCommands {
+    /// Print the current configuration
     Show,
+    /// Open config file in editor
     Edit,
+    /// Show the config file path
+    Path,
 }
 
 fn main() -> Result<()> {
-    let _args = Args::parse();
+    // Check if we're being launched by the Windows Service Control Manager.
+    // SCM passes "service-run" as the first real argument.
+    let raw_args: Vec<String> = std::env::args().collect();
+    if raw_args.len() > 1 && raw_args[1] == "service-run" {
+        #[cfg(target_os = "windows")]
+        return service_dispatch();
 
+        #[cfg(not(target_os = "windows"))]
+        anyhow::bail!("Windows service mode is only available on Windows");
+    }
+
+    // Normal CLI mode
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive(tracing::Level::INFO.into()),
+        )
+        .init();
+
+    let args = Args::parse();
     let config = Config::load()?;
-    println!("KRONK: The Heavy-Lifting Henchman for Local AI");
-    println!("Config loaded from: {}", config.general.data_dir);
 
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        match args.command {
+            Commands::Run { profile } => cmd_run(&config, &profile).await,
+            Commands::Service { command } => cmd_service(&config, command),
+            Commands::ServiceRun { profile } => cmd_run(&config, &profile).await,
+            Commands::Stop { profile } => cmd_service(&config, ServiceCommands::Stop { profile }),
+            Commands::Status => cmd_status(&config).await,
+            Commands::Config { command } => cmd_config(&config, command),
+        }
+    })
+}
+
+// ── Windows Service Dispatch ─────────────────────────────────────────────
+
+#[cfg(target_os = "windows")]
+fn service_dispatch() -> Result<()> {
+    // Extract profile name from args before SCM takes over
+    let raw_args: Vec<String> = std::env::args().collect();
+    let profile = raw_args
+        .iter()
+        .position(|a| a == "--profile")
+        .and_then(|i| raw_args.get(i + 1))
+        .cloned()
+        .unwrap_or_else(|| "default".to_string());
+
+    let service_name = Config::service_name(&profile);
+
+    // Store profile in global so service_main can access it
+    SERVICE_PROFILE
+        .set(profile)
+        .map_err(|_| anyhow::anyhow!("Failed to set service profile"))?;
+    SERVICE_NAME
+        .set(service_name.clone())
+        .map_err(|_| anyhow::anyhow!("Failed to set service name"))?;
+
+    windows_service::service_dispatcher::start(&service_name, ffi_service_main)
+        .context("Failed to start service dispatcher — is this running as a Windows Service?")?;
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+use std::sync::OnceLock;
+
+#[cfg(target_os = "windows")]
+static SERVICE_PROFILE: OnceLock<String> = OnceLock::new();
+#[cfg(target_os = "windows")]
+static SERVICE_NAME: OnceLock<String> = OnceLock::new();
+
+#[cfg(target_os = "windows")]
+windows_service::define_windows_service!(ffi_service_main, win_service_main);
+
+#[cfg(target_os = "windows")]
+fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
+    use windows_service::service::{
+        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
+        ServiceType,
+    };
+    use windows_service::service_control_handler;
+
+    let profile = SERVICE_PROFILE.get().cloned().unwrap_or_default();
+    let service_name = SERVICE_NAME.get().cloned().unwrap_or_default();
+
+    // Set up logging to file
+    let log_dir = directories::ProjectDirs::from("", "", "kronk")
+        .map(|p: directories::ProjectDirs| p.data_dir().to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_file = std::fs::File::create(log_dir.join(format!("{}.log", service_name)))
+        .unwrap_or_else(|_| std::fs::File::create("kronk-service.log").unwrap());
+
+    tracing_subscriber::fmt()
+        .with_writer(std::sync::Mutex::new(log_file))
+        .with_env_filter("info")
+        .init();
+
+    tracing::info!("Service starting for profile: {}", profile);
+
+    // Create a shutdown channel
+    let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel::<()>();
+
+    // Register the control handler
+    let shutdown_sender = shutdown_tx.clone();
+    let event_handler = move |control_event| -> service_control_handler::ServiceControlHandlerResult {
+        match control_event {
+            ServiceControl::Stop | ServiceControl::Shutdown => {
+                tracing::info!("Received stop/shutdown signal");
+                shutdown_sender.send(()).ok();
+                service_control_handler::ServiceControlHandlerResult::NoError
+            }
+            ServiceControl::Interrogate => {
+                service_control_handler::ServiceControlHandlerResult::NoError
+            }
+            _ => service_control_handler::ServiceControlHandlerResult::NotImplemented,
+        }
+    };
+
+    let status_handle = match service_control_handler::register(&service_name, event_handler) {
+        Ok(h) => h,
+        Err(e) => {
+            tracing::error!("Failed to register control handler: {}", e);
+            return;
+        }
+    };
+
+    // Report running
+    let _ = status_handle.set_service_status(ServiceStatus {
+        service_type: ServiceType::OWN_PROCESS,
+        current_state: ServiceState::Running,
+        controls_accepted: ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
+        exit_code: ServiceExitCode::Win32(0),
+        checkpoint: 0,
+        wait_hint: std::time::Duration::default(),
+        process_id: None,
+    });
+
+    // Load config and run supervisor
+    let config = match Config::load() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to load config: {}", e);
+            let _ = status_handle.set_service_status(ServiceStatus {
+                service_type: ServiceType::OWN_PROCESS,
+                current_state: ServiceState::Stopped,
+                controls_accepted: ServiceControlAccept::empty(),
+                exit_code: ServiceExitCode::Win32(1),
+                checkpoint: 0,
+                wait_hint: std::time::Duration::default(),
+                process_id: None,
+            });
+            return;
+        }
+    };
+
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+
+    rt.block_on(async {
+        let (prof, backend) = match config.resolve_profile(&profile) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("Failed to resolve profile '{}': {}", profile, e);
+                return;
+            }
+        };
+
+        let args = config.build_args(prof, backend);
+        let supervisor = ProcessSupervisor::new(
+            backend.path.clone(),
+            args,
+            backend.health_check_url.clone(),
+            config.supervisor.max_restarts,
+            config.supervisor.restart_delay_ms,
+            config.supervisor.health_check_interval_ms,
+        );
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<ProcessEvent>();
+
+        // Log events
+        let logger = tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                match &event {
+                    ProcessEvent::Started => tracing::info!("Backend process started"),
+                    ProcessEvent::Ready => tracing::info!("Backend server ready"),
+                    ProcessEvent::Output(line) => tracing::info!("[backend] {}", line),
+                    ProcessEvent::Crashed(msg) => tracing::warn!("Backend crashed: {}", msg),
+                    ProcessEvent::Restarting { attempt, max } => {
+                        tracing::info!("Restarting backend ({}/{})", attempt, max)
+                    }
+                    ProcessEvent::Stopped => tracing::info!("Backend stopped"),
+                    ProcessEvent::HealthCheck { healthy, uptime_secs, .. } => {
+                        tracing::debug!("Health: healthy={}, uptime={}s", healthy, uptime_secs)
+                    }
+                }
+            }
+        });
+
+        // Run supervisor in background, wait for shutdown signal
+        let supervisor_handle = tokio::spawn(async move {
+            if let Err(e) = supervisor.run(tx).await {
+                tracing::error!("Supervisor error: {}", e);
+            }
+        });
+
+        // Wait for SCM stop signal (blocking recv on std channel, polled from async)
+        tokio::task::spawn_blocking(move || {
+            let _ = shutdown_rx.recv();
+        })
+        .await
+        .ok();
+
+        tracing::info!("Shutting down...");
+        supervisor_handle.abort();
+        logger.abort();
+    });
+
+    // Report stopped
+    let _ = status_handle.set_service_status(ServiceStatus {
+        service_type: ServiceType::OWN_PROCESS,
+        current_state: ServiceState::Stopped,
+        controls_accepted: ServiceControlAccept::empty(),
+        exit_code: ServiceExitCode::Win32(0),
+        checkpoint: 0,
+        wait_hint: std::time::Duration::default(),
+        process_id: None,
+    });
+
+    tracing::info!("Service stopped");
+}
+
+// ── CLI Commands ─────────────────────────────────────────────────────────
+
+async fn cmd_run(config: &Config, profile_name: &str) -> Result<()> {
+    let (profile, backend) = config.resolve_profile(profile_name)?;
+    let args = config.build_args(profile, backend);
+
+    println!("Oh yeah, it's all coming together.");
+    println!();
+    println!("  Profile:  {}", profile_name);
+    println!("  Backend:  {}", backend.path);
+    if let Some(url) = &backend.health_check_url {
+        println!("  Health:   {}", url);
+    }
+    println!();
+
+    let supervisor = ProcessSupervisor::new(
+        backend.path.clone(),
+        args,
+        backend.health_check_url.clone(),
+        config.supervisor.max_restarts,
+        config.supervisor.restart_delay_ms,
+        config.supervisor.health_check_interval_ms,
+    );
+
+    let (tx, mut rx) = mpsc::unbounded_channel::<ProcessEvent>();
+
+    let printer = tokio::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            match event {
+                ProcessEvent::Started => println!("[kronk] Pull the lever!"),
+                ProcessEvent::Ready => println!("[kronk] Oh yeah, it's all coming together."),
+                ProcessEvent::Output(line) => println!("[server] {}", line),
+                ProcessEvent::Crashed(msg) => eprintln!("[kronk] WRONG LEVER! {}", msg),
+                ProcessEvent::Restarting { attempt, max } => {
+                    println!("[kronk] Why do we even have that lever? Restarting ({}/{})", attempt, max)
+                }
+                ProcessEvent::Stopped => println!("[kronk] By all accounts, it doesn't make sense."),
+                ProcessEvent::HealthCheck {
+                    alive,
+                    healthy,
+                    uptime_secs,
+                    restarts,
+                } => {
+                    tracing::debug!(alive, healthy, uptime_secs, restarts, "health check");
+                }
+            }
+        }
+    });
+
+    supervisor.run(tx).await?;
+    printer.abort();
+    Ok(())
+}
+
+fn cmd_service(config: &Config, command: ServiceCommands) -> Result<()> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (config, command);
+        anyhow::bail!("Service management is only supported on Windows");
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use kronk_core::platform::windows;
+
+        match command {
+            ServiceCommands::Install { profile } => {
+                // Validate profile exists
+                config.resolve_profile(&profile)?;
+
+                let service_name = Config::service_name(&profile);
+                let display_name = format!("Kronk: {}", profile);
+
+                windows::install_service(&service_name, &display_name, &profile)?;
+                println!("Oh right. The service. The service for {}.", profile);
+                println!("  Installed. Auto-starts on boot.");
+
+                // Start it
+                windows::start_service(&service_name)?;
+                println!("  Oh yeah, it's all coming together.");
+            }
+            ServiceCommands::Start { profile } => {
+                let service_name = Config::service_name(&profile);
+                windows::start_service(&service_name)?;
+                println!("Pull the lever! '{}' started.", service_name);
+            }
+            ServiceCommands::Stop { profile } => {
+                let service_name = Config::service_name(&profile);
+                windows::stop_service(&service_name)?;
+                println!("Wrong lever! '{}' stopped.", service_name);
+            }
+            ServiceCommands::Remove { profile } => {
+                let service_name = Config::service_name(&profile);
+                windows::remove_service(&service_name)?;
+                println!("No touchy! '{}' removed.", service_name);
+            }
+        }
+        Ok(())
+    }
+}
+
+async fn cmd_status(config: &Config) -> Result<()> {
+    println!("KRONK Status");
+    println!("{}", "-".repeat(60));
+
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .unwrap_or_default();
+
+    for (name, profile) in &config.profiles {
+        let backend = config.backends.get(&profile.backend);
+        let backend_path = backend.map(|b| b.path.as_str()).unwrap_or("???");
+
+        // Check service status
+        let service_name = Config::service_name(name);
+        let service_status = {
+            #[cfg(target_os = "windows")]
+            {
+                use kronk_core::platform::windows;
+                windows::query_service(&service_name).unwrap_or_else(|_| "UNKNOWN".to_string())
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = &service_name;
+                "N/A".to_string()
+            }
+        };
+
+        // Check health endpoint
+        let health = if let Some(url) = backend.and_then(|b| b.health_check_url.as_ref()) {
+            match http_client.get(url).send().await {
+                Ok(resp) if resp.status().is_success() => "HEALTHY".to_string(),
+                Ok(resp) => format!("HTTP {}", resp.status()),
+                Err(_) => "DOWN".to_string(),
+            }
+        } else {
+            "N/A".to_string()
+        };
+
+        println!();
+        println!("  Profile:  {}", name);
+        println!("  Backend:  {} ({})", profile.backend, backend_path);
+        println!("  Service:  {}", service_status);
+        println!("  Health:   {}", health);
+    }
+
+    println!();
+    Ok(())
+}
+
+fn cmd_config(config: &Config, command: ConfigCommands) -> Result<()> {
+    match command {
+        ConfigCommands::Show => {
+            let toml_str = toml::to_string_pretty(config)?;
+            println!("{}", toml_str);
+        }
+        ConfigCommands::Edit => {
+            let path = Config::config_path()?;
+            let editor = std::env::var("EDITOR").unwrap_or_else(|_| "notepad".to_string());
+            std::process::Command::new(&editor)
+                .arg(&path)
+                .status()
+                .map_err(|e| anyhow::anyhow!("Failed to open editor '{}': {}", editor, e))?;
+        }
+        ConfigCommands::Path => {
+            let path = Config::config_path()?;
+            println!("{}", path.display());
+        }
+    }
     Ok(())
 }

@@ -12,8 +12,7 @@ thiserror.workspace = true
 anyhow.workspace = true
 directories.workspace = true
 sysinfo.workspace = true
-dirs = "5"
-windows-service = { version = "0.8", optional = true }
+reqwest.workspace = true
 
-[features]
-windows-service = ["dep:windows-service"]
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.7"

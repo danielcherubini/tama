@@ -1,126 +1,163 @@
 use anyhow::{Context, Result};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
 use std::process::Stdio;
 
-use crate::config::{BackendConfig, Config};
-
 #[derive(Debug, Clone)]
 pub enum ProcessEvent {
     Started,
+    Ready,
     Output(String),
-    Crashed,
-    Restarting,
+    Crashed(String),
+    Restarting { attempt: u32, max: u32 },
     Stopped,
-    HealthSnapshot(HealthSnapshot),
-}
-
-#[derive(Debug, Clone)]
-pub struct HealthSnapshot {
-    pub alive: bool,
-    pub restart_count: u32,
-    pub uptime_ms: u64,
+    HealthCheck { alive: bool, healthy: bool, uptime_secs: u64, restarts: u32 },
 }
 
 pub struct ProcessSupervisor {
-    config: Config,
-    backend: BackendConfig,
-    restart_count: u32,
-    last_output_time: Option<std::time::Instant>,
-    hang_timeout_ms: u64,
+    exe_path: String,
+    args: Vec<String>,
+    health_url: Option<String>,
+    max_restarts: u32,
+    restart_delay_ms: u64,
+    health_check_interval_ms: u64,
 }
 
 impl ProcessSupervisor {
-    pub fn new(config: Config, backend: BackendConfig, hang_timeout_ms: u64) -> Self {
+    pub fn new(
+        exe_path: String,
+        args: Vec<String>,
+        health_url: Option<String>,
+        max_restarts: u32,
+        restart_delay_ms: u64,
+        health_check_interval_ms: u64,
+    ) -> Self {
         Self {
-            config,
-            backend,
-            restart_count: 0,
-            last_output_time: None,
-            hang_timeout_ms,
+            exe_path,
+            args,
+            health_url,
+            max_restarts,
+            restart_delay_ms,
+            health_check_interval_ms,
         }
     }
 
-    pub async fn run(self) -> Result<()> {
-        let (tx, mut rx) = mpsc::unbounded_channel::<ProcessEvent>();
-        
-        let mut supervisor = self;
-        
-        // Spawn child process
-        let mut child = Command::new(&supervisor.backend.path)
-            .args(&supervisor.backend.default_args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .context("Failed to spawn backend process")?;
-
-        tx.send(ProcessEvent::Started).ok();
-
-        let mut health_interval = interval(Duration::from_millis(supervisor.config.supervisor.health_check_interval_ms));
+    pub async fn run(&self, tx: mpsc::UnboundedSender<ProcessEvent>) -> Result<()> {
+        let mut restart_count: u32 = 0;
 
         loop {
-            tokio::select! {
-                Some(event) = rx.recv() => {
-                    match event {
-                        ProcessEvent::Started => {}
-                        ProcessEvent::Output(line) => {
-                            tracing::debug!("Backend output: {}", line);
-                        }
-                        ProcessEvent::Crashed => {
-                            supervisor.handle_crash(tx.clone()).await?;
-                        }
-                        ProcessEvent::Stopped => {
-                            tracing::info!("Backend stopped");
-                            return Ok(());
-                        }
-                        ProcessEvent::HealthSnapshot(snapshot) => {
-                            tracing::debug!("Health snapshot: {:?}", snapshot);
-                        }
-                        _ => {}
+            let mut child = Command::new(&self.exe_path)
+                .args(&self.args)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .with_context(|| format!("Failed to spawn: {}", self.exe_path))?;
+
+            let start_time = std::time::Instant::now();
+            tx.send(ProcessEvent::Started).ok();
+
+            // Stream stdout
+            let stdout = child.stdout.take();
+            let tx_out = tx.clone();
+            let stdout_handle = tokio::spawn(async move {
+                if let Some(stdout) = stdout {
+                    let reader = BufReader::new(stdout);
+                    let mut lines = reader.lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        tx_out.send(ProcessEvent::Output(line)).ok();
                     }
                 }
-                _ = health_interval.tick() => {
-                    supervisor.health_check(&mut child, &tx).await?;
+            });
+
+            // Stream stderr
+            let stderr = child.stderr.take();
+            let tx_err = tx.clone();
+            let stderr_handle = tokio::spawn(async move {
+                if let Some(stderr) = stderr {
+                    let reader = BufReader::new(stderr);
+                    let mut lines = reader.lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        tx_err.send(ProcessEvent::Output(line)).ok();
+                    }
+                }
+            });
+
+            // Health check loop
+            let mut health_interval =
+                interval(Duration::from_millis(self.health_check_interval_ms));
+            let mut server_ready = false;
+            let http_client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(3))
+                .build()
+                .unwrap_or_default();
+
+            let exit_status = loop {
+                tokio::select! {
+                    status = child.wait() => {
+                        break status;
+                    }
+                    _ = health_interval.tick() => {
+                        let alive = child.try_wait().map(|s| s.is_none()).unwrap_or(false);
+                        let healthy = if let Some(url) = &self.health_url {
+                            http_client.get(url).send().await
+                                .map(|r| r.status().is_success())
+                                .unwrap_or(false)
+                        } else {
+                            alive
+                        };
+
+                        if healthy && !server_ready {
+                            server_ready = true;
+                            tx.send(ProcessEvent::Ready).ok();
+                        }
+
+                        tx.send(ProcessEvent::HealthCheck {
+                            alive,
+                            healthy,
+                            uptime_secs: start_time.elapsed().as_secs(),
+                            restarts: restart_count,
+                        }).ok();
+                    }
+                    _ = tokio::signal::ctrl_c() => {
+                        tracing::info!("Received shutdown signal");
+                        child.kill().await.ok();
+                        tx.send(ProcessEvent::Stopped).ok();
+                        stdout_handle.abort();
+                        stderr_handle.abort();
+                        return Ok(());
+                    }
+                }
+            };
+
+            stdout_handle.abort();
+            stderr_handle.abort();
+
+            match exit_status {
+                Ok(status) => {
+                    let msg = format!("Process exited with {}", status);
+                    tx.send(ProcessEvent::Crashed(msg.clone())).ok();
+                }
+                Err(e) => {
+                    let msg = format!("Process error: {}", e);
+                    tx.send(ProcessEvent::Crashed(msg)).ok();
                 }
             }
+
+            restart_count += 1;
+            if restart_count > self.max_restarts {
+                tracing::error!("Max restarts ({}) exceeded, giving up", self.max_restarts);
+                tx.send(ProcessEvent::Stopped).ok();
+                return Ok(());
+            }
+
+            tx.send(ProcessEvent::Restarting {
+                attempt: restart_count,
+                max: self.max_restarts,
+            }).ok();
+
+            tokio::time::sleep(Duration::from_millis(self.restart_delay_ms)).await;
         }
-    }
-
-    async fn handle_crash(&mut self, tx: mpsc::UnboundedSender<ProcessEvent>) -> Result<()> {
-        self.restart_count += 1;
-        tx.send(ProcessEvent::Crashed).ok();
-        tx.send(ProcessEvent::Restarting).ok();
-
-        let delay = Duration::from_millis(self.config.supervisor.restart_delay_ms);
-        tokio::time::sleep(delay).await;
-
-        let child = Command::new(&self.backend.path)
-            .args(&self.backend.default_args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .context("Failed to restart backend")?;
-
-        tx.send(ProcessEvent::Started).ok();
-        Ok(())
-    }
-
-    async fn health_check(&mut self, child: &mut tokio::process::Child, tx: &mpsc::UnboundedSender<ProcessEvent>) -> Result<()> {
-        let alive = !child.try_wait().unwrap().is_some();
-        self.last_output_time = Some(std::time::Instant::now());
-
-        if !alive {
-            tx.send(ProcessEvent::Stopped).ok();
-            return Ok(());
-        }
-
-        tx.send(ProcessEvent::HealthSnapshot(HealthSnapshot {
-            alive,
-            restart_count: self.restart_count,
-            uptime_ms: 0,
-        })).ok();
-
-        Ok(())
     }
 }
