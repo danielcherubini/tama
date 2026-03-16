@@ -378,7 +378,8 @@ async fn cmd_run(config: &Config, profile_name: &str) -> Result<()> {
 fn cmd_service(config: &Config, command: ServiceCommands) -> Result<()> {
     match command {
         ServiceCommands::Install { profile } => {
-            let (_prof, _backend) = config.resolve_profile(&profile)?;
+            #[allow(unused_variables)]
+            let (prof, backend) = config.resolve_profile(&profile)?;
             let service_name = Config::service_name(&profile);
 
             #[cfg(target_os = "windows")]
