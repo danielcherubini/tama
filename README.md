@@ -45,11 +45,17 @@ Kronk figures out the backend from the binary path and saves everything to confi
 # Foreground (with live output)
 kronk run
 
-# Install as a system service (run as admin / sudo)
+# Or install as a system service (run as admin / sudo)
 kronk service install
+kronk service start
+
+# After that, no admin needed
+kronk service stop
+kronk service start
+kronk status
 ```
 
-That's it. Kronk supervises the process, streams logs, checks health, and restarts on crash.
+Kronk supervises the process, streams logs, checks health, and restarts on crash.
 
 ---
 
