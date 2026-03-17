@@ -82,13 +82,16 @@ pub async fn search_models(query: &str, sort: SortBy, limit: usize) -> Result<Ve
 /// URL encode a string for use in a query parameter.
 /// Uses percent-encoding for all non-alphanumeric characters except
 /// the ones that are safe in query strings: - _ . ~
+/// Encodes UTF-8 bytes correctly for multi-byte characters.
 fn urlencoding(s: &str) -> String {
-    s.chars()
-        .map(|c| match c {
-            ' ' => "+".to_string(),
-            '-' | '_' | '.' | '~' => c.to_string(),
-            c if c.is_alphanumeric() => c.to_string(),
-            c => format!("%{:02X}", c as u32),
+    s.as_bytes()
+        .iter()
+        .map(|&b| match b {
+            0x20 => "+".to_string(),
+            b if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' || b == b'~' => {
+                (b as char).to_string()
+            }
+            b => format!("%{:02X}", b),
         })
         .collect()
 }
@@ -101,6 +104,7 @@ mod tests {
     fn test_urlencoding() {
         assert_eq!(urlencoding("hello world"), "hello+world");
         assert_eq!(urlencoding("foo&bar=baz"), "foo%26bar%3Dbaz");
+        assert_eq!(urlencoding("café"), "caf%C3%A9");
     }
 
     // Network test — run with: cargo test -p kronk-core -- search --ignored
