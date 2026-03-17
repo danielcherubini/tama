@@ -38,6 +38,7 @@ pub struct BackendConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct HealthCheck {
     /// Health check endpoint URL. Overrides backend's health_check_url.
     #[serde(default)]
@@ -600,7 +601,6 @@ args = []
 url = "http://localhost:9090/health"
 interval_ms = 3000
 timeout_ms = 5000
-retries = 3
 "#;
         let profile: ProfileConfig = toml::from_str(toml_str).unwrap();
         let hc = profile.health_check.unwrap();

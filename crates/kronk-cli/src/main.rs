@@ -901,9 +901,9 @@ async fn cmd_profile_ls(config: &Config) -> Result<()> {
             }
         };
 
-        // Use profile's resolved health URL
-        let health_url = config.resolve_health_url(profile);
-        let health = if let Some(url) = health_url {
+        // Use profile's resolved health check config
+        let health_check = config.resolve_health_check(profile);
+        let health = if let Some(url) = health_check.url {
             match http_client.get(url).send().await {
                 Ok(resp) if resp.status().is_success() => "HEALTHY",
                 _ => "DOWN",
