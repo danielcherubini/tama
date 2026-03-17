@@ -379,9 +379,9 @@ async fn cmd_ps(config: &Config) -> Result<()> {
             }
         };
 
-        // Use profile's resolved health URL
-        let health_url = config.resolve_health_url(profile);
-        let health = if let Some(url) = health_url {
+        // Use profile's resolved health check config
+        let health_check = config.resolve_health_check(profile);
+        let health = if let Some(url) = health_check.url {
             match http_client.get(url).send().await {
                 Ok(resp) if resp.status().is_success() => "HEALTHY",
                 _ => "DOWN",
@@ -502,6 +502,7 @@ async fn cmd_create(
             model: Some(model_id.to_string()),
             quant: Some(quant_name.clone()),
             port: None,
+            health_check: None,
         },
     );
 
