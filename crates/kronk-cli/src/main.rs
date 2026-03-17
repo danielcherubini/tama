@@ -1072,14 +1072,31 @@ async fn cmd_server_add(
     let exe_path = &command[0];
     let args: Vec<String> = command[1..].to_vec();
 
-    // Resolve the exe to an absolute path
+    // Only absolutize if it looks like a filesystem path (contains separator or starts with ./..);
+    // bare command names (e.g. "llama-server") are left as-is so PATH resolution works at runtime.
     let exe_abs = std::path::Path::new(exe_path);
-    let exe_resolved = if exe_abs.is_absolute() {
-        exe_abs.to_path_buf()
+    let is_path = exe_path.contains(std::path::MAIN_SEPARATOR)
+        || exe_path.contains('/')
+        || exe_path.starts_with('.')
+        || exe_abs.is_absolute();
+    let (exe_str, exe_stem) = if is_path {
+        let resolved = if exe_abs.is_absolute() {
+            exe_abs.to_path_buf()
+        } else {
+            std::env::current_dir()?.join(exe_abs)
+        };
+        let stem = resolved
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "backend".to_string());
+        (resolved.to_string_lossy().to_string(), stem)
     } else {
-        std::env::current_dir()?.join(exe_abs)
+        let stem = exe_path
+            .strip_suffix(".exe")
+            .unwrap_or(exe_path)
+            .to_string();
+        (exe_path.to_string(), stem)
     };
-    let exe_str = exe_resolved.to_string_lossy().to_string();
 
     // Check if this backend path already exists
     let mut config = config.clone();
@@ -1092,29 +1109,32 @@ async fn cmd_server_add(
     let backend_key = match backend_name {
         Some(k) => k,
         None => {
-            // Derive a backend name from the exe filename
-            let stem = exe_resolved
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| "backend".to_string())
-                .replace('-', "_");
+            // Derive a backend name from the exe filename, avoiding collisions
+            let base = exe_stem.replace('-', "_");
+
+            let mut key = base.clone();
+            let mut i = 2;
+            while config.backends.contains_key(&key) {
+                key = format!("{}_{}", base, i);
+                i += 1;
+            }
 
             config.backends.insert(
-                stem.clone(),
+                key.clone(),
                 BackendConfig {
                     path: exe_str.clone(),
                     default_args: vec![],
                     health_check_url: Some("http://localhost:8080/health".to_string()),
                 },
             );
-            stem
+            key
         }
     };
 
     // Check for duplicate server
     if config.servers.contains_key(name) && !overwrite {
         anyhow::bail!(
-            "Server '{}' already exists. Use `kronk update` to modify it.",
+            "Server '{}' already exists. Use `kronk server edit` to modify it.",
             name
         );
     }
@@ -1157,14 +1177,30 @@ async fn cmd_server_edit(config: &mut Config, name: &str, command: Vec<String>) 
     let exe_path = &command[0];
     let args: Vec<String> = command[1..].to_vec();
 
-    // Resolve the exe to an absolute path
+    // Only absolutize if it looks like a filesystem path
     let exe_abs = std::path::Path::new(exe_path);
-    let exe_resolved = if exe_abs.is_absolute() {
-        exe_abs.to_path_buf()
+    let is_path = exe_path.contains(std::path::MAIN_SEPARATOR)
+        || exe_path.contains('/')
+        || exe_path.starts_with('.')
+        || exe_abs.is_absolute();
+    let (exe_str, exe_stem) = if is_path {
+        let resolved = if exe_abs.is_absolute() {
+            exe_abs.to_path_buf()
+        } else {
+            std::env::current_dir()?.join(exe_abs)
+        };
+        let stem = resolved
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "backend".to_string());
+        (resolved.to_string_lossy().to_string(), stem)
     } else {
-        std::env::current_dir()?.join(exe_abs)
+        let stem = exe_path
+            .strip_suffix(".exe")
+            .unwrap_or(exe_path)
+            .to_string();
+        (exe_path.to_string(), stem)
     };
-    let exe_str = exe_resolved.to_string_lossy().to_string();
 
     // Check if this backend path exists
     let backend_name = config
@@ -1176,22 +1212,25 @@ async fn cmd_server_edit(config: &mut Config, name: &str, command: Vec<String>) 
     let backend_key = match backend_name {
         Some(k) => k,
         None => {
-            // Derive a backend name from the exe filename
-            let stem = exe_resolved
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| "backend".to_string())
-                .replace('-', "_");
+            // Derive a backend name from the exe filename, avoiding collisions
+            let base = exe_stem.replace('-', "_");
+
+            let mut key = base.clone();
+            let mut i = 2;
+            while config.backends.contains_key(&key) {
+                key = format!("{}_{}", base, i);
+                i += 1;
+            }
 
             config.backends.insert(
-                stem.clone(),
+                key.clone(),
                 BackendConfig {
                     path: exe_str.clone(),
                     default_args: vec![],
                     health_check_url: Some("http://localhost:8080/health".to_string()),
                 },
             );
-            stem
+            key
         }
     };
 
@@ -1413,6 +1452,16 @@ fn cmd_profile(config: &Config, command: ProfileCommands) -> Result<()> {
                 anyhow::bail!("At least one sampling parameter is required. Example:\n  kronk profile add my-preset --temp 0.4 --top-k 30");
             }
 
+            // Reject names that shadow built-in profiles
+            const RESERVED: &[&str] = &["coding", "chat", "analysis", "creative"];
+            if RESERVED.contains(&name.as_str()) {
+                anyhow::bail!(
+                    "Cannot create custom profile '{}': it shadows a built-in profile. \
+                     Edit profiles.d/{}.toml instead to customize it.",
+                    name, name
+                );
+            }
+
             let custom = config.custom_profiles.get_or_insert_with(HashMap::new);
             custom.insert(name.clone(), params);
             config.save()?;
@@ -1423,16 +1472,35 @@ fn cmd_profile(config: &Config, command: ProfileCommands) -> Result<()> {
         }
         ProfileCommands::Remove { name } => {
             let mut config = config.clone();
-            let removed = config
-                .custom_profiles
-                .as_mut()
-                .and_then(|m| m.remove(&name))
-                .is_some();
 
-            if !removed {
+            let exists = config
+                .custom_profiles
+                .as_ref()
+                .map(|m| m.contains_key(&name))
+                .unwrap_or(false);
+            if !exists {
                 anyhow::bail!("Custom profile '{}' not found", name);
             }
 
+            // Check if any servers reference this profile
+            let referencing: Vec<&str> = config
+                .servers
+                .iter()
+                .filter(|(_, s)| {
+                    matches!(&s.profile, Some(Profile::Custom { name: n }) if n == &name)
+                })
+                .map(|(k, _)| k.as_str())
+                .collect();
+            if !referencing.is_empty() {
+                anyhow::bail!(
+                    "Cannot remove profile '{}': referenced by servers: {}. \
+                     Clear them first with `kronk profile clear <server>`.",
+                    name,
+                    referencing.join(", ")
+                );
+            }
+
+            config.custom_profiles.as_mut().unwrap().remove(&name);
             config.save()?;
             println!("Custom profile '{}' removed.", name);
             Ok(())

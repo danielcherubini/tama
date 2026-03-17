@@ -96,7 +96,7 @@ Kronk supervises the process, streams logs, checks health, and restarts on crash
 
 ## CLI
 
-```
+```text
 kronk run <name> [--ctx N]                         Run a server in the foreground
 kronk status                                       Show status of all servers
 kronk service install [name]                       Install as a system service
@@ -161,11 +161,11 @@ health_check_interval_ms = 5000
 
 You can define multiple backends and servers. Switch between them with `kronk run <name>`.
 
-Model cards are stored in `~/.config/kronk/configs.d/<company>-<model>.toml` and contain quant info, context settings, and sampling presets.
+Model cards are stored in `~/.config/kronk/configs.d/<company>--<model>.toml` and contain quant info, context settings, and sampling presets.
 
 ### Directory Layout
 
-```
+```text
 ~/.config/kronk/
 ├── config.toml              Main configuration
 ├── profiles.d/              Sampling presets (editable)
@@ -174,7 +174,7 @@ Model cards are stored in `~/.config/kronk/configs.d/<company>-<model>.toml` and
 │   ├── analysis.toml
 │   └── creative.toml
 ├── configs.d/               Model cards
-│   └── bartowski-OmniCoder-8B.toml
+│   └── bartowski--OmniCoder-8B.toml
 ├── models/                  GGUF model files
 │   └── bartowski/OmniCoder-8B/*.gguf
 └── logs/                    Service logs

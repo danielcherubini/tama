@@ -56,14 +56,14 @@ impl ModelRegistry {
         })? {
             let entry = entry?;
             let path = entry.path();
-            if !path.extension().map_or(false, |e| e == "toml") {
+            if path.extension().is_none_or(|e| e != "toml") {
                 continue;
             }
             let stem = path.file_stem().unwrap().to_string_lossy().to_string();
-            // "company-modelname.toml" → id "company/modelname"
-            let id = match stem.find('-') {
-                Some(pos) => format!("{}/{}", &stem[..pos], &stem[pos + 1..]),
-                None => continue, // skip files without a dash
+            // "company--modelname.toml" → id "company/modelname"
+            let id = match stem.find("--") {
+                Some(pos) => format!("{}/{}", &stem[..pos], &stem[pos + 2..]),
+                None => continue, // skip files without the "--" delimiter
             };
             let model_dir = self.models_dir.join(&id);
 
@@ -166,7 +166,7 @@ mod tests {
                 q
             },
         };
-        let card_filename = format!("{}-{}.toml", company, model);
+        let card_filename = format!("{}--{}.toml", company, model);
         card.save(&configs_dir.join(&card_filename)).unwrap();
         // GGUF file still goes in models dir
         std::fs::write(model_dir.join(format!("{}-Q4_K_M.gguf", model)), b"fake").unwrap();

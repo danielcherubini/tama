@@ -1006,7 +1006,7 @@ Rewrite README sections to reflect new nomenclature:
 - Add `profiles.d/` and `configs.d/` to Architecture section
 - Update directory structure diagram:
 
-```
+```text
 ~/.config/kronk/
 ├── config.toml
 ├── profiles.d/
@@ -1015,7 +1015,7 @@ Rewrite README sections to reflect new nomenclature:
 │   ├── analysis.toml
 │   └── creative.toml
 ├── configs.d/
-│   └── bartowski-OmniCoder-8B.toml
+│   └── bartowski--OmniCoder-8B.toml
 ├── models/
 │   └── bartowski/OmniCoder-8B/*.gguf
 └── logs/
