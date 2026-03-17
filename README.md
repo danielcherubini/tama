@@ -196,17 +196,6 @@ The binary is at `target/release/kronk.exe` (Windows) or `target/release/kronk` 
 
 See [TODO.md](TODO.md) for the full development plan.
 
-- [x] Native Windows Service (no NSSM)
-- [x] Linux systemd support
-- [x] Process supervision with health checks
-- [x] VRAM monitoring in status output
-- [x] User-level service control (no admin after install)
-- [x] Profile management from CLI
-- [x] Model management (pull, search, create profiles)
-- [x] GitHub Actions CI/CD with Windows installer + .deb + .rpm
-- [ ] TUI Dashboard (ratatui)
-- [ ] System tray integration
-
 ---
 
 ## License
