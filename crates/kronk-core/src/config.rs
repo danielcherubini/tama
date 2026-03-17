@@ -24,6 +24,8 @@ pub struct General {
     pub log_level: String,
     #[serde(default)]
     pub models_dir: Option<String>,
+    #[serde(default)]
+    pub logs_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -260,6 +262,20 @@ impl Config {
         }
     }
 
+    /// Resolve the logs directory path.
+    /// Uses `general.logs_dir` if set, otherwise defaults to `~/.kronk/logs/`.
+    pub fn logs_dir(&self) -> Result<PathBuf> {
+        if let Some(ref dir) = self.general.logs_dir {
+            Ok(PathBuf::from(dir))
+        } else if let Some(ref loaded) = self.loaded_from {
+            Ok(loaded.join("logs"))
+        } else {
+            let home =
+                directories::UserDirs::new().context("Failed to determine home directory")?;
+            Ok(home.home_dir().join(".kronk").join("logs"))
+        }
+    }
+
     pub fn with_models_dir(&self, dir: impl Into<PathBuf>) -> Self {
         let dir = dir.into();
         Self {
@@ -322,6 +338,7 @@ impl Default for Config {
             general: General {
                 log_level: "info".to_string(),
                 models_dir: None,
+                logs_dir: None,
             },
             backends,
             profiles,
