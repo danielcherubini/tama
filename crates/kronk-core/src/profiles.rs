@@ -22,10 +22,10 @@ pub struct SamplingParams {
     pub repeat_penalty: Option<f64>,
 }
 
-/// Built-in use case presets that auto-configure sampling params.
+/// Built-in profile presets that auto-configure sampling params.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub enum UseCase {
+pub enum Profile {
     Coding,
     Chat,
     Analysis,
@@ -33,11 +33,11 @@ pub enum UseCase {
     Custom { name: String },
 }
 
-impl UseCase {
+impl Profile {
     /// Return the preset sampling params for this use case.
     pub fn params(&self) -> SamplingParams {
         match self {
-            UseCase::Coding => SamplingParams {
+            Profile::Coding => SamplingParams {
                 temperature: Some(0.3),
                 top_p: Some(0.9),
                 top_k: Some(50),
@@ -46,7 +46,7 @@ impl UseCase {
                 frequency_penalty: None,
                 repeat_penalty: None,
             },
-            UseCase::Chat => SamplingParams {
+            Profile::Chat => SamplingParams {
                 temperature: Some(0.7),
                 top_p: Some(0.95),
                 top_k: Some(40),
@@ -55,7 +55,7 @@ impl UseCase {
                 frequency_penalty: None,
                 repeat_penalty: None,
             },
-            UseCase::Analysis => SamplingParams {
+            Profile::Analysis => SamplingParams {
                 temperature: Some(0.3),
                 top_p: Some(0.9),
                 top_k: Some(20),
@@ -64,7 +64,7 @@ impl UseCase {
                 frequency_penalty: None,
                 repeat_penalty: None,
             },
-            UseCase::Creative => SamplingParams {
+            Profile::Creative => SamplingParams {
                 temperature: Some(0.9),
                 top_p: Some(0.95),
                 top_k: Some(50),
@@ -73,61 +73,61 @@ impl UseCase {
                 frequency_penalty: None,
                 repeat_penalty: None,
             },
-            UseCase::Custom { .. } => SamplingParams::default(),
+            Profile::Custom { .. } => SamplingParams::default(),
         }
     }
 
     /// List all built-in use cases with descriptions.
-    pub fn all() -> Vec<(&'static str, &'static str, UseCase)> {
+    pub fn all() -> Vec<(&'static str, &'static str, Profile)> {
         vec![
             (
                 "coding",
                 "Low temp (0.3), deterministic for code gen / agentic tasks",
-                UseCase::Coding,
+                Profile::Coding,
             ),
             (
                 "chat",
                 "Balanced (temp 0.7) for conversational use",
-                UseCase::Chat,
+                Profile::Chat,
             ),
             (
                 "analysis",
                 "Deterministic (temp 0.3), focused sampling",
-                UseCase::Analysis,
+                Profile::Analysis,
             ),
             (
                 "creative",
                 "High temp (0.9), diverse and exploratory output",
-                UseCase::Creative,
+                Profile::Creative,
             ),
         ]
     }
 }
 
-impl std::str::FromStr for UseCase {
+impl std::str::FromStr for Profile {
     type Err = std::convert::Infallible;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         Ok(match s.to_lowercase().trim() {
-            "coding" => UseCase::Coding,
-            "chat" => UseCase::Chat,
-            "analysis" => UseCase::Analysis,
-            "creative" => UseCase::Creative,
-            other => UseCase::Custom {
+            "coding" => Profile::Coding,
+            "chat" => Profile::Chat,
+            "analysis" => Profile::Analysis,
+            "creative" => Profile::Creative,
+            other => Profile::Custom {
                 name: other.to_string(),
             },
         })
     }
 }
 
-impl fmt::Display for UseCase {
+impl fmt::Display for Profile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            UseCase::Coding => write!(f, "coding"),
-            UseCase::Chat => write!(f, "chat"),
-            UseCase::Analysis => write!(f, "analysis"),
-            UseCase::Creative => write!(f, "creative"),
-            UseCase::Custom { name } => write!(f, "{}", name),
+            Profile::Coding => write!(f, "coding"),
+            Profile::Chat => write!(f, "chat"),
+            Profile::Analysis => write!(f, "analysis"),
+            Profile::Creative => write!(f, "creative"),
+            Profile::Custom { name } => write!(f, "{}", name),
         }
     }
 }
@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn test_coding_preset() {
-        let params = UseCase::Coding.params();
+        let params = Profile::Coding.params();
         assert_eq!(params.temperature, Some(0.3));
         assert_eq!(params.top_k, Some(50));
         assert_eq!(params.top_p, Some(0.9));
@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn test_merge_override_wins() {
-        let base = UseCase::Coding.params(); // temp 0.3
+        let base = Profile::Coding.params(); // temp 0.3
         let overrides = SamplingParams {
             temperature: Some(0.5), // override
             ..Default::default()
@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn test_merge_none_keeps_base() {
-        let base = UseCase::Chat.params();
+        let base = Profile::Chat.params();
         let overrides = SamplingParams::default(); // all None
         let merged = base.merge(&overrides);
         assert_eq!(merged, base);
@@ -245,16 +245,16 @@ mod tests {
 
     #[test]
     fn test_use_case_display() {
-        assert_eq!(UseCase::Coding.to_string(), "coding");
-        assert_eq!(UseCase::Creative.to_string(), "creative");
+        assert_eq!(Profile::Coding.to_string(), "coding");
+        assert_eq!(Profile::Creative.to_string(), "creative");
     }
 
     #[test]
     fn test_use_case_serde_roundtrip() {
-        let uc = UseCase::Coding;
+        let uc = Profile::Coding;
         let json = serde_json::to_string(&uc).unwrap();
         assert_eq!(json, "\"coding\"");
-        let back: UseCase = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, UseCase::Coding);
+        let back: Profile = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, Profile::Coding);
     }
 }

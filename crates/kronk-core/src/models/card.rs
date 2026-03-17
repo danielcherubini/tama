@@ -1,4 +1,4 @@
-use crate::use_cases::SamplingParams;
+use crate::profiles::SamplingParams;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
