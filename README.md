@@ -44,7 +44,7 @@ sudo dpkg -i kronk_*.deb
 sudo rpm -i kronk-*.rpm
 ```
 
-### Add a profile from a command you already use
+### Add a server from a command you already use
 
 ```bash
 kronk add default llama-server.exe --host 0.0.0.0 -m model.gguf -ngl 999 -fa 1 -c 8192
@@ -60,22 +60,22 @@ kronk model pull bartowski/OmniCoder-8B-GGUF
 
 Kronk downloads all available quants, detects your GPU VRAM, and suggests optimal context sizes.
 
-### Create a profile from an installed model
+### Create a server from an installed model
 
 ```bash
-kronk model create my-profile --model bartowski/OmniCoder-8B-GGUF --use-case coding
+kronk model create my-server --model bartowski/OmniCoder-8B-GGUF --profile coding
 ```
 
-Kronk auto-configures the profile with the selected quant and use-case preset.
+Kronk auto-configures the server with the selected quant and sampling profile.
 
 ### Run it
 
 ```bash
 # Foreground (with live output)
-kronk run
+kronk run default
 
 # Override context size (takes priority over model card)
-kronk run --ctx 8192
+kronk run default --ctx 8192
 
 # Or install as a system service (run as admin / sudo)
 kronk service install
@@ -90,34 +90,39 @@ kronk status
 Kronk supervises the process, streams logs, checks health, and restarts on crash.
 
 > [!NOTE]
-> After installing the service, you can run `kronk run` in the foreground to monitor logs and debug issues.
+> After installing the service, you can run `kronk run <name>` in the foreground to monitor logs and debug issues.
 
 ---
 
 ## CLI
 
-```
-kronk run [--profile name] [--ctx N]           Run a profile in the foreground
-kronk status                                   Show status of all profiles
-kronk service install [--profile]              Install as a Windows service
-kronk service start [--profile]                Start an installed service
-kronk service stop [--profile]                 Stop a running service
-kronk service remove [--profile]               Remove an installed service
-kronk profile ls                               List all profiles with status
-kronk profile add <name> <cmd...>              Add a new profile from a raw command
-kronk profile edit <name>                      Edit an existing profile
-kronk profile rm <name>                        Remove a profile
-kronk model pull <repo>                        Pull a model from HuggingFace
-kronk model ls                                 List installed models
-kronk model ps                                 Show running model processes
-kronk model create <name>                      Create a profile from an installed model
-kronk model rm <model>                         Remove an installed model
-kronk model scan                               Scan for untracked GGUF files
-kronk model search <query>                     Search HuggingFace for GGUF models
-kronk config show                              Print the current configuration
-kronk config edit                              Open config file in editor
-kronk config path                              Show the config file path
-kronk logs [--profile name]                    View backend logs (follow with -f)
+```text
+kronk run <name> [--ctx N]                         Run a server in the foreground
+kronk status                                       Show status of all servers
+kronk service install [name]                       Install as a system service
+kronk service start [name]                         Start an installed service
+kronk service stop [name]                          Stop a running service
+kronk service remove [name]                        Remove an installed service
+kronk server ls                                    List all servers with status
+kronk server add <name> <cmd...>                   Add a new server from a raw command
+kronk server edit <name> <cmd...>                  Edit an existing server
+kronk server rm <name>                             Remove a server
+kronk profile list                                 List available sampling profiles
+kronk profile set <server> <profile>               Set a server's sampling profile
+kronk profile clear <server>                       Clear a server's profile
+kronk profile add <name> [--temp ...] [--top-k ...]  Create a custom profile
+kronk profile remove <name>                        Remove a custom profile
+kronk model pull <repo>                            Pull a model from HuggingFace
+kronk model ls                                     List installed models
+kronk model ps                                     Show running model processes
+kronk model create <name>                          Create a server from an installed model
+kronk model rm <model>                             Remove an installed model
+kronk model scan                                   Scan for untracked GGUF files
+kronk model search <query>                         Search HuggingFace for GGUF models
+kronk config show                                  Print the current configuration
+kronk config edit                                  Open config file in editor
+kronk config path                                  Show the config file path
+kronk logs <name>                                  View backend logs (follow with -f)
 ```
 
 ---
@@ -134,22 +139,18 @@ Kronk auto-generates a config on first run:
 path = "C:\\path\\to\\llama-server.exe"
 health_check_url = "http://localhost:8080/health"
 
-[profiles.default]
+[servers.default]
 backend = "llama_cpp"
 args = ["--host", "0.0.0.0", "-m", "model.gguf", "-ngl", "999", "-c", "8192"]
+profile = "coding"
+enabled = true
 
-[profiles.model-profile]
+[servers.model-server]
 backend = "llama_cpp"
 model = "bartowski/OmniCoder-8B-GGUF"
 quant = "Q4_K_M"
-use-case = "coding"
-
-[models.bartowski/OmniCoder-8B-GGUF]
-dir = "~/.config/kronk/models/bartowski/OmniCoder-8B-GGUF"
-[[models.bartowski/OmniCoder-8B-GGUF.quants]]
-name = "Q4_K_M"
-file = "OmniCoder-8B-Q4_K_M.gguf"
-context = 8192
+profile = "coding"
+enabled = true
 
 [supervisor]
 restart_policy = "always"
@@ -158,9 +159,26 @@ restart_delay_ms = 3000
 health_check_interval_ms = 5000
 ```
 
-You can define multiple backends and profiles. Switch between them with `--profile`.
+You can define multiple backends and servers. Switch between them with `kronk run <name>`.
 
-Model cards are stored in `~/.config/kronk/models/<repo>/<model>/model.toml` and contain quant info, context settings, and sampling presets.
+Model cards are stored in `~/.config/kronk/configs.d/<company>--<model>.toml` and contain quant info, context settings, and sampling presets.
+
+### Directory Layout
+
+```text
+~/.config/kronk/
+├── config.toml              Main configuration
+├── profiles.d/              Sampling presets (editable)
+│   ├── coding.toml
+│   ├── chat.toml
+│   ├── analysis.toml
+│   └── creative.toml
+├── configs.d/               Model cards
+│   └── bartowski--OmniCoder-8B.toml
+├── models/                  GGUF model files
+│   └── bartowski/OmniCoder-8B/*.gguf
+└── logs/                    Service logs
+```
 
 ---
 
@@ -195,11 +213,8 @@ kronk/
 │   ├── kronk-cli/       # CLI binary (clap)
 │   └── kronk-mock/      # Mock LLM backend for testing
 ├── installer/           # Inno Setup script (Windows installer)
-├── docs/
-│   └── superpowers/     # Development documentation
+├── modelcards/          # Community model cards
 ├── .github/workflows/   # CI/CD release pipeline
-├── SPEC.md              # Original technical specification
-├── PLAN.md              # Development roadmap
 └── README.md
 ```
 
@@ -221,7 +236,7 @@ The binary is at `target/release/kronk.exe` (Windows) or `target/release/kronk` 
 
 See [TODO.md](TODO.md) for the full development plan:
 
-- **Multi-port support** — Per-profile port config, auto `--port` injection
+- **Multi-port support** — Per-server port config, auto `--port` injection
 - **Log viewer** — `kronk logs` with `--follow`, log rotation
 - **Parallel downloads** — Multi-connection Range downloads for GGUF files
 - **Windows service polling** — Replace fixed sleeps with proper SCM status polling
@@ -252,8 +267,3 @@ Key dependencies include:
 - `indicatif` — Progress bars for downloads
 - `directories` — Platform-specific config paths
 
----
-
-## License
-
-MIT License — see [LICENSE](LICENSE) for details.

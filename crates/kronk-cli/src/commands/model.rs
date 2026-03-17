@@ -39,9 +39,9 @@ pub async fn run(config: &Config, command: ModelCommands) -> Result<()> {
             name,
             model,
             quant,
-            use_case,
+            profile,
             backend,
-        } => cmd_create(config, &name, &model, quant, use_case, backend).await,
+        } => cmd_create(config, &name, &model, quant, profile, backend).await,
         ModelCommands::Rm { model } => cmd_rm(config, &model),
         ModelCommands::Scan => cmd_scan(config),
         ModelCommands::Search {
@@ -104,7 +104,10 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
     std::fs::create_dir_all(&model_dir)
         .with_context(|| format!("Failed to create directory: {}", model_dir.display()))?;
 
-    let card_path = model_dir.join("model.toml");
+    let configs_dir = config.configs_dir()?;
+    std::fs::create_dir_all(&configs_dir)?;
+    let card_filename = format!("{}.toml", model_id.replace('/', "--"));
+    let card_path = configs_dir.join(&card_filename);
     let mut card = if card_path.exists() {
         ModelCard::load(&card_path)?
     } else {
@@ -259,9 +262,9 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
     println!("Oh yeah, it's all coming together.");
     println!("  Model card saved: {}", card_path.display());
     println!();
-    println!("  Create a profile:");
+    println!("  Create a server:");
     println!(
-        "    kronk model create my-profile --model {} --use-case coding",
+        "    kronk model create my-server --model {} --profile coding",
         model_id
     );
 
@@ -270,7 +273,8 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
 
 fn cmd_ls(config: &Config) -> Result<()> {
     let models_dir = config.models_dir()?;
-    let registry = ModelRegistry::new(models_dir);
+    let configs_dir = config.configs_dir()?;
+    let registry = ModelRegistry::new(models_dir, configs_dir);
     let models = registry.scan()?;
 
     if models.is_empty() {
@@ -306,14 +310,14 @@ fn cmd_ls(config: &Config) -> Result<()> {
             }
         }
 
-        let linked_profiles: Vec<&str> = config
-            .profiles
+        let linked_servers: Vec<&str> = config
+            .servers
             .iter()
             .filter(|(_, p)| p.model.as_deref() == Some(&model.id))
             .map(|(name, _)| name.as_str())
             .collect();
-        if !linked_profiles.is_empty() {
-            println!("    profiles: {}", linked_profiles.join(", "));
+        if !linked_servers.is_empty() {
+            println!("    servers: {}", linked_servers.join(", "));
         }
 
         let untracked = registry
@@ -334,30 +338,30 @@ async fn cmd_ps(config: &Config) -> Result<()> {
         .build()
         .unwrap_or_default();
 
-    let model_profiles: Vec<(&str, &kronk_core::config::ProfileConfig)> = config
-        .profiles
+    let model_servers: Vec<(&str, &kronk_core::config::ServerConfig)> = config
+        .servers
         .iter()
         .filter(|(_, p)| p.model.is_some())
         .map(|(n, p)| (n.as_str(), p))
         .collect();
 
-    if model_profiles.is_empty() {
-        println!("No model-based profiles.");
+    if model_servers.is_empty() {
+        println!("No model-based servers.");
         println!();
-        println!("Create one:  kronk model create <name> --model <id> --use-case coding");
+        println!("Create one:  kronk model create <name> --model <id> --profile coding");
         return Ok(());
     }
 
     println!("Model processes:");
     println!("{}", "-".repeat(60));
 
-    for (name, profile) in model_profiles {
-        let model_id = profile.model.as_deref().unwrap_or("?");
-        let quant = profile.quant.as_deref().unwrap_or("?");
-        let use_case = profile
-            .use_case
+    for (name, srv) in model_servers {
+        let model_id = srv.model.as_deref().unwrap_or("?");
+        let quant = srv.quant.as_deref().unwrap_or("?");
+        let profile_name = srv
+            .profile
             .as_ref()
-            .map(|uc| uc.to_string())
+            .map(|p| p.to_string())
             .unwrap_or_else(|| "none".to_string());
 
         let service_name = Config::service_name(name);
@@ -379,8 +383,8 @@ async fn cmd_ps(config: &Config) -> Result<()> {
             }
         };
 
-        // Use profile's resolved health check config
-        let health_check = config.resolve_health_check(profile);
+        // Use server's resolved health check config
+        let health_check = config.resolve_health_check(srv);
         let health = if let Some(url) = health_check.url {
             match http_client.get(url).send().await {
                 Ok(resp) if resp.status().is_success() => "HEALTHY",
@@ -393,8 +397,8 @@ async fn cmd_ps(config: &Config) -> Result<()> {
         println!();
         println!("  {}  {} / {}", name, model_id, quant);
         println!(
-            "    use-case: {}  service: {}  health: {}",
-            use_case, service_status, health
+            "    profile: {}  service: {}  health: {}",
+            profile_name, service_status, health
         );
     }
 
@@ -407,11 +411,12 @@ async fn cmd_create(
     name: &str,
     model_id: &str,
     quant: Option<String>,
-    use_case: Option<String>,
+    profile: Option<String>,
     backend: Option<String>,
 ) -> Result<()> {
     let models_dir = config.models_dir()?;
-    let registry = ModelRegistry::new(models_dir);
+    let configs_dir = config.configs_dir()?;
+    let registry = ModelRegistry::new(models_dir, configs_dir);
 
     let installed = registry.find(model_id)?.with_context(|| {
         format!(
@@ -448,8 +453,10 @@ async fn cmd_create(
         }
     };
 
-    let resolved_use_case: Option<kronk_core::use_cases::UseCase> =
-        use_case.map(|uc| uc.parse().unwrap());
+    let resolved_profile: Option<kronk_core::profiles::Profile> = profile.map(|p| {
+        p.parse::<kronk_core::profiles::Profile>()
+            .expect("Profile::from_str is infallible")
+    });
 
     // Verify the GGUF file exists on disk
     let gguf_path = registry
@@ -461,9 +468,9 @@ async fn cmd_create(
     let args = vec!["--host".to_string(), "0.0.0.0".to_string()];
 
     let mut config = config.clone();
-    if config.profiles.contains_key(name) {
+    if config.servers.contains_key(name) {
         anyhow::bail!(
-            "Profile '{}' already exists. Use `kronk update` or choose a different name.",
+            "Server '{}' already exists. Use `kronk server edit` or choose a different name.",
             name
         );
     }
@@ -492,17 +499,18 @@ async fn cmd_create(
         }
     };
 
-    config.profiles.insert(
+    config.servers.insert(
         name.to_string(),
-        kronk_core::config::ProfileConfig {
+        kronk_core::config::ServerConfig {
             backend: backend_key.clone(),
             args,
-            use_case: resolved_use_case,
+            profile: resolved_profile,
             sampling: None,
             model: Some(model_id.to_string()),
             quant: Some(quant_name.clone()),
             port: None,
             health_check: None,
+            enabled: true,
         },
     );
 
@@ -510,40 +518,41 @@ async fn cmd_create(
 
     println!("Oh yeah, it's all coming together.");
     println!();
-    println!("  Profile:   {}", name);
+    println!("  Server:    {}", name);
     println!("  Model:     {}", model_id);
     println!("  Quant:     {}", quant_name);
     println!("  GGUF:      {}", gguf_path.display());
-    if let Some(uc) = &config.profiles[name].use_case {
-        println!("  Use case:  {}", uc);
+    if let Some(p) = &config.servers[name].profile {
+        println!("  Profile:   {}", p);
     }
     println!();
-    println!("Run it:      kronk run --profile {}", name);
-    println!("Install it:  kronk service install --profile {}", name);
+    println!("Run it:      kronk run {}", name);
+    println!("Install it:  kronk service install {}", name);
 
     Ok(())
 }
 
 fn cmd_rm(config: &Config, model_id: &str) -> Result<()> {
     let models_dir = config.models_dir()?;
-    let registry = ModelRegistry::new(models_dir);
+    let configs_dir = config.configs_dir()?;
+    let registry = ModelRegistry::new(models_dir, configs_dir);
 
     let model = registry
         .find(model_id)?
         .with_context(|| format!("Model '{}' not found.", model_id))?;
 
-    let linked_profiles: Vec<&str> = config
-        .profiles
+    let linked_servers: Vec<&str> = config
+        .servers
         .iter()
         .filter(|(_, p)| p.model.as_deref() == Some(model_id))
         .map(|(name, _)| name.as_str())
         .collect();
 
-    if !linked_profiles.is_empty() {
+    if !linked_servers.is_empty() {
         anyhow::bail!(
-            "Cannot remove '{}': referenced by profiles: {}. Remove those first.",
+            "Cannot remove '{}': referenced by servers: {}. Remove those first.",
             model_id,
-            linked_profiles.join(", ")
+            linked_servers.join(", ")
         );
     }
 
@@ -571,13 +580,19 @@ fn cmd_rm(config: &Config, model_id: &str) -> Result<()> {
         }
     }
 
+    // Also remove the config card from configs.d/
+    if model.card_path.exists() {
+        std::fs::remove_file(&model.card_path)?;
+    }
+
     println!("No touchy! Model '{}' removed.", model_id);
     Ok(())
 }
 
 fn cmd_scan(config: &Config) -> Result<()> {
     let models_dir = config.models_dir()?;
-    let registry = ModelRegistry::new(models_dir.clone());
+    let configs_dir = config.configs_dir()?;
+    let registry = ModelRegistry::new(models_dir.clone(), configs_dir.clone());
     let models = registry.scan()?;
 
     let mut found_any = false;
@@ -607,12 +622,15 @@ fn cmd_scan(config: &Config) -> Result<()> {
                     },
                 );
             }
-            card.save(&model.dir.join("model.toml"))?;
+            card.save(&model.card_path)?;
             found_any = true;
         }
     }
 
-    // Scan for directories with GGUFs but no model.toml
+    // Scan for directories with GGUFs but no model card in configs.d/
+    let known_ids: std::collections::HashSet<String> =
+        models.iter().map(|m| m.id.clone()).collect();
+
     if models_dir.exists() {
         for company_entry in std::fs::read_dir(&models_dir)? {
             let company_entry = company_entry?;
@@ -627,7 +645,12 @@ fn cmd_scan(config: &Config) -> Result<()> {
                 if !model_path.is_dir() {
                     continue;
                 }
-                if model_path.join("model.toml").exists() {
+
+                let model_name = model_entry.file_name().to_string_lossy().to_string();
+                let model_id = format!("{}/{}", company, model_name);
+
+                // Skip if already tracked in configs.d/
+                if known_ids.contains(&model_id) {
                     continue;
                 }
 
@@ -638,8 +661,6 @@ fn cmd_scan(config: &Config) -> Result<()> {
                     .collect();
 
                 if !gguf_files.is_empty() {
-                    let model_name = model_entry.file_name().to_string_lossy().to_string();
-                    let model_id = format!("{}/{}", company, model_name);
                     println!(
                         "  {} -- new model with {} GGUF file(s):",
                         model_id,
@@ -666,14 +687,16 @@ fn cmd_scan(config: &Config) -> Result<()> {
                     let card = ModelCard {
                         model: ModelMeta {
                             name: model_name,
-                            source: model_id,
+                            source: model_id.clone(),
                             default_context_length: Some(8192),
                             default_gpu_layers: Some(999),
                         },
                         sampling: HashMap::new(),
                         quants,
                     };
-                    card.save(&model_path.join("model.toml"))?;
+                    std::fs::create_dir_all(&configs_dir)?;
+                    let card_filename = format!("{}.toml", model_id.replace('/', "--"));
+                    card.save(&configs_dir.join(&card_filename))?;
                     found_any = true;
                 }
             }
