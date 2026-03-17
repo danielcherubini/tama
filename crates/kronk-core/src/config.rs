@@ -48,9 +48,6 @@ pub struct HealthCheck {
     /// HTTP timeout in milliseconds per health check request (default: 3000).
     #[serde(default)]
     pub timeout_ms: Option<u64>,
-    /// Number of consecutive failures before declaring unhealthy (default: 1).
-    #[serde(default)]
-    pub retries: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,20 +181,18 @@ impl Config {
     /// Resolve the effective health check config for a profile.
     /// Merges: profile.health_check → backend.health_check_url → supervisor defaults.
     pub fn resolve_health_check(&self, profile: &ProfileConfig) -> HealthCheck {
-        let backend = self.backends.get(&profile.backend);
         let profile_hc = profile.health_check.as_ref();
 
         HealthCheck {
             url: profile_hc
                 .and_then(|h| h.url.clone())
-                .or_else(|| backend.and_then(|b| b.health_check_url.clone())),
+                .or_else(|| self.resolve_health_url(profile)),
             interval_ms: Some(
                 profile_hc
                     .and_then(|h| h.interval_ms)
                     .unwrap_or(self.supervisor.health_check_interval_ms),
             ),
             timeout_ms: Some(profile_hc.and_then(|h| h.timeout_ms).unwrap_or(3000)),
-            retries: Some(profile_hc.and_then(|h| h.retries).unwrap_or(1)),
         }
     }
 
@@ -612,7 +607,6 @@ retries = 3
         assert_eq!(hc.url, Some("http://localhost:9090/health".to_string()));
         assert_eq!(hc.interval_ms, Some(3000));
         assert_eq!(hc.timeout_ms, Some(5000));
-        assert_eq!(hc.retries, Some(3));
     }
 
     #[test]
@@ -633,7 +627,6 @@ args = []
         assert_eq!(hc.url, Some("http://localhost:8080/health".to_string()));
         assert_eq!(hc.interval_ms, Some(5000)); // from supervisor default
         assert_eq!(hc.timeout_ms, Some(3000));
-        assert_eq!(hc.retries, Some(1));
     }
 
     #[test]
@@ -644,12 +637,10 @@ args = []
             url: Some("http://localhost:9090/health".to_string()),
             interval_ms: Some(3000),
             timeout_ms: Some(5000),
-            retries: Some(3),
         });
         let hc = config.resolve_health_check(&profile);
         assert_eq!(hc.url, Some("http://localhost:9090/health".to_string()));
         assert_eq!(hc.interval_ms, Some(3000));
         assert_eq!(hc.timeout_ms, Some(5000));
-        assert_eq!(hc.retries, Some(3));
     }
 }

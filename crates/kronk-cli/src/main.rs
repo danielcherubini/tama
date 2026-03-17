@@ -628,12 +628,12 @@ async fn cmd_run(config: &Config, profile_name: &str) -> Result<()> {
     println!();
     println!("  Profile:  {}", profile_name);
     println!("  Backend:  {}", backend.path);
-    if let Some(url) = &backend.health_check_url {
+    let health_check = config.resolve_health_check(&profile);
+    if let Some(ref url) = health_check.url {
         println!("  Health:   {}", url);
     }
     println!();
 
-    let health_check = config.resolve_health_check(&profile);
     let supervisor = ProcessSupervisor::new(
         backend.path.clone(),
         args,
@@ -809,9 +809,9 @@ async fn cmd_status(config: &Config) -> Result<()> {
             }
         };
 
-        // Check health endpoint using profile's resolved URL
-        let health_url = config.resolve_health_url(profile);
-        let health = if let Some(url) = health_url {
+        // Check health endpoint using profile's resolved health check config
+        let health_check = config.resolve_health_check(profile);
+        let health = if let Some(url) = health_check.url {
             match http_client.get(url).send().await {
                 Ok(resp) if resp.status().is_success() => "HEALTHY".to_string(),
                 Ok(resp) => format!("HTTP {}", resp.status()),
