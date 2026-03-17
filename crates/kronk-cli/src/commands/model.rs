@@ -39,9 +39,9 @@ pub async fn run(config: &Config, command: ModelCommands) -> Result<()> {
             name,
             model,
             quant,
-            use_case,
+            profile,
             backend,
-        } => cmd_create(config, &name, &model, quant, use_case, backend).await,
+        } => cmd_create(config, &name, &model, quant, profile, backend).await,
         ModelCommands::Rm { model } => cmd_rm(config, &model),
         ModelCommands::Scan => cmd_scan(config),
         ModelCommands::Search {
@@ -259,9 +259,9 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
     println!("Oh yeah, it's all coming together.");
     println!("  Model card saved: {}", card_path.display());
     println!();
-    println!("  Create a profile:");
+    println!("  Create a server:");
     println!(
-        "    kronk model create my-profile --model {} --use-case coding",
+        "    kronk model create my-server --model {} --profile coding",
         model_id
     );
 
@@ -344,7 +344,7 @@ async fn cmd_ps(config: &Config) -> Result<()> {
     if model_servers.is_empty() {
         println!("No model-based servers.");
         println!();
-        println!("Create one:  kronk model create <name> --model <id> --use-case coding");
+        println!("Create one:  kronk model create <name> --model <id> --profile coding");
         return Ok(());
     }
 
@@ -393,7 +393,7 @@ async fn cmd_ps(config: &Config) -> Result<()> {
         println!();
         println!("  {}  {} / {}", name, model_id, quant);
         println!(
-            "    use-case: {}  service: {}  health: {}",
+            "    profile: {}  service: {}  health: {}",
             use_case, service_status, health
         );
     }
@@ -407,7 +407,7 @@ async fn cmd_create(
     name: &str,
     model_id: &str,
     quant: Option<String>,
-    use_case: Option<String>,
+    profile: Option<String>,
     backend: Option<String>,
 ) -> Result<()> {
     let models_dir = config.models_dir()?;
@@ -449,7 +449,7 @@ async fn cmd_create(
     };
 
     let resolved_use_case: Option<kronk_core::profiles::Profile> =
-        use_case.map(|uc| uc.parse().unwrap());
+        profile.map(|uc| uc.parse().unwrap());
 
     // Verify the GGUF file exists on disk
     let gguf_path = registry
@@ -516,11 +516,11 @@ async fn cmd_create(
     println!("  Quant:     {}", quant_name);
     println!("  GGUF:      {}", gguf_path.display());
     if let Some(uc) = &config.servers[name].profile {
-        println!("  Use case:  {}", uc);
+        println!("  Profile:   {}", uc);
     }
     println!();
-    println!("Run it:      kronk run --profile {}", name);
-    println!("Install it:  kronk service install --profile {}", name);
+    println!("Run it:      kronk run {}", name);
+    println!("Install it:  kronk service install {}", name);
 
     Ok(())
 }
