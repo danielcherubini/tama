@@ -74,6 +74,9 @@ Kronk auto-configures the profile with the selected quant and use-case preset.
 # Foreground (with live output)
 kronk run
 
+# Override context size (takes priority over model card)
+kronk run --ctx 8192
+
 # Or install as a system service (run as admin / sudo)
 kronk service install
 kronk service start
@@ -94,27 +97,27 @@ Kronk supervises the process, streams logs, checks health, and restarts on crash
 ## CLI
 
 ```
-kronk run [--profile name]           Run a profile in the foreground
-kronk status                         Show status of all profiles
-kronk service install [--profile]    Install as a Windows service
-kronk service start [--profile]      Start an installed service
-kronk service stop [--profile]       Stop a running service
-kronk service remove [--profile]     Remove an installed service
-kronk profile ls                     List all profiles with status
-kronk profile add <name> <cmd...>    Add a new profile from a raw command
-kronk profile edit <name>            Edit an existing profile
-kronk profile rm <name>              Remove a profile
-kronk model pull <repo>              Pull a model from HuggingFace
-kronk model ls                       List installed models
-kronk model ps                       Show running model processes
-kronk model create <name>            Create a profile from an installed model
-kronk model rm <model>               Remove an installed model
-kronk model scan                     Scan for untracked GGUF files
-kronk model search <query>           Search HuggingFace for GGUF models
-kronk config show                    Print the current configuration
-kronk config edit                    Open config file in editor
-kronk config path                    Show the config file path
-kronk logs [--profile name]          View backend logs (follow with -f)
+kronk run [--profile name] [--ctx N]           Run a profile in the foreground
+kronk status                                   Show status of all profiles
+kronk service install [--profile]              Install as a Windows service
+kronk service start [--profile]                Start an installed service
+kronk service stop [--profile]                 Stop a running service
+kronk service remove [--profile]               Remove an installed service
+kronk profile ls                               List all profiles with status
+kronk profile add <name> <cmd...>              Add a new profile from a raw command
+kronk profile edit <name>                      Edit an existing profile
+kronk profile rm <name>                        Remove a profile
+kronk model pull <repo>                        Pull a model from HuggingFace
+kronk model ls                                 List installed models
+kronk model ps                                 Show running model processes
+kronk model create <name>                      Create a profile from an installed model
+kronk model rm <model>                         Remove an installed model
+kronk model scan                               Scan for untracked GGUF files
+kronk model search <query>                     Search HuggingFace for GGUF models
+kronk config show                              Print the current configuration
+kronk config edit                              Open config file in editor
+kronk config path                              Show the config file path
+kronk logs [--profile name]                    View backend logs (follow with -f)
 ```
 
 ---
@@ -220,7 +223,6 @@ See [TODO.md](TODO.md) for the full development plan:
 
 - **Multi-port support** — Per-profile port config, auto `--port` injection
 - **Log viewer** — `kronk logs` with `--follow`, log rotation
-- **Health check customization** — Per-profile health check URL, interval, timeout
 - **Parallel downloads** — Multi-connection Range downloads for GGUF files
 - **Windows service polling** — Replace fixed sleeps with proper SCM status polling
 - **TUI Dashboard** — `kronk-tui` crate with ratatui
