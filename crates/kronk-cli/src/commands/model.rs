@@ -106,7 +106,7 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
 
     let configs_dir = config.configs_dir()?;
     std::fs::create_dir_all(&configs_dir)?;
-    let card_filename = format!("{}.toml", model_id.replace('/', "-"));
+    let card_filename = format!("{}.toml", model_id.replace('/', "--"));
     let card_path = configs_dir.join(&card_filename);
     let mut card = if card_path.exists() {
         ModelCard::load(&card_path)?
@@ -454,7 +454,7 @@ async fn cmd_create(
     };
 
     let resolved_profile: Option<kronk_core::profiles::Profile> =
-        profile.map(|p| p.parse().unwrap());
+        profile.map(|p| p.parse::<kronk_core::profiles::Profile>().unwrap());
 
     // Verify the GGUF file exists on disk
     let gguf_path = registry
@@ -693,7 +693,7 @@ fn cmd_scan(config: &Config) -> Result<()> {
                         quants,
                     };
                     std::fs::create_dir_all(&configs_dir)?;
-                    let card_filename = format!("{}.toml", model_id.replace('/', "-"));
+                    let card_filename = format!("{}.toml", model_id.replace('/', "--"));
                     card.save(&configs_dir.join(&card_filename))?;
                     found_any = true;
                 }

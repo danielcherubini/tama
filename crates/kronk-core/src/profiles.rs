@@ -211,7 +211,7 @@ pub fn load_profiles_d(
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().map_or(false, |e| e == "toml") {
+        if path.extension().is_some_and(|e| e == "toml") {
             let name = path.file_stem().unwrap().to_string_lossy().to_string();
             let contents = std::fs::read_to_string(&path)?;
             match toml::from_str::<ProfileDef>(&contents) {
@@ -324,10 +324,9 @@ mod tests {
 
     #[test]
     fn test_load_profiles_d_nonexistent() {
-        let profiles = super::load_profiles_d(std::path::Path::new(
-            "/tmp/nonexistent_kronk_profiles_d_test",
-        ))
-        .unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let nonexistent = tmp.path().join("does_not_exist");
+        let profiles = super::load_profiles_d(&nonexistent).unwrap();
         assert!(profiles.is_empty());
     }
 
