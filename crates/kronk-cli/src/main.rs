@@ -576,8 +576,6 @@ fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
 
 // ── CLI Commands ─────────────────────────────────────────────────────────
 
-/// Replace or inject `-c <value>` in the argument list.
-/// Removes any existing `-c` / `--ctx-size` and appends the new value.
 /// Build the full argument list for a profile, resolving model card args at runtime.
 /// Merges: backend.default_args + profile.args + model card (-m, -c, -ngl) + sampling
 fn build_full_args(

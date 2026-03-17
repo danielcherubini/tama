@@ -17,8 +17,8 @@ pub fn inject_context_size(args: &mut Vec<String>, ctx: u32) {
                     // Remove the flag
                     to_remove.push(i);
                     i += 1;
-                    // Remove the value if it exists
-                    if i < args.len() {
+                    // Remove the value if it exists and doesn't start with '-'
+                    if i < args.len() && !args[i].starts_with('-') {
                         to_remove.push(i);
                         i += 1;
                     }
