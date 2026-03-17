@@ -1,4 +1,4 @@
-use crate::use_cases::{SamplingParams, UseCase};
+use crate::profiles::{Profile, SamplingParams};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -57,7 +57,7 @@ pub struct ProfileConfig {
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
-    pub use_case: Option<UseCase>,
+    pub use_case: Option<Profile>,
     #[serde(default)]
     pub sampling: Option<SamplingParams>,
     /// Model card reference in "company/modelname" format.
@@ -238,7 +238,7 @@ impl Config {
     /// Resolve effective sampling for a profile, including custom use case lookup.
     pub fn effective_sampling(&self, profile: &ProfileConfig) -> Option<SamplingParams> {
         let base = match &profile.use_case {
-            Some(UseCase::Custom { name }) => {
+            Some(Profile::Custom { name }) => {
                 // Look up custom use case in config
                 self.custom_use_cases
                     .as_ref()
@@ -258,7 +258,7 @@ impl Config {
     }
 
     /// Resolve effective sampling with the 3-layer merge chain:
-    /// 1. UseCase built-in defaults
+    /// 1. Profile built-in defaults
     /// 2. Model card per-use-case sampling overrides
     /// 3. Profile-level sampling overrides
     pub fn effective_sampling_with_card(
@@ -268,7 +268,7 @@ impl Config {
     ) -> Option<SamplingParams> {
         // Layer 1: Use case base params
         let base = match &profile.use_case {
-            Some(UseCase::Custom { name }) => self
+            Some(Profile::Custom { name }) => self
                 .custom_use_cases
                 .as_ref()
                 .and_then(|m| m.get(name))
@@ -384,7 +384,7 @@ impl Default for Config {
                 .into_iter()
                 .map(String::from)
                 .collect(),
-                use_case: Some(UseCase::Coding),
+                use_case: Some(Profile::Coding),
                 sampling: None,
                 model: None,
                 quant: None,
@@ -416,7 +416,7 @@ impl Default for Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::use_cases::{SamplingParams, UseCase};
+    use crate::profiles::{Profile, SamplingParams};
 
     #[test]
     fn test_effective_sampling_use_case_only() {
@@ -424,7 +424,7 @@ mod tests {
         let profile = ProfileConfig {
             backend: "test".to_string(),
             args: vec![],
-            use_case: Some(UseCase::Coding),
+            use_case: Some(Profile::Coding),
             sampling: None,
             model: None,
             quant: None,
@@ -441,7 +441,7 @@ mod tests {
         let profile = ProfileConfig {
             backend: "test".to_string(),
             args: vec![],
-            use_case: Some(UseCase::Coding),
+            use_case: Some(Profile::Coding),
             sampling: Some(SamplingParams {
                 temperature: Some(0.5),
                 ..Default::default()
@@ -477,7 +477,7 @@ mod tests {
         let config = Config::default();
         let (profile, backend) = config.resolve_profile("default").unwrap();
         let args = config.build_args(profile, backend);
-        // Default profile has UseCase::Coding, so should include --temp
+        // Default profile has Profile::Coding, so should include --temp
         assert!(args.contains(&"--temp".to_string()));
     }
 
@@ -487,7 +487,7 @@ mod tests {
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let loaded: Config = toml::from_str(&toml_str).unwrap();
         let profile = loaded.profiles.get("default").unwrap();
-        assert_eq!(profile.use_case, Some(UseCase::Coding));
+        assert_eq!(profile.use_case, Some(Profile::Coding));
     }
 
     #[test]
@@ -495,7 +495,7 @@ mod tests {
         let profile = ProfileConfig {
             backend: "llama_cpp".to_string(),
             args: vec![],
-            use_case: Some(UseCase::Coding),
+            use_case: Some(Profile::Coding),
             sampling: None,
             model: Some("bartowski/OmniCoder".to_string()),
             quant: Some("Q4_K_M".to_string()),
@@ -549,7 +549,7 @@ args = ["--host", "0.0.0.0"]
         let profile = ProfileConfig {
             backend: "test".to_string(),
             args: vec![],
-            use_case: Some(UseCase::Coding),
+            use_case: Some(Profile::Coding),
             sampling: Some(SamplingParams {
                 top_p: Some(0.85),
                 ..Default::default()
@@ -560,14 +560,14 @@ args = ["--host", "0.0.0.0"]
             health_check: None,
         };
 
-        // 3-layer merge: UseCase::Coding (temp=0.3) -> model card (temp=0.2, top_k=40) -> profile (top_p=0.85)
+        // 3-layer merge: Profile::Coding (temp=0.3) -> model card (temp=0.2, top_k=40) -> profile (top_p=0.85)
         let params = config
             .effective_sampling_with_card(&profile, Some(&card))
             .unwrap();
         assert_eq!(params.temperature, Some(0.2)); // model card override won over use case default
         assert_eq!(params.top_k, Some(40)); // model card override
         assert_eq!(params.top_p, Some(0.85)); // profile override won over everything
-        assert_eq!(params.min_p, Some(0.05)); // from UseCase::Coding base (not overridden)
+        assert_eq!(params.min_p, Some(0.05)); // from Profile::Coding base (not overridden)
     }
 
     #[test]
@@ -576,7 +576,7 @@ args = ["--host", "0.0.0.0"]
         let profile = ProfileConfig {
             backend: "test".to_string(),
             args: vec![],
-            use_case: Some(UseCase::Coding),
+            use_case: Some(Profile::Coding),
             sampling: Some(SamplingParams {
                 temperature: Some(0.5),
                 ..Default::default()
@@ -588,7 +588,7 @@ args = ["--host", "0.0.0.0"]
         };
         let params = config.effective_sampling_with_card(&profile, None).unwrap();
         assert_eq!(params.temperature, Some(0.5)); // profile override
-        assert_eq!(params.top_k, Some(50)); // from UseCase::Coding
+        assert_eq!(params.top_k, Some(50)); // from Profile::Coding
     }
 
     #[test]

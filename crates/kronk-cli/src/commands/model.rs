@@ -448,7 +448,7 @@ async fn cmd_create(
         }
     };
 
-    let resolved_use_case: Option<kronk_core::use_cases::UseCase> =
+    let resolved_use_case: Option<kronk_core::profiles::Profile> =
         use_case.map(|uc| uc.parse().unwrap());
 
     // Verify the GGUF file exists on disk

@@ -3,7 +3,7 @@ use clap::Parser;
 use kronk_core::config::Config;
 use kronk_core::logging;
 use kronk_core::process::{ProcessEvent, ProcessSupervisor};
-use kronk_core::use_cases::SamplingParams;
+use kronk_core::profiles::SamplingParams;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::time::Duration;
@@ -1208,13 +1208,13 @@ fn cmd_config(config: &Config, command: ConfigCommands) -> Result<()> {
 }
 
 fn cmd_use_case(config: &Config, command: UseCaseCommands) -> Result<()> {
-    use kronk_core::use_cases::UseCase;
+    use kronk_core::profiles::Profile;
 
     match command {
         UseCaseCommands::List => {
             println!("Available use cases:");
             println!();
-            for (name, desc, uc) in UseCase::all() {
+            for (name, desc, uc) in Profile::all() {
                 let params = uc.params();
                 println!("  {}:", name);
                 println!("    {}", desc);
@@ -1272,10 +1272,10 @@ fn cmd_use_case(config: &Config, command: UseCaseCommands) -> Result<()> {
 
             // Try built-in first
             let uc = match use_case.as_str() {
-                "coding" => UseCase::Coding,
-                "chat" => UseCase::Chat,
-                "analysis" => UseCase::Analysis,
-                "creative" => UseCase::Creative,
+                "coding" => Profile::Coding,
+                "chat" => Profile::Chat,
+                "analysis" => Profile::Analysis,
+                "creative" => Profile::Creative,
                 name => {
                     // Check if it's a known custom use case
                     let is_custom = config
@@ -1290,7 +1290,7 @@ fn cmd_use_case(config: &Config, command: UseCaseCommands) -> Result<()> {
                             name, name
                         );
                     }
-                    UseCase::Custom {
+                    Profile::Custom {
                         name: name.to_string(),
                     }
                 }
