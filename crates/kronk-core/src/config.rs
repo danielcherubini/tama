@@ -9,10 +9,10 @@ use std::path::PathBuf;
 pub struct Config {
     pub general: General,
     pub backends: HashMap<String, BackendConfig>,
-    pub profiles: HashMap<String, ProfileConfig>,
+    pub servers: HashMap<String, ServerConfig>,
     pub supervisor: Supervisor,
     #[serde(default)]
-    pub custom_use_cases: Option<HashMap<String, SamplingParams>>,
+    pub custom_profiles: Option<HashMap<String, SamplingParams>>,
     /// The directory this config was loaded from. Used to resolve models_dir
     /// when running as a service (where %APPDATA% differs from the installing user).
     #[serde(skip)]
@@ -52,12 +52,12 @@ pub struct HealthCheck {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProfileConfig {
+pub struct ServerConfig {
     pub backend: String,
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
-    pub use_case: Option<Profile>,
+    pub profile: Option<Profile>,
     #[serde(default)]
     pub sampling: Option<SamplingParams>,
     /// Model card reference in "company/modelname" format.
@@ -66,12 +66,18 @@ pub struct ProfileConfig {
     /// Which quant to use from the model card (e.g. "Q4_K_M").
     #[serde(default)]
     pub quant: Option<String>,
-    /// Custom port for this profile (None = backend default)
+    /// Custom port for this server (None = backend default)
     #[serde(default)]
     pub port: Option<u16>,
-    /// Per-profile health check overrides.
+    /// Per-server health check overrides.
     #[serde(default)]
     pub health_check: Option<HealthCheck>,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,32 +150,32 @@ impl Config {
         Ok(config)
     }
 
-    pub fn resolve_profile(&self, name: &str) -> Result<(&ProfileConfig, &BackendConfig)> {
-        let profile = self
-            .profiles
+    pub fn resolve_server(&self, name: &str) -> Result<(&ServerConfig, &BackendConfig)> {
+        let server = self
+            .servers
             .get(name)
-            .with_context(|| format!("Profile '{}' not found in config", name))?;
+            .with_context(|| format!("Server '{}' not found in config", name))?;
 
-        let backend = self.backends.get(&profile.backend).with_context(|| {
+        let backend = self.backends.get(&server.backend).with_context(|| {
             format!(
-                "Backend '{}' referenced by profile '{}' not found in config",
-                profile.backend, name
+                "Backend '{}' referenced by server '{}' not found in config",
+                server.backend, name
             )
         })?;
 
-        Ok((profile, backend))
+        Ok((server, backend))
     }
 
-    /// Resolve the health check URL for a profile, taking into account:
+    /// Resolve the health check URL for a server, taking into account:
     /// 1. Backend's health_check_url if set
-    /// 2. Profile's custom port if set
+    /// 2. Server's custom port if set
     /// 3. Fallback to http://localhost:{port}/health
-    pub fn resolve_health_url(&self, profile: &ProfileConfig) -> Option<String> {
-        let backend = self.backends.get(&profile.backend)?;
+    pub fn resolve_health_url(&self, server: &ServerConfig) -> Option<String> {
+        let backend = self.backends.get(&server.backend)?;
         let backend_url = backend.health_check_url.as_ref()?;
 
-        // If profile has a custom port, replace it in the URL
-        if let Some(port) = profile.port {
+        // If server has a custom port, replace it in the URL
+        if let Some(port) = server.port {
             let mut url = url::Url::parse(backend_url).ok()?;
             url.set_port(Some(port)).ok()?;
             return Some(url.to_string());
@@ -179,31 +185,31 @@ impl Config {
         Some(backend_url.clone())
     }
 
-    /// Resolve the effective health check config for a profile.
-    /// Merges: profile.health_check → backend.health_check_url → supervisor defaults.
-    pub fn resolve_health_check(&self, profile: &ProfileConfig) -> HealthCheck {
-        let profile_hc = profile.health_check.as_ref();
+    /// Resolve the effective health check config for a server.
+    /// Merges: server.health_check → backend.health_check_url → supervisor defaults.
+    pub fn resolve_health_check(&self, server: &ServerConfig) -> HealthCheck {
+        let server_hc = server.health_check.as_ref();
 
         HealthCheck {
-            url: profile_hc
+            url: server_hc
                 .and_then(|h| h.url.clone())
-                .or_else(|| self.resolve_health_url(profile)),
+                .or_else(|| self.resolve_health_url(server)),
             interval_ms: Some(
-                profile_hc
+                server_hc
                     .and_then(|h| h.interval_ms)
                     .unwrap_or(self.supervisor.health_check_interval_ms),
             ),
-            timeout_ms: Some(profile_hc.and_then(|h| h.timeout_ms).unwrap_or(3000)),
+            timeout_ms: Some(server_hc.and_then(|h| h.timeout_ms).unwrap_or(3000)),
         }
     }
 
-    pub fn build_args(&self, profile: &ProfileConfig, backend: &BackendConfig) -> Vec<String> {
+    pub fn build_args(&self, server: &ServerConfig, backend: &BackendConfig) -> Vec<String> {
         let mut args = backend.default_args.clone();
-        args.extend(profile.args.clone());
+        args.extend(server.args.clone());
 
         // Append sampling params as CLI flags, filtering out any duplicates
-        // that may already be in profile.args
-        if let Some(sampling) = self.effective_sampling(profile) {
+        // that may already be in server.args
+        if let Some(sampling) = self.effective_sampling(server) {
             let sampling_args = sampling.to_args();
             let sampling_flags: std::collections::HashSet<&str> = sampling_args
                 .iter()
@@ -235,12 +241,12 @@ impl Config {
         args
     }
 
-    /// Resolve effective sampling for a profile, including custom use case lookup.
-    pub fn effective_sampling(&self, profile: &ProfileConfig) -> Option<SamplingParams> {
-        let base = match &profile.use_case {
+    /// Resolve effective sampling for a server, including custom profile lookup.
+    pub fn effective_sampling(&self, server: &ServerConfig) -> Option<SamplingParams> {
+        let base = match &server.profile {
             Some(Profile::Custom { name }) => {
-                // Look up custom use case in config
-                self.custom_use_cases
+                // Look up custom profile in config
+                self.custom_profiles
                     .as_ref()
                     .and_then(|m| m.get(name))
                     .cloned()
@@ -249,7 +255,7 @@ impl Config {
             None => None,
         };
 
-        match (base, &profile.sampling) {
+        match (base, &server.sampling) {
             (Some(base), Some(overrides)) => Some(base.merge(overrides)),
             (Some(base), None) => Some(base),
             (None, Some(sampling)) => Some(sampling.clone()),
@@ -259,17 +265,17 @@ impl Config {
 
     /// Resolve effective sampling with the 3-layer merge chain:
     /// 1. Profile built-in defaults
-    /// 2. Model card per-use-case sampling overrides
-    /// 3. Profile-level sampling overrides
+    /// 2. Model card per-profile sampling overrides
+    /// 3. Server-level sampling overrides
     pub fn effective_sampling_with_card(
         &self,
-        profile: &ProfileConfig,
+        server: &ServerConfig,
         card: Option<&crate::models::card::ModelCard>,
     ) -> Option<SamplingParams> {
-        // Layer 1: Use case base params
-        let base = match &profile.use_case {
+        // Layer 1: Profile base params
+        let base = match &server.profile {
             Some(Profile::Custom { name }) => self
-                .custom_use_cases
+                .custom_profiles
                 .as_ref()
                 .and_then(|m| m.get(name))
                 .cloned(),
@@ -277,9 +283,9 @@ impl Config {
             None => None,
         };
 
-        // Layer 2: Model card sampling overrides for this use case
-        let use_case_name = profile.use_case.as_ref().map(|uc| uc.to_string());
-        let with_model = match (base, card, use_case_name) {
+        // Layer 2: Model card sampling overrides for this profile
+        let profile_name = server.profile.as_ref().map(|uc| uc.to_string());
+        let with_model = match (base, card, profile_name) {
             (Some(base), Some(card), Some(ref uc_name)) => {
                 if let Some(model_sampling) = card.sampling_for(uc_name) {
                     Some(base.merge(model_sampling))
@@ -292,8 +298,8 @@ impl Config {
             (None, _, _) => None,
         };
 
-        // Layer 3: Profile-level overrides
-        match (with_model, &profile.sampling) {
+        // Layer 3: Server-level overrides
+        match (with_model, &server.sampling) {
             (Some(base), Some(overrides)) => Some(base.merge(overrides)),
             (Some(base), None) => Some(base),
             (None, Some(sampling)) => Some(sampling.clone()),
@@ -364,10 +370,10 @@ impl Default for Config {
             },
         );
 
-        let mut profiles = HashMap::new();
-        profiles.insert(
+        let mut servers = HashMap::new();
+        servers.insert(
             "default".to_string(),
-            ProfileConfig {
+            ServerConfig {
                 backend: "llama_cpp".to_string(),
                 args: vec![
                     "--host",
@@ -384,12 +390,13 @@ impl Default for Config {
                 .into_iter()
                 .map(String::from)
                 .collect(),
-                use_case: Some(Profile::Coding),
+                profile: Some(Profile::Coding),
                 sampling: None,
                 model: None,
                 quant: None,
                 port: None,
                 health_check: None,
+                enabled: true,
             },
         );
 
@@ -400,14 +407,14 @@ impl Default for Config {
                 logs_dir: None,
             },
             backends,
-            profiles,
+            servers,
             supervisor: Supervisor {
                 restart_policy: "always".to_string(),
                 max_restarts: 10,
                 restart_delay_ms: 3000,
                 health_check_interval_ms: 5000,
             },
-            custom_use_cases: None,
+            custom_profiles: None,
             loaded_from: None,
         }
     }
@@ -421,27 +428,28 @@ mod tests {
     #[test]
     fn test_effective_sampling_use_case_only() {
         let config = Config::default();
-        let profile = ProfileConfig {
+        let server = ServerConfig {
             backend: "test".to_string(),
             args: vec![],
-            use_case: Some(Profile::Coding),
+            profile: Some(Profile::Coding),
             sampling: None,
             model: None,
             quant: None,
             port: None,
             health_check: None,
+            enabled: true,
         };
-        let params = config.effective_sampling(&profile).unwrap();
+        let params = config.effective_sampling(&server).unwrap();
         assert_eq!(params.temperature, Some(0.3));
     }
 
     #[test]
     fn test_effective_sampling_override() {
         let config = Config::default();
-        let profile = ProfileConfig {
+        let server = ServerConfig {
             backend: "test".to_string(),
             args: vec![],
-            use_case: Some(Profile::Coding),
+            profile: Some(Profile::Coding),
             sampling: Some(SamplingParams {
                 temperature: Some(0.5),
                 ..Default::default()
@@ -450,8 +458,9 @@ mod tests {
             quant: None,
             port: None,
             health_check: None,
+            enabled: true,
         };
-        let params = config.effective_sampling(&profile).unwrap();
+        let params = config.effective_sampling(&server).unwrap();
         assert_eq!(params.temperature, Some(0.5)); // override won
         assert_eq!(params.top_k, Some(50)); // coding preset kept
     }
@@ -459,25 +468,26 @@ mod tests {
     #[test]
     fn test_effective_sampling_none() {
         let config = Config::default();
-        let profile = ProfileConfig {
+        let server = ServerConfig {
             backend: "test".to_string(),
             args: vec![],
-            use_case: None,
+            profile: None,
             sampling: None,
             model: None,
             quant: None,
             port: None,
             health_check: None,
+            enabled: true,
         };
-        assert!(config.effective_sampling(&profile).is_none());
+        assert!(config.effective_sampling(&server).is_none());
     }
 
     #[test]
     fn test_build_args_includes_sampling() {
         let config = Config::default();
-        let (profile, backend) = config.resolve_profile("default").unwrap();
-        let args = config.build_args(profile, backend);
-        // Default profile has Profile::Coding, so should include --temp
+        let (server, backend) = config.resolve_server("default").unwrap();
+        let args = config.build_args(server, backend);
+        // Default server has Profile::Coding, so should include --temp
         assert!(args.contains(&"--temp".to_string()));
     }
 
@@ -486,37 +496,38 @@ mod tests {
         let config = Config::default();
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let loaded: Config = toml::from_str(&toml_str).unwrap();
-        let profile = loaded.profiles.get("default").unwrap();
-        assert_eq!(profile.use_case, Some(Profile::Coding));
+        let server = loaded.servers.get("default").unwrap();
+        assert_eq!(server.profile, Some(Profile::Coding));
     }
 
     #[test]
-    fn test_profile_with_model_fields_roundtrip() {
-        let profile = ProfileConfig {
+    fn test_server_with_model_fields_roundtrip() {
+        let server = ServerConfig {
             backend: "llama_cpp".to_string(),
             args: vec![],
-            use_case: Some(Profile::Coding),
+            profile: Some(Profile::Coding),
             sampling: None,
             model: Some("bartowski/OmniCoder".to_string()),
             quant: Some("Q4_K_M".to_string()),
             port: None,
             health_check: None,
+            enabled: true,
         };
-        let toml_str = toml::to_string_pretty(&profile).unwrap();
-        let loaded: ProfileConfig = toml::from_str(&toml_str).unwrap();
+        let toml_str = toml::to_string_pretty(&server).unwrap();
+        let loaded: ServerConfig = toml::from_str(&toml_str).unwrap();
         assert_eq!(loaded.model, Some("bartowski/OmniCoder".to_string()));
         assert_eq!(loaded.quant, Some("Q4_K_M".to_string()));
     }
 
     #[test]
-    fn test_profile_without_model_fields_still_works() {
+    fn test_server_without_model_fields_still_works() {
         let toml_str = r#"
 backend = "llama_cpp"
 args = ["--host", "0.0.0.0"]
 "#;
-        let profile: ProfileConfig = toml::from_str(toml_str).unwrap();
-        assert_eq!(profile.model, None);
-        assert_eq!(profile.quant, None);
+        let server: ServerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(server.model, None);
+        assert_eq!(server.quant, None);
     }
 
     #[test]
@@ -546,10 +557,10 @@ args = ["--host", "0.0.0.0"]
             quants: HashMap::new(),
         };
 
-        let profile = ProfileConfig {
+        let server = ServerConfig {
             backend: "test".to_string(),
             args: vec![],
-            use_case: Some(Profile::Coding),
+            profile: Some(Profile::Coding),
             sampling: Some(SamplingParams {
                 top_p: Some(0.85),
                 ..Default::default()
@@ -558,25 +569,26 @@ args = ["--host", "0.0.0.0"]
             quant: None,
             port: None,
             health_check: None,
+            enabled: true,
         };
 
-        // 3-layer merge: Profile::Coding (temp=0.3) -> model card (temp=0.2, top_k=40) -> profile (top_p=0.85)
+        // 3-layer merge: Profile::Coding (temp=0.3) -> model card (temp=0.2, top_k=40) -> server (top_p=0.85)
         let params = config
-            .effective_sampling_with_card(&profile, Some(&card))
+            .effective_sampling_with_card(&server, Some(&card))
             .unwrap();
         assert_eq!(params.temperature, Some(0.2)); // model card override won over use case default
         assert_eq!(params.top_k, Some(40)); // model card override
-        assert_eq!(params.top_p, Some(0.85)); // profile override won over everything
+        assert_eq!(params.top_p, Some(0.85)); // server override won over everything
         assert_eq!(params.min_p, Some(0.05)); // from Profile::Coding base (not overridden)
     }
 
     #[test]
     fn test_effective_sampling_backward_compat() {
         let config = Config::default();
-        let profile = ProfileConfig {
+        let server = ServerConfig {
             backend: "test".to_string(),
             args: vec![],
-            use_case: Some(Profile::Coding),
+            profile: Some(Profile::Coding),
             sampling: Some(SamplingParams {
                 temperature: Some(0.5),
                 ..Default::default()
@@ -585,9 +597,10 @@ args = ["--host", "0.0.0.0"]
             quant: None,
             port: None,
             health_check: None,
+            enabled: true,
         };
-        let params = config.effective_sampling_with_card(&profile, None).unwrap();
-        assert_eq!(params.temperature, Some(0.5)); // profile override
+        let params = config.effective_sampling_with_card(&server, None).unwrap();
+        assert_eq!(params.temperature, Some(0.5)); // server override
         assert_eq!(params.top_k, Some(50)); // from Profile::Coding
     }
 
@@ -602,43 +615,43 @@ url = "http://localhost:9090/health"
 interval_ms = 3000
 timeout_ms = 5000
 "#;
-        let profile: ProfileConfig = toml::from_str(toml_str).unwrap();
-        let hc = profile.health_check.unwrap();
+        let server: ServerConfig = toml::from_str(toml_str).unwrap();
+        let hc = server.health_check.unwrap();
         assert_eq!(hc.url, Some("http://localhost:9090/health".to_string()));
         assert_eq!(hc.interval_ms, Some(3000));
         assert_eq!(hc.timeout_ms, Some(5000));
     }
 
     #[test]
-    fn test_profile_without_health_check_still_works() {
+    fn test_server_without_health_check_still_works() {
         let toml_str = r#"
 backend = "llama_cpp"
 args = []
 "#;
-        let profile: ProfileConfig = toml::from_str(toml_str).unwrap();
-        assert!(profile.health_check.is_none());
+        let server: ServerConfig = toml::from_str(toml_str).unwrap();
+        assert!(server.health_check.is_none());
     }
 
     #[test]
     fn test_resolve_health_check_defaults() {
         let config = Config::default();
-        let profile = config.profiles.get("default").unwrap();
-        let hc = config.resolve_health_check(profile);
+        let server = config.servers.get("default").unwrap();
+        let hc = config.resolve_health_check(server);
         assert_eq!(hc.url, Some("http://localhost:8080/health".to_string()));
         assert_eq!(hc.interval_ms, Some(5000)); // from supervisor default
         assert_eq!(hc.timeout_ms, Some(3000));
     }
 
     #[test]
-    fn test_resolve_health_check_profile_override() {
+    fn test_resolve_health_check_server_override() {
         let config = Config::default();
-        let mut profile = config.profiles.get("default").unwrap().clone();
-        profile.health_check = Some(HealthCheck {
+        let mut server = config.servers.get("default").unwrap().clone();
+        server.health_check = Some(HealthCheck {
             url: Some("http://localhost:9090/health".to_string()),
             interval_ms: Some(3000),
             timeout_ms: Some(5000),
         });
-        let hc = config.resolve_health_check(&profile);
+        let hc = config.resolve_health_check(&server);
         assert_eq!(hc.url, Some("http://localhost:9090/health".to_string()));
         assert_eq!(hc.interval_ms, Some(3000));
         assert_eq!(hc.timeout_ms, Some(5000));
