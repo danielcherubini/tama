@@ -4,4 +4,4 @@ pub mod logging;
 pub mod models;
 pub mod platform;
 pub mod process;
-pub mod use_cases;
+pub mod profiles;
