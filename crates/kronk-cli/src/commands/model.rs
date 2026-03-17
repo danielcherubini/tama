@@ -453,8 +453,10 @@ async fn cmd_create(
         }
     };
 
-    let resolved_profile: Option<kronk_core::profiles::Profile> =
-        profile.map(|p| p.parse::<kronk_core::profiles::Profile>().unwrap());
+    let resolved_profile: Option<kronk_core::profiles::Profile> = profile.map(|p| {
+        p.parse::<kronk_core::profiles::Profile>()
+            .expect("Profile::from_str is infallible")
+    });
 
     // Verify the GGUF file exists on disk
     let gguf_path = registry

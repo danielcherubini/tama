@@ -656,7 +656,7 @@ fn migrate_model_cards_to_configs_d(config: &Config) -> Result<()> {
             let old_card = model_entry.path().join("model.toml");
             if old_card.exists() {
                 let model_name = model_entry.file_name().to_string_lossy().to_string();
-                let new_filename = format!("{}-{}.toml", company, model_name);
+                let new_filename = format!("{}--{}.toml", company, model_name);
                 std::fs::create_dir_all(&configs_dir)?;
                 std::fs::copy(&old_card, configs_dir.join(&new_filename))?;
                 std::fs::remove_file(&old_card)?;

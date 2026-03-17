@@ -352,7 +352,7 @@ fn service_dispatch() -> Result<()> {
         .position(|a| a == "--server")
         .and_then(|i| raw_args.get(i + 1))
         .cloned()
-        .unwrap_or_else(|| "default".to_string());
+        .expect("Missing --server argument. This binary should be launched by the Windows Service Control Manager.");
 
     let config_dir = raw_args
         .iter()
