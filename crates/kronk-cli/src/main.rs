@@ -503,25 +503,25 @@ fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
     rt.block_on(async {
-        let (prof, backend) = match config.resolve_profile(&profile) {
+        let (srv, backend) = match config.resolve_server(&profile) {
             Ok(r) => r,
             Err(e) => {
-                tracing::error!("Failed to resolve profile '{}': {}", profile, e);
+                tracing::error!("Failed to resolve server '{}': {}", profile, e);
                 return;
             }
         };
 
-        let args = build_full_args(&config, prof, backend, ctx).unwrap_or_else(|e| {
+        let args = build_full_args(&config, srv, backend, ctx).unwrap_or_else(|e| {
             tracing::warn!("Failed to build model args: {}", e);
             let mut args = backend.default_args.clone();
-            args.extend(prof.args.clone());
+            args.extend(srv.args.clone());
             args
         });
         let log_dir = config
             .logs_dir()
             .ok()
             .expect("Failed to get logs directory");
-        let health_check = config.resolve_health_check(&prof);
+        let health_check = config.resolve_health_check(&srv);
         let supervisor = ProcessSupervisor::new(
             backend.path.clone(),
             args,
@@ -588,19 +588,19 @@ fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
 
 // ── CLI Commands ─────────────────────────────────────────────────────────
 
-/// Build the full argument list for a profile, resolving model card args at runtime.
-/// Merges: backend.default_args + profile.args + model card (-m, -c, -ngl) + sampling
+/// Build the full argument list for a server, resolving model card args at runtime.
+/// Merges: backend.default_args + server.args + model card (-m, -c, -ngl) + sampling
 fn build_full_args(
     config: &Config,
-    profile: &kronk_core::config::ProfileConfig,
+    server: &kronk_core::config::ServerConfig,
     backend: &kronk_core::config::BackendConfig,
     ctx_override: Option<u32>,
 ) -> Result<Vec<String>> {
     let mut args = backend.default_args.clone();
-    args.extend(profile.args.clone());
+    args.extend(server.args.clone());
 
     // Inject model card args: -m, -c, -ngl
-    if let (Some(ref model_id), Some(ref quant_name)) = (&profile.model, &profile.quant) {
+    if let (Some(ref model_id), Some(ref quant_name)) = (&server.model, &server.quant) {
         let models_dir = config.models_dir()?;
         let registry = kronk_core::models::ModelRegistry::new(models_dir);
         if let Some(installed) = registry.find(model_id)? {
@@ -627,7 +627,7 @@ fn build_full_args(
 
             // 3-layer sampling merge
             if let Some(sampling) =
-                config.effective_sampling_with_card(profile, Some(&installed.card))
+                config.effective_sampling_with_card(server, Some(&installed.card))
             {
                 args.extend(sampling.to_args());
             }
@@ -641,27 +641,27 @@ fn build_full_args(
         args::inject_context_size(&mut args, ctx);
     }
 
-    // No model card — just use profile sampling
-    if let Some(sampling) = config.effective_sampling_with_card(profile, None) {
+    // No model card — just use server sampling
+    if let Some(sampling) = config.effective_sampling_with_card(server, None) {
         args.extend(sampling.to_args());
     }
 
     Ok(args)
 }
 
-async fn cmd_run(config: &Config, profile_name: &str, ctx_override: Option<u32>) -> Result<()> {
-    let (profile, backend) = config.resolve_profile(profile_name)?;
+async fn cmd_run(config: &Config, server_name: &str, ctx_override: Option<u32>) -> Result<()> {
+    let (server, backend) = config.resolve_server(server_name)?;
 
-    let args = build_full_args(config, profile, backend, ctx_override)?;
+    let args = build_full_args(config, server, backend, ctx_override)?;
 
     println!("Oh yeah, it's all coming together.");
     println!();
-    println!("  Profile:  {}", profile_name);
+    println!("  Server:   {}", server_name);
     println!("  Backend:  {}", backend.path);
     if let Some(ctx) = ctx_override {
         println!("  Context:  {}", ctx);
     }
-    let health_check = config.resolve_health_check(profile);
+    let health_check = config.resolve_health_check(server);
     if let Some(ref url) = health_check.url {
         println!("  Health:   {}", url);
     }
@@ -713,14 +713,14 @@ async fn cmd_run(config: &Config, profile_name: &str, ctx_override: Option<u32>)
 fn cmd_service(config: &Config, command: ServiceCommands) -> Result<()> {
     match command {
         ServiceCommands::Install { profile } => {
-            let (prof, backend) = config.resolve_profile(&profile)?;
+            let (srv, backend) = config.resolve_server(&profile)?;
             let service_name = Config::service_name(&profile);
 
             #[cfg(target_os = "windows")]
             {
                 let display_name = format!("Kronk: {}", profile);
                 let config_dir = Config::base_dir()?;
-                let port = prof.port.unwrap_or(8080);
+                let port = srv.port.unwrap_or(8080);
                 kronk_core::platform::windows::install_service(
                     &service_name,
                     &display_name,
@@ -732,8 +732,8 @@ fn cmd_service(config: &Config, command: ServiceCommands) -> Result<()> {
 
             #[cfg(target_os = "linux")]
             {
-                let args = build_full_args(config, prof, backend, None)?;
-                let port = prof.port.unwrap_or(8080);
+                let args = build_full_args(config, srv, backend, None)?;
+                let port = srv.port.unwrap_or(8080);
                 kronk_core::platform::linux::install_service(
                     &service_name,
                     &backend.path,
@@ -744,7 +744,7 @@ fn cmd_service(config: &Config, command: ServiceCommands) -> Result<()> {
 
             #[cfg(not(any(target_os = "windows", target_os = "linux")))]
             {
-                let _ = (prof, backend);
+                let _ = (srv, backend);
                 anyhow::bail!("Service management not supported on this platform");
             }
 
@@ -818,8 +818,8 @@ async fn cmd_status(config: &Config) -> Result<()> {
         .build()
         .unwrap_or_default();
 
-    for (name, profile) in &config.profiles {
-        let _backend = config.backends.get(&profile.backend);
+    for (name, srv) in &config.servers {
+        let _backend = config.backends.get(&srv.backend);
         let backend_path = _backend.map(|b| b.path.as_str()).unwrap_or("???");
 
         // Check service status
@@ -842,8 +842,8 @@ async fn cmd_status(config: &Config) -> Result<()> {
             }
         };
 
-        // Check health endpoint using profile's resolved health check config
-        let health_check = config.resolve_health_check(profile);
+        // Check health endpoint using server's resolved health check config
+        let health_check = config.resolve_health_check(srv);
         let health = if let Some(url) = health_check.url {
             match http_client.get(url).send().await {
                 Ok(resp) if resp.status().is_success() => "HEALTHY".to_string(),
@@ -855,8 +855,8 @@ async fn cmd_status(config: &Config) -> Result<()> {
         };
 
         println!();
-        println!("  Profile:  {}", name);
-        println!("  Backend:  {} ({})", profile.backend, backend_path);
+        println!("  Server:   {}", name);
+        println!("  Backend:  {} ({})", srv.backend, backend_path);
         println!("  Service:  {}", service_status);
         println!("  Health:   {}", health);
     }
@@ -878,7 +878,7 @@ async fn cmd_profile(config: &Config, command: ProfileCommands) -> Result<()> {
             cmd_profile_add(config, &name, command, false).await
         }
         ProfileCommands::Edit { name, command } => {
-            if !config.profiles.contains_key(&name) {
+            if !config.servers.contains_key(&name) {
                 anyhow::bail!(
                     "Profile '{}' not found. Use `kronk profile add` to create it.",
                     name
@@ -891,7 +891,7 @@ async fn cmd_profile(config: &Config, command: ProfileCommands) -> Result<()> {
 }
 
 async fn cmd_profile_ls(config: &Config) -> Result<()> {
-    if config.profiles.is_empty() {
+    if config.servers.is_empty() {
         println!("No profiles configured.");
         println!();
         println!("Add one:  kronk profile add <name> <command...>");
@@ -907,10 +907,10 @@ async fn cmd_profile_ls(config: &Config) -> Result<()> {
     println!("Profiles:");
     println!("{}", "-".repeat(60));
 
-    for (name, profile) in &config.profiles {
-        let _backend = config.backends.get(&profile.backend);
-        let use_case = profile
-            .use_case
+    for (name, srv) in &config.servers {
+        let _backend = config.backends.get(&srv.backend);
+        let use_case = srv
+            .profile
             .as_ref()
             .map(|uc| uc.to_string())
             .unwrap_or_else(|| "none".to_string());
@@ -934,8 +934,8 @@ async fn cmd_profile_ls(config: &Config) -> Result<()> {
             }
         };
 
-        // Use profile's resolved health check config
-        let health_check = config.resolve_health_check(profile);
+        // Use server's resolved health check config
+        let health_check = config.resolve_health_check(srv);
         let health = if let Some(url) = health_check.url {
             match http_client.get(url).send().await {
                 Ok(resp) if resp.status().is_success() => "HEALTHY",
@@ -946,19 +946,19 @@ async fn cmd_profile_ls(config: &Config) -> Result<()> {
         };
 
         println!();
-        println!("  {}  (backend: {})", name, profile.backend);
+        println!("  {}  (backend: {})", name, srv.backend);
         println!(
             "    use-case: {}  service: {}  health: {}",
             use_case, service_status, health
         );
 
-        if let Some(ref model) = profile.model {
-            let quant = profile.quant.as_deref().unwrap_or("?");
+        if let Some(ref model) = srv.model {
+            let quant = srv.quant.as_deref().unwrap_or("?");
             println!("    model: {} / {}", model, quant);
         }
 
-        if !profile.args.is_empty() {
-            let args_str = profile.args.join(" ");
+        if !srv.args.is_empty() {
+            let args_str = srv.args.join(" ");
             if args_str.len() > 80 {
                 let chars: Vec<char> = args_str.chars().take(77).collect();
                 println!("    args: {}...", chars.iter().collect::<String>());
@@ -973,7 +973,7 @@ async fn cmd_profile_ls(config: &Config) -> Result<()> {
 }
 
 fn cmd_profile_rm(config: &Config, name: &str, force: bool) -> Result<()> {
-    if !config.profiles.contains_key(name) {
+    if !config.servers.contains_key(name) {
         anyhow::bail!("Profile '{}' not found.", name);
     }
 
@@ -1018,7 +1018,7 @@ fn cmd_profile_rm(config: &Config, name: &str, force: bool) -> Result<()> {
     }
 
     let mut config = config.clone();
-    config.profiles.remove(name);
+    config.servers.remove(name);
     config.save()?;
 
     println!("Profile '{}' removed.", name);
@@ -1031,7 +1031,7 @@ async fn cmd_profile_add(
     command: Vec<String>,
     overwrite: bool,
 ) -> Result<()> {
-    use kronk_core::config::{BackendConfig, ProfileConfig};
+    use kronk_core::config::{BackendConfig, ServerConfig};
 
     if command.is_empty() {
         anyhow::bail!("No command provided");
@@ -1080,24 +1080,25 @@ async fn cmd_profile_add(
     };
 
     // Check for duplicate profile
-    if config.profiles.contains_key(name) && !overwrite {
+    if config.servers.contains_key(name) && !overwrite {
         anyhow::bail!(
             "Profile '{}' already exists. Use `kronk update` to modify it.",
             name
         );
     }
 
-    config.profiles.insert(
+    config.servers.insert(
         name.to_string(),
-        ProfileConfig {
+        ServerConfig {
             backend: backend_key.clone(),
             args,
-            use_case: None,
+            profile: None,
             sampling: None,
             model: None,
             quant: None,
             port: None,
             health_check: None,
+            enabled: true,
         },
     );
 
@@ -1105,7 +1106,7 @@ async fn cmd_profile_add(
 
     println!("Oh yeah, it's all coming together.");
     println!();
-    println!("  Profile:  {}", name);
+    println!("  Server:   {}", name);
     println!("  Backend:  {} ({})", backend_key, exe_str);
     println!();
     println!("Run it:     kronk run --profile {}", name);
@@ -1162,21 +1163,21 @@ async fn cmd_profile_edit(config: &mut Config, name: &str, command: Vec<String>)
         }
     };
 
-    // Load config, update only the command string for the existing profile
+    // Load config, update only the command string for the existing server
     let mut config = config.clone();
-    let profile = config
-        .profiles
+    let srv = config
+        .servers
         .get_mut(name)
-        .ok_or_else(|| anyhow::anyhow!("Profile '{}' not found", name))?;
+        .ok_or_else(|| anyhow::anyhow!("Server '{}' not found", name))?;
 
-    profile.backend = backend_key.clone();
-    profile.args = args;
+    srv.backend = backend_key.clone();
+    srv.args = args;
 
     config.save()?;
 
     println!("Oh yeah, it's all coming together.");
     println!();
-    println!("  Profile:  {}", name);
+    println!("  Server:   {}", name);
     println!("  Backend:  {} ({})", backend_key, exe_str);
     println!();
     println!("Run it:     kronk run --profile {}", name);
@@ -1230,7 +1231,7 @@ fn cmd_use_case(config: &Config, command: UseCaseCommands) -> Result<()> {
             }
 
             // Show custom use cases from config
-            if let Some(custom) = &config.custom_use_cases {
+            if let Some(custom) = &config.custom_profiles {
                 if !custom.is_empty() {
                     println!("Custom use cases:");
                     println!();
@@ -1250,11 +1251,11 @@ fn cmd_use_case(config: &Config, command: UseCaseCommands) -> Result<()> {
                 }
             }
 
-            // Show which profiles use which use case
-            println!("Profile assignments:");
-            for (name, profile) in &config.profiles {
-                let uc_str = profile
-                    .use_case
+            // Show which servers use which profile
+            println!("Server assignments:");
+            for (name, srv) in &config.servers {
+                let uc_str = srv
+                    .profile
                     .as_ref()
                     .map(|uc| uc.to_string())
                     .unwrap_or_else(|| "none".to_string());
@@ -1265,10 +1266,10 @@ fn cmd_use_case(config: &Config, command: UseCaseCommands) -> Result<()> {
         }
         UseCaseCommands::Set { profile, use_case } => {
             let mut config = config.clone();
-            let prof = config
-                .profiles
+            let srv = config
+                .servers
                 .get_mut(&profile)
-                .with_context(|| format!("Profile '{}' not found", profile))?;
+                .with_context(|| format!("Server '{}' not found", profile))?;
 
             // Try built-in first
             let uc = match use_case.as_str() {
@@ -1279,7 +1280,7 @@ fn cmd_use_case(config: &Config, command: UseCaseCommands) -> Result<()> {
                 name => {
                     // Check if it's a known custom use case
                     let is_custom = config
-                        .custom_use_cases
+                        .custom_profiles
                         .as_ref()
                         .map(|m| m.contains_key(name))
                         .unwrap_or(false);
@@ -1296,25 +1297,25 @@ fn cmd_use_case(config: &Config, command: UseCaseCommands) -> Result<()> {
                 }
             };
 
-            prof.use_case = Some(uc);
+            srv.profile = Some(uc);
             config.save()?;
 
             println!("Oh yeah, it's all coming together.");
-            println!("  Profile '{}' now uses '{}' preset.", profile, use_case);
+            println!("  Server '{}' now uses '{}' preset.", profile, use_case);
 
             Ok(())
         }
         UseCaseCommands::Clear { profile } => {
             let mut config = config.clone();
-            let prof = config
-                .profiles
+            let srv = config
+                .servers
                 .get_mut(&profile)
-                .with_context(|| format!("Profile '{}' not found", profile))?;
+                .with_context(|| format!("Server '{}' not found", profile))?;
 
-            prof.use_case = None;
+            srv.profile = None;
             config.save()?;
 
-            println!("Use case cleared for profile '{}'.", profile);
+            println!("Use case cleared for server '{}'.", profile);
             Ok(())
         }
         UseCaseCommands::Add {
@@ -1342,7 +1343,7 @@ fn cmd_use_case(config: &Config, command: UseCaseCommands) -> Result<()> {
                 anyhow::bail!("At least one sampling parameter is required. Example:\n  kronk use-case add my-preset --temp 0.4 --top-k 30");
             }
 
-            let custom = config.custom_use_cases.get_or_insert_with(HashMap::new);
+            let custom = config.custom_profiles.get_or_insert_with(HashMap::new);
             custom.insert(name.clone(), params);
             config.save()?;
 
@@ -1353,7 +1354,7 @@ fn cmd_use_case(config: &Config, command: UseCaseCommands) -> Result<()> {
         UseCaseCommands::Remove { name } => {
             let mut config = config.clone();
             let removed = config
-                .custom_use_cases
+                .custom_profiles
                 .as_mut()
                 .and_then(|m| m.remove(&name))
                 .is_some();

@@ -306,14 +306,14 @@ fn cmd_ls(config: &Config) -> Result<()> {
             }
         }
 
-        let linked_profiles: Vec<&str> = config
-            .profiles
+        let linked_servers: Vec<&str> = config
+            .servers
             .iter()
             .filter(|(_, p)| p.model.as_deref() == Some(&model.id))
             .map(|(name, _)| name.as_str())
             .collect();
-        if !linked_profiles.is_empty() {
-            println!("    profiles: {}", linked_profiles.join(", "));
+        if !linked_servers.is_empty() {
+            println!("    servers: {}", linked_servers.join(", "));
         }
 
         let untracked = registry
@@ -334,15 +334,15 @@ async fn cmd_ps(config: &Config) -> Result<()> {
         .build()
         .unwrap_or_default();
 
-    let model_profiles: Vec<(&str, &kronk_core::config::ProfileConfig)> = config
-        .profiles
+    let model_servers: Vec<(&str, &kronk_core::config::ServerConfig)> = config
+        .servers
         .iter()
         .filter(|(_, p)| p.model.is_some())
         .map(|(n, p)| (n.as_str(), p))
         .collect();
 
-    if model_profiles.is_empty() {
-        println!("No model-based profiles.");
+    if model_servers.is_empty() {
+        println!("No model-based servers.");
         println!();
         println!("Create one:  kronk model create <name> --model <id> --use-case coding");
         return Ok(());
@@ -351,11 +351,11 @@ async fn cmd_ps(config: &Config) -> Result<()> {
     println!("Model processes:");
     println!("{}", "-".repeat(60));
 
-    for (name, profile) in model_profiles {
-        let model_id = profile.model.as_deref().unwrap_or("?");
-        let quant = profile.quant.as_deref().unwrap_or("?");
-        let use_case = profile
-            .use_case
+    for (name, srv) in model_servers {
+        let model_id = srv.model.as_deref().unwrap_or("?");
+        let quant = srv.quant.as_deref().unwrap_or("?");
+        let use_case = srv
+            .profile
             .as_ref()
             .map(|uc| uc.to_string())
             .unwrap_or_else(|| "none".to_string());
@@ -379,8 +379,8 @@ async fn cmd_ps(config: &Config) -> Result<()> {
             }
         };
 
-        // Use profile's resolved health check config
-        let health_check = config.resolve_health_check(profile);
+        // Use server's resolved health check config
+        let health_check = config.resolve_health_check(srv);
         let health = if let Some(url) = health_check.url {
             match http_client.get(url).send().await {
                 Ok(resp) if resp.status().is_success() => "HEALTHY",
@@ -461,9 +461,9 @@ async fn cmd_create(
     let args = vec!["--host".to_string(), "0.0.0.0".to_string()];
 
     let mut config = config.clone();
-    if config.profiles.contains_key(name) {
+    if config.servers.contains_key(name) {
         anyhow::bail!(
-            "Profile '{}' already exists. Use `kronk update` or choose a different name.",
+            "Server '{}' already exists. Use `kronk update` or choose a different name.",
             name
         );
     }
@@ -492,17 +492,18 @@ async fn cmd_create(
         }
     };
 
-    config.profiles.insert(
+    config.servers.insert(
         name.to_string(),
-        kronk_core::config::ProfileConfig {
+        kronk_core::config::ServerConfig {
             backend: backend_key.clone(),
             args,
-            use_case: resolved_use_case,
+            profile: resolved_use_case,
             sampling: None,
             model: Some(model_id.to_string()),
             quant: Some(quant_name.clone()),
             port: None,
             health_check: None,
+            enabled: true,
         },
     );
 
@@ -510,11 +511,11 @@ async fn cmd_create(
 
     println!("Oh yeah, it's all coming together.");
     println!();
-    println!("  Profile:   {}", name);
+    println!("  Server:    {}", name);
     println!("  Model:     {}", model_id);
     println!("  Quant:     {}", quant_name);
     println!("  GGUF:      {}", gguf_path.display());
-    if let Some(uc) = &config.profiles[name].use_case {
+    if let Some(uc) = &config.servers[name].profile {
         println!("  Use case:  {}", uc);
     }
     println!();
@@ -532,18 +533,18 @@ fn cmd_rm(config: &Config, model_id: &str) -> Result<()> {
         .find(model_id)?
         .with_context(|| format!("Model '{}' not found.", model_id))?;
 
-    let linked_profiles: Vec<&str> = config
-        .profiles
+    let linked_servers: Vec<&str> = config
+        .servers
         .iter()
         .filter(|(_, p)| p.model.as_deref() == Some(model_id))
         .map(|(name, _)| name.as_str())
         .collect();
 
-    if !linked_profiles.is_empty() {
+    if !linked_servers.is_empty() {
         anyhow::bail!(
-            "Cannot remove '{}': referenced by profiles: {}. Remove those first.",
+            "Cannot remove '{}': referenced by servers: {}. Remove those first.",
             model_id,
-            linked_profiles.join(", ")
+            linked_servers.join(", ")
         );
     }
 
