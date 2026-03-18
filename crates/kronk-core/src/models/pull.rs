@@ -385,8 +385,9 @@ pub fn infer_quant_from_filename(filename: &str) -> Option<String> {
     let quant_patterns = [
         "IQ2_XXS", "IQ3_XXS", "IQ1_S", "IQ1_M", "IQ2_XS", "IQ2_S", "IQ2_M", "IQ3_XS", "IQ3_S",
         "IQ3_M", "IQ4_XS", "IQ4_NL", "Q2_K_S", "Q3_K_S", "Q3_K_M", "Q3_K_L", "Q4_K_S", "Q4_K_M",
-        "Q4_K_L", "Q5_K_S", "Q5_K_M", "Q5_K_L", "Q2_K", "Q3_K", "Q4_K", "Q5_K", "Q6_K", "Q4_0",
-        "Q4_1", "Q5_0", "Q5_1", "Q6_0", "Q8_0", "Q8_1", "F16", "F32", "BF16",
+        "Q4_K_L", "Q5_K_S", "Q5_K_M", "Q5_K_L", "Q2_K_XL", "Q3_K_XL", "Q4_K_XL", "Q5_K_XL",
+        "Q6_K_XL", "Q8_K_XL", "Q2_K", "Q3_K", "Q4_K", "Q5_K", "Q6_K", "Q4_0", "Q4_1", "Q5_0",
+        "Q5_1", "Q6_0", "Q8_0", "Q8_1", "F16", "F32", "BF16",
     ];
 
     let stem_upper = stem.to_uppercase();
@@ -457,6 +458,22 @@ mod tests {
         assert_eq!(
             infer_quant_from_filename("model-IQ4_NL.gguf"),
             Some("IQ4_NL".to_string())
+        );
+    }
+
+    #[test]
+    fn test_infer_quant_xl() {
+        assert_eq!(
+            infer_quant_from_filename("model-Q4_K_XL.gguf"),
+            Some("Q4_K_XL".to_string())
+        );
+    }
+
+    #[test]
+    fn test_infer_quant_xl_lowercase() {
+        assert_eq!(
+            infer_quant_from_filename("model-q5_k_xl.gguf"),
+            Some("Q5_K_XL".to_string())
         );
     }
 }
