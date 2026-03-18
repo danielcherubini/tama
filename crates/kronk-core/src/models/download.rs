@@ -85,13 +85,7 @@ pub async fn download_chunked(url: &str, dest: &Path, connections: usize) -> Res
     }
 }
 
-async fn download_single(
-    client: &Client,
-    url: &str,
-    dest: &Path,
-    pb: &ProgressBar,
-) -> Result<()> {
-
+async fn download_single(client: &Client, url: &str, dest: &Path, pb: &ProgressBar) -> Result<()> {
     let mut attempt = 0u32;
     let mut downloaded: u64 = 0;
 
@@ -156,9 +150,9 @@ async fn download_single(
         let stream_failed = false;
 
         while let Ok(Some(chunk)) = stream.try_next().await {
-            file.write_all(&chunk).await.with_context(|| {
-                format!("Failed to write to {}", dest.display())
-            })?;
+            file.write_all(&chunk)
+                .await
+                .with_context(|| format!("Failed to write to {}", dest.display()))?;
             downloaded += chunk.len() as u64;
             pb.set_position(downloaded);
         }
@@ -185,7 +179,6 @@ async fn download_parallel(
     num_connections: usize,
     pb: &ProgressBar,
 ) -> Result<()> {
-
     let chunk_size = total_size / num_connections as u64;
 
     // Build temp file paths
@@ -198,7 +191,7 @@ async fn download_parallel(
     // Download each chunk to a temp file
     let mut handles = Vec::new();
 
-    for i in 0..num_connections {
+    for (i, tmp_path) in tmp_paths.iter().enumerate().take(num_connections) {
         let start = i as u64 * chunk_size;
         let end = if i == num_connections - 1 {
             total_size - 1
@@ -208,7 +201,7 @@ async fn download_parallel(
 
         let client = client.clone();
         let url = url.to_string();
-        let tmp_path = tmp_paths[i].clone();
+        let tmp_path = tmp_path.clone();
         let pb = pb.clone();
 
         let handle = tokio::spawn(async move {
@@ -267,7 +260,6 @@ async fn download_chunk_with_retry(
     chunk_index: usize,
     pb: &ProgressBar,
 ) -> Result<()> {
-
     let expected_size = end - start + 1;
     let mut attempt = 0u32;
 
