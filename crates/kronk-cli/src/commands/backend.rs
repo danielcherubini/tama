@@ -393,13 +393,47 @@ async fn cmd_remove(_config: &Config, name: &str) -> Result<()> {
             if let Some(parent) = backend.path.parent() {
                 // Safety: only remove if it's under our managed backends dir
                 // Canonicalize both paths to prevent symlink/.. bypass attacks
-                let canonical_parent = std::fs::canonicalize(parent)
-                    .map_err(|_e| anyhow::anyhow!("Failed to canonicalize path {:?}", parent))?;
-                let managed = std::fs::canonicalize(backends_dir()?)
-                    .map_err(|_e| anyhow::anyhow!("Failed to canonicalize backends directory"))?;
+                let canonical_parent = match std::fs::canonicalize(parent) {
+                    Ok(path) => path,
+                    Err(_) => {
+                        // Parent directory may not exist (e.g., user manually deleted it)
+                        // In this case, skip removal since there's nothing to remove
+                        println!("Skipping file removal: parent directory does not exist.");
+                        return Ok(());
+                    }
+                };
+                let managed = match std::fs::canonicalize(backends_dir()?) {
+                    Ok(path) => path,
+                    Err(_) => {
+                        // Backends directory may not exist (e.g., user manually deleted it)
+                        println!("Skipping file removal: backends directory does not exist.");
+                        return Ok(());
+                    }
+                };
                 if canonical_parent.starts_with(&managed) {
-                    std::fs::remove_dir_all(parent)?;
-                    println!("Files removed.");
+                    // On Windows, remove_dir_all fails if a process is using the directory
+                    #[cfg(windows)]
+                    {
+                        use std::io::ErrorKind;
+                        match std::fs::remove_dir_all(parent) {
+                            Ok(_) => println!("Files removed."),
+                            Err(e) if e.kind() == ErrorKind::PermissionDenied => {
+                                println!("Skipping file removal: backend server may still be running.");
+                            }
+                            Err(e) => {
+                                println!("Skipping file removal: {}", e);
+                            }
+                        }
+                    }
+                    // On Unix, remove_dir_all will fail if directory is in use
+                    #[cfg(not(windows))]
+                    {
+                        if let Err(e) = std::fs::remove_dir_all(parent) {
+                            println!("Skipping file removal: {}", e);
+                        } else {
+                            println!("Files removed.");
+                        }
+                    }
                 } else {
                     println!("Skipping file removal: path is outside managed directory.");
                 }
