@@ -1,9 +1,40 @@
 use anyhow::{Context, Result};
 use std::ffi::OsString;
+use std::time::{Duration, Instant};
 use windows_service::service::{
     ServiceAccess, ServiceErrorControl, ServiceInfo, ServiceStartType, ServiceState, ServiceType,
 };
 use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
+
+/// Poll a service until it reaches the desired state, or timeout.
+/// Uses exponential backoff starting at 100ms, capped at 2s per poll.
+fn wait_for_state(
+    service: &windows_service::service::Service,
+    desired: ServiceState,
+    timeout: Duration,
+) -> Result<()> {
+    let start = Instant::now();
+    let mut interval = Duration::from_millis(100);
+    let max_interval = Duration::from_secs(2);
+
+    loop {
+        let status = service
+            .query_status()
+            .context("Failed to query service status while waiting")?;
+        if status.current_state == desired {
+            return Ok(());
+        }
+        if start.elapsed() > timeout {
+            anyhow::bail!(
+                "Timed out waiting for service to reach {:?} (current: {:?})",
+                desired,
+                status.current_state,
+            );
+        }
+        std::thread::sleep(interval);
+        interval = (interval * 2).min(max_interval);
+    }
+}
 
 /// Install kronk as a native Windows Service for the given server.
 /// The service will run `kronk.exe service-run --server <name> --config-dir <path>` when started.
@@ -27,12 +58,44 @@ pub fn install_service(
         let status = existing.query_status()?;
         if status.current_state != ServiceState::Stopped {
             existing.stop()?;
-            // Wait briefly for stop
-            std::thread::sleep(std::time::Duration::from_secs(2));
+            wait_for_state(&existing, ServiceState::Stopped, Duration::from_secs(30))
+                .with_context(|| format!("Service '{}' did not stop in time", service_name))?;
         }
         existing.delete()?;
-        // Brief wait for SCM to process deletion
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        // Drop the handle so SCM can finalize deletion
+        drop(existing);
+
+        // Wait for SCM to fully process the deletion by retrying open
+        let delete_start = Instant::now();
+        let delete_timeout = Duration::from_secs(10);
+        loop {
+            match manager.open_service(service_name, ServiceAccess::QUERY_STATUS) {
+                Ok(_) => {
+                    // Service still exists — SCM hasn't finalized yet
+                    if delete_start.elapsed() > delete_timeout {
+                        anyhow::bail!(
+                            "Timed out waiting for SCM to delete service '{}'",
+                            service_name
+                        );
+                    }
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+                Err(e) => {
+                    // Check if this is the service-not-found error
+                    use windows::Win32::Foundation::ERROR_SERVICE_DOES_NOT_EXIST;
+                    if let Some(windows_error) =
+                        e.downcast_ref::<windows::Win32::Foundation::BOOLERROR>()
+                    {
+                        if *windows_error == ERROR_SERVICE_DOES_NOT_EXIST {
+                            break; // Service gone — proceed
+                        }
+                    }
+                    // For other errors, log and retry to distinguish transient from real failures
+                    tracing::warn!("Error checking service deletion status: {}", e);
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+            }
+        }
     }
 
     let service_info = ServiceInfo {
@@ -72,16 +135,57 @@ pub fn install_service(
     Ok(())
 }
 
-/// Grant Interactive Users (IU) permission to start, stop, and query the service.
-/// This allows non-admin users to control the service after initial install.
+/// Resolve the SID of the current user via `whoami /user`.
+/// Returns the SID string, e.g. "S-1-5-21-1234567890-1234567890-1234567890-1001".
+fn get_current_user_sid() -> Result<String> {
+    let output = std::process::Command::new("whoami")
+        .args(["/user", "/fo", "csv", "/nh"])
+        .output()
+        .context("Failed to run 'whoami /user' — is this a Windows system?")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("whoami failed (exit {}): {}", output.status, stderr.trim());
+    }
+
+    // Output format: "DOMAIN\User","S-1-5-21-..."
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout.trim();
+
+    // Parse CSV: split on "," and take the second field, strip quotes
+    let sid = line
+        .split(',')
+        .nth(1)
+        .map(|s| s.trim().trim_matches('"').to_string())
+        .filter(|s| s.starts_with("S-1-"))
+        .with_context(|| format!("Failed to parse SID from whoami output: {}", line))?;
+
+    Ok(sid)
+}
+
+/// Grant the installing user permission to start, stop, and query the service.
+/// Resolves the current user's SID and applies it via `sc sdset`, so only the
+/// installer (plus SYSTEM and Administrators) can control the service.
 fn grant_user_control(service_name: &str) -> Result<()> {
+    let user_sid = get_current_user_sid().with_context(|| {
+        format!(
+            "Failed to resolve current user SID for service '{}'",
+            service_name
+        )
+    })?;
+
+    tracing::info!("Granting service control to user SID: {}", user_sid);
+
     // SDDL breakdown:
-    //   SY = Local System: full control
-    //   BA = Builtin Administrators: full control
-    //   IU = Interactive Users: start (RP), stop (WP), query status (LC), query config (LO), read (CR)
+    //   SY  = Local System: full control
+    //   BA  = Builtin Administrators: full control
+    //   <SID> = Installing user: start (RP), stop (WP), query status (LC), query config (LO), read (CR)
     let sddl = format!(
-        "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;RPWPLCLOCR;;;IU)"
+        "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;RPWPLCLOCR;;;{})",
+        user_sid
     );
+
+    tracing::debug!("Setting service SDDL for '{}': {}", service_name, sddl);
 
     let output = std::process::Command::new("sc")
         .args(["sdset", service_name, &sddl])
@@ -160,6 +264,9 @@ pub fn start_service(service_name: &str) -> Result<()> {
         .start::<String>(&[])
         .context("Failed to start service")?;
 
+    wait_for_state(&service, ServiceState::Running, Duration::from_secs(30))
+        .with_context(|| format!("Service '{}' did not start in time", service_name))?;
+
     Ok(())
 }
 
@@ -182,6 +289,9 @@ pub fn stop_service(service_name: &str) -> Result<()> {
 
     service.stop().context("Failed to stop service")?;
 
+    wait_for_state(&service, ServiceState::Stopped, Duration::from_secs(30))
+        .with_context(|| format!("Service '{}' did not stop in time", service_name))?;
+
     Ok(())
 }
 
@@ -191,12 +301,37 @@ pub fn remove_service(service_name: &str) -> Result<()> {
         .context("Failed to open Service Control Manager — run as Administrator")?;
 
     let service = manager
-        .open_service(service_name, ServiceAccess::STOP | ServiceAccess::DELETE)
+        .open_service(
+            service_name,
+            ServiceAccess::STOP | ServiceAccess::DELETE | ServiceAccess::QUERY_STATUS,
+        )
         .with_context(|| format!("Service '{}' not found", service_name))?;
 
-    // Try to stop first
-    let _ = service.stop();
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    // Stop if running, then wait for it to actually stop
+    let status = service.query_status()?;
+    if status.current_state != ServiceState::Stopped {
+        match service.stop() {
+            Ok(()) => {
+                // Successfully initiated stop, now wait for it to complete
+                wait_for_state(&service, ServiceState::Stopped, Duration::from_secs(30))
+                    .with_context(|| format!("Service '{}' did not stop in time", service_name))?;
+            }
+            Err(e) => {
+                // If already in StopPending, wait for it to complete
+                let stop_status = service.query_status()?;
+                if stop_status.current_state == ServiceState::StopPending {
+                    wait_for_state(&service, ServiceState::Stopped, Duration::from_secs(30))
+                        .with_context(|| {
+                            format!("Service '{}' did not stop in time", service_name)
+                        })?;
+                } else {
+                    // Propagate the stop error
+                    return Err(e)
+                        .with_context(|| format!("Failed to stop service '{}'", service_name));
+                }
+            }
+        }
+    }
 
     service.delete().context("Failed to delete service")?;
 
