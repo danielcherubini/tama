@@ -99,20 +99,14 @@ async fn cmd_install(
 ) -> Result<()> {
     let backend_type = parse_backend_type(backend_type_str)?;
 
-    // Detect system capabilities
-    println!("Detecting system capabilities...");
-    let caps = gpu::detect_system_capabilities();
+    // Check build prerequisites
+    println!("Checking system...");
+    let caps = gpu::detect_build_prerequisites();
     println!("  OS:       {} {}", caps.os, caps.arch);
     println!("  Git:      {}", if caps.git_available { "found" } else { "not found" });
     println!("  CMake:    {}", if caps.cmake_available { "found" } else { "not found" });
     println!("  Compiler: {}", if caps.compiler_available { "found" } else { "not found" });
-
-    if let Some(ref gpu) = caps.gpu {
-        println!("  GPU:      {} ({:?})", gpu.device_name, gpu.gpu_type);
-        println!("  VRAM:     {} MiB", gpu.vram_mb);
-    } else {
-        println!("  GPU:      none detected (CPU-only)");
-    }
+    println!();
 
     // Fetch latest version if not specified
     let version = match version {
@@ -144,20 +138,31 @@ async fn cmd_install(
         }
     };
 
-    // Confirm GPU settings
-    let gpu_type = if let Some(ref gpu_cap) = caps.gpu {
-        println!("\nDetected GPU: {} ({:?})", gpu_cap.device_name, gpu_cap.gpu_type);
-        let confirm = inquire::Confirm::new("Use this GPU for acceleration?")
-            .with_default(true)
-            .prompt()?;
+    // Ask user about GPU acceleration
+    let gpu_type = {
+        let gpu_choice = inquire::Select::new(
+            "What GPU acceleration do you want?",
+            vec![
+                "NVIDIA (CUDA)",
+                "AMD (ROCm)",
+                "Intel / AMD (Vulkan)",
+                "Apple Silicon (Metal)",
+                "CPU only",
+            ],
+        )
+        .prompt()?;
 
-        if confirm {
-            Some(gpu_cap.gpu_type.clone())
-        } else {
-            None
+        match gpu_choice {
+            "NVIDIA (CUDA)" => Some(gpu::GpuType::Cuda {
+                version: "auto".to_string(),
+            }),
+            "AMD (ROCm)" => Some(gpu::GpuType::RocM {
+                version: "auto".to_string(),
+            }),
+            "Intel / AMD (Vulkan)" => Some(gpu::GpuType::Vulkan),
+            "Apple Silicon (Metal)" => Some(gpu::GpuType::Metal),
+            _ => None,
         }
-    } else {
-        None
     };
 
     // Determine install directory

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+use crate::config::Config;
 use crate::gpu::GpuType;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,9 +41,6 @@ impl FromStr for BackendType {
 }
 
 /// Metadata for an installed backend.
-///
-/// `installed_at` is a unix epoch timestamp (i64) because `SystemTime`
-/// cannot be serialized by the `toml` crate.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackendInfo {
     pub name: String,
@@ -66,9 +64,7 @@ struct RegistryData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "source", content = "content")]
 pub enum BackendSource {
-    /// Pre-built binary with version tag
     Prebuilt { version: String },
-    /// Source code with git URL and version
     SourceCode { version: String, git_url: String },
 }
 
@@ -79,6 +75,45 @@ pub struct BackendRegistry {
 
 impl BackendRegistry {
     pub fn load(path: &Path) -> Result<Self> {
+        Self::load_with_base_dir(path, None)
+    }
+
+    pub fn load_with_base_dir(path: &Path, base_dir: Option<&Path>) -> Result<Self> {
+        // Validate path is within safe directory (prevent symlink attacks)
+        // Canonicalize parent directory first (works even if file doesn't exist yet)
+        let canonical_path = if path.exists() {
+            std::fs::canonicalize(path)
+                .with_context(|| format!("Failed to canonicalize registry path {:?}", path))?
+        } else {
+            // For new files, canonicalize the parent directory
+            if let Some(parent) = path.parent() {
+                std::fs::canonicalize(parent)
+                    .with_context(|| {
+                        format!("Failed to canonicalize parent directory {:?}", parent)
+                    })?
+                    .join(path)
+            } else {
+                return Err(anyhow!("Registry path {:?} has no parent directory", path));
+            }
+        };
+
+        // Get the canonical base directory if provided
+        let base_dir = if let Some(base) = base_dir {
+            std::fs::canonicalize(base).with_context(|| "Failed to canonicalize base directory")?
+        } else {
+            std::fs::canonicalize(Config::base_dir()?)
+                .with_context(|| "Failed to canonicalize base directory")?
+        };
+
+        // Ensure the path is within the base directory
+        if !canonical_path.starts_with(&base_dir) {
+            return Err(anyhow!(
+                "Registry path {:?} is outside base directory {:?}",
+                path,
+                base_dir
+            ));
+        }
+
         let data = if path.exists() {
             let content = std::fs::read_to_string(path)
                 .with_context(|| format!("Failed to read registry at {:?}", path))?;
@@ -94,6 +129,66 @@ impl BackendRegistry {
     }
 
     pub fn save(&self) -> Result<()> {
+        // Validate path is within safe directory
+        // Canonicalize parent directory first (works even if file doesn't exist yet)
+        let canonical_path = if self.path.exists() {
+            std::fs::canonicalize(&self.path)
+                .with_context(|| format!("Failed to canonicalize registry path {:?}", self.path))?
+        } else {
+            // For new files, canonicalize the parent directory
+            if let Some(parent) = self.path.parent() {
+                std::fs::canonicalize(parent)
+                    .with_context(|| {
+                        format!("Failed to canonicalize parent directory {:?}", parent)
+                    })?
+                    .join(&self.path)
+            } else {
+                return Err(anyhow!(
+                    "Registry path {:?} has no parent directory",
+                    self.path
+                ));
+            }
+        };
+
+        let base_dir = std::fs::canonicalize(Config::base_dir()?)
+            .with_context(|| "Failed to canonicalize base directory")?;
+
+        if !canonical_path.starts_with(&base_dir) {
+            return Err(anyhow!(
+                "Registry path {:?} is outside base directory {:?}",
+                self.path,
+                base_dir
+            ));
+        }
+
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let content = toml::to_string_pretty(&self.data)?;
+        std::fs::write(&self.path, content)?;
+        Ok(())
+    }
+
+    /// Load registry without path validation (for tests)
+    #[cfg(test)]
+    pub fn load_unchecked(path: &Path) -> Result<Self> {
+        let data = if path.exists() {
+            let content = std::fs::read_to_string(path)
+                .with_context(|| format!("Failed to read registry at {:?}", path))?;
+            toml::from_str(&content).with_context(|| "Failed to parse registry")?
+        } else {
+            RegistryData::default()
+        };
+
+        Ok(Self {
+            path: path.to_path_buf(),
+            data,
+        })
+    }
+
+    /// Save without path validation (for tests)
+    #[cfg(test)]
+    pub fn save_unchecked(&self) -> Result<()> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -144,13 +239,13 @@ impl BackendRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
     #[test]
     fn test_registry_add_and_list() {
-        let tmp = TempDir::new().unwrap();
-        let registry_path = tmp.path().join("registry.toml");
-        let mut registry = BackendRegistry::load(&registry_path).unwrap();
+        let base_dir = Config::base_dir().unwrap();
+        let registry_path = base_dir.join("test_registry.toml");
+        std::fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
+        let mut registry = BackendRegistry::load_unchecked(&registry_path).unwrap();
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -171,6 +266,8 @@ mod tests {
             })
             .unwrap();
 
+        registry.save_unchecked().unwrap();
+
         let backends = registry.list();
         assert_eq!(backends.len(), 1);
         assert_eq!(backends[0].name, "llama_cpp");
@@ -178,9 +275,11 @@ mod tests {
 
     #[test]
     fn test_registry_remove() {
-        let tmp = TempDir::new().unwrap();
-        let registry_path = tmp.path().join("registry.toml");
-        let mut registry = BackendRegistry::load(&registry_path).unwrap();
+        let base_dir = Config::base_dir().unwrap();
+        let registry_path = base_dir.join("test_registry_remove.toml");
+        // Create parent directory so canonicalize can work
+        std::fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
+        let mut registry = BackendRegistry::load_unchecked(&registry_path).unwrap();
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -199,14 +298,18 @@ mod tests {
             })
             .unwrap();
 
+        registry.save_unchecked().unwrap();
+
         registry.remove("llama_cpp").unwrap();
         assert_eq!(registry.list().len(), 0);
     }
 
     #[test]
     fn test_registry_roundtrip_serialization() {
-        let tmp = TempDir::new().unwrap();
-        let registry_path = tmp.path().join("registry.toml");
+        let base_dir = Config::base_dir().unwrap();
+        let registry_path = base_dir.join("test_registry_roundtrip.toml");
+        // Create parent directory so canonicalize can work
+        std::fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -215,7 +318,7 @@ mod tests {
 
         // Write
         {
-            let mut registry = BackendRegistry::load(&registry_path).unwrap();
+            let mut registry = BackendRegistry::load_unchecked(&registry_path).unwrap();
             registry
                 .add(BackendInfo {
                     name: "test".to_string(),
@@ -229,10 +332,11 @@ mod tests {
                     source: None,
                 })
                 .unwrap();
+            registry.save_unchecked().unwrap();
         }
 
         // Read back
-        let registry = BackendRegistry::load(&registry_path).unwrap();
+        let registry = BackendRegistry::load_unchecked(&registry_path).unwrap();
         let backend = registry.get("test").unwrap();
         assert_eq!(backend.version, "b1234");
     }

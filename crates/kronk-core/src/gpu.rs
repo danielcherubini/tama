@@ -11,13 +11,6 @@ pub enum GpuType {
 }
 
 #[derive(Debug, Clone)]
-pub struct GpuCapability {
-    pub gpu_type: GpuType,
-    pub device_name: String,
-    pub vram_mb: u64,
-}
-
-#[derive(Debug, Clone)]
 pub struct BuildPrerequisites {
     pub os: String,
     pub arch: String,
