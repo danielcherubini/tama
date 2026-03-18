@@ -368,7 +368,7 @@ async fn install_from_source(
     prepare_target_dir(&options.target_dir, options.allow_overwrite)?;
 
     // Check prerequisites
-    let caps = crate::gpu::detect_system_capabilities();
+    let caps = crate::gpu::detect_build_prerequisites();
     if !caps.git_available {
         return Err(anyhow!(
             "Git is required to build from source.\n\
