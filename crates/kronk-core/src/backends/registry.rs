@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -114,11 +114,14 @@ impl BackendRegistry {
         new_version: String,
         new_path: PathBuf,
     ) -> Result<()> {
-        if let Some(backend) = self.data.backends.get_mut(name) {
-            backend.version = new_version;
-            backend.path = new_path;
-            self.save()?;
-        }
+        let backend = self
+            .data
+            .backends
+            .get_mut(name)
+            .ok_or_else(|| anyhow!("Backend '{}' not found", name))?;
+        backend.version = new_version;
+        backend.path = new_path;
+        self.save()?;
         Ok(())
     }
 }
