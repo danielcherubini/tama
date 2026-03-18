@@ -4,6 +4,7 @@ use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Client;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use flate2::read::GzDecoder;
 
@@ -56,7 +57,7 @@ pub fn get_prebuilt_url(
                 // Windows
                 ("windows", "x86_64", Some(GpuType::Cuda { ref version })) => {
                     let cuda_ver = match version.as_str() {
-                        "11" | "11.0" | "11.1" | "11.2" | "11.3" | "11.4" | "11.5" | "11.6" | "11.7" | "11.8" | "11.9" => "11.1",
+                        "11" | "11.0" | "11.1" | "11.2" | "11.3" | "11.4" | "11.5" | "11.6" | "11.7" | "11.8" => "11.1",
                         "12" | "12.0" | "12.1" | "12.2" | "12.3" | "12.4" | "12.5" | "12.6" => "12.4",
                         "13" | "13.0" | "13.1" | "13.2" | "13.3" | "13.4" | "13.5" | "13.6" | "13.7" => "13.1",
                         _ => {
@@ -104,6 +105,7 @@ pub fn get_prebuilt_url(
 pub async fn download_file(url: &str, dest: &Path) -> Result<()> {
     let client = Client::builder()
         .user_agent("kronk-backend-manager")
+        .timeout(Duration::from_secs(300))
         .build()?;
 
     let response = client
@@ -206,8 +208,12 @@ pub fn extract_archive(archive: &Path, dest: &Path) -> Result<PathBuf> {
             // Sanitize path to prevent CVE-2025-29787 (path traversal via symlinks)
             let entry_name = entry.name();
             let sanitized = entry_name.replace('\\', "/");
-            if sanitized.contains("..") || sanitized.starts_with('/') || sanitized.is_empty() {
+            if sanitized.contains("..") || sanitized.starts_with('/') || sanitized.is_empty() || sanitized.starts_with("//") || sanitized.starts_with("\\\\") {
                 return Err(anyhow!("Malicious path in archive: {}", entry_name));
+            }
+            // Reject Windows absolute paths with drive letters (e.g., "C:/...")
+            if sanitized.len() >= 3 && sanitized.chars().nth(1) == Some(':') && sanitized.chars().nth(2) == Some('/') {
+                return Err(anyhow!("Windows absolute path not allowed: {}", entry_name));
             }
             
             let outpath = dest.join(&sanitized);
@@ -403,7 +409,8 @@ match tags_output {
                                 .status()
                                 .await?;
                             if tag_clone.success() {
-                                // Continue with normal build flow, don't return early
+                                // Tag clone succeeded, skip fallback and return source_dir
+                                return Ok(source_dir);
                             }
                         }
                     }
@@ -505,7 +512,7 @@ match tags_output {
     let binary_src = find_backend_binary(&build_output)?;
 
     std::fs::create_dir_all(&options.target_dir)?;
-    let binary_name = binary_src.file_name().unwrap();
+    let binary_name = binary_src.file_name().ok_or_else(|| anyhow!("Could not determine binary filename"))?;
     let binary_dest = options.target_dir.join(binary_name);
 
     std::fs::copy(&binary_src, &binary_dest)?;

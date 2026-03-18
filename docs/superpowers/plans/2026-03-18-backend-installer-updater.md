@@ -1760,11 +1760,9 @@ kronk backend list              # List installed backends
 kronk backend check-updates     # Check for new versions
 kronk backend update <name>     # Update to latest version
 kronk backend remove <name>     # Remove an installed backend
-```bash
 ```
 
 Backends are stored in `~/.config/kronk/backends/` (Linux) or `%APPDATA%\kronk\backends\` (Windows). You can also point servers at external backend installations via the config file.
-```
 
 - [ ] **Step 2: Add backend commands to the CLI reference table**
 
