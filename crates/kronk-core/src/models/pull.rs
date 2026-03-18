@@ -99,8 +99,6 @@ pub async fn download_gguf(
     filename: &str,
     dest_dir: &std::path::Path,
 ) -> Result<DownloadResult> {
-    
-
     // Ensure the full directory path exists
     let dest_path = dest_dir.join(filename);
     if let Some(parent) = dest_path.parent() {
@@ -112,24 +110,7 @@ pub async fn download_gguf(
         repo_id, filename
     );
 
-    // Check if already downloaded with matching size
-    if dest_path.exists() {
-        // Use chunked downloader which does its own HEAD check
-        let size_bytes = crate::models::download::download_chunked(
-            &url,
-            &dest_path,
-            8, // connections
-        )
-        .await
-        .with_context(|| format!("Failed to download '{}' from '{}'", filename, repo_id))?;
-
-        return Ok(DownloadResult {
-            path: dest_path,
-            size_bytes,
-        });
-    }
-
-    // Use chunked parallel download
+    // Use chunked parallel download (includes skip-if-exists check)
     let size_bytes = crate::models::download::download_chunked(
         &url,
         &dest_path,
