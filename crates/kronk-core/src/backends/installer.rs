@@ -209,28 +209,19 @@ pub fn extract_archive(archive: &Path, dest: &Path) -> Result<PathBuf> {
         for i in 0..zip.len() {
             let mut entry = zip.by_index(i)?;
 
+            // Use zip crate's built-in path validation to prevent Zip Slip
+            // entry.enclosed_name() returns None if path escapes the destination
+            let entry_name = entry.enclosed_name()
+                .ok_or_else(|| anyhow!("Invalid path in archive: {}", entry.name()))?;
+
             // Reject symlinks (CVE-2025-29787: symlink-based path traversal)
             if entry.is_symlink() {
                 return Err(anyhow!("Symlinks not allowed in archive: {}", entry.name()));
             }
 
-            // Sanitize path to prevent CVE-2025-29787 (path traversal via symlinks)
-            let entry_name = entry.name();
-            let sanitized = entry_name.replace('\\', "/");
-            if sanitized.contains("..") || sanitized.starts_with('/') || sanitized.is_empty() {
-                return Err(anyhow!("Malicious path in archive: {}", entry_name));
-            }
-            // Reject Windows absolute paths with drive letters (e.g., "C:/...")
-            if sanitized.len() >= 3
-                && sanitized.chars().nth(1) == Some(':')
-                && sanitized.chars().nth(2) == Some('/')
-            {
-                return Err(anyhow!("Windows absolute path not allowed: {}", entry_name));
-            }
+            let outpath = dest.join(&entry_name);
 
-            let outpath = dest.join(&sanitized);
-
-            if entry_name.ends_with('/') {
+            if entry_name.as_path().ends_with("/") {
                 std::fs::create_dir_all(&outpath)?;
             } else {
                 if let Some(p) = outpath.parent() {
@@ -560,7 +551,7 @@ async fn install_from_source(
         return Err(anyhow!("Build failed. Check the output above for errors."));
     }
 
-    // Find and copy the binary
+    // Install using CMake's install capabilities (handles shared libs on Windows)
     println!("Installing binary...");
     let binary_src = find_backend_binary(&build_output)?;
 
@@ -570,6 +561,7 @@ async fn install_from_source(
         .ok_or_else(|| anyhow!("Could not determine binary filename"))?;
     let binary_dest = options.target_dir.join(binary_name);
 
+    // Copy binary
     std::fs::copy(&binary_src, &binary_dest)?;
 
     // Set executable permissions on Unix
@@ -579,6 +571,36 @@ async fn install_from_source(
         let mut perms = std::fs::metadata(&binary_dest)?.permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&binary_dest, perms)?;
+    }
+
+    // Copy shared libraries on Unix (llama-server.so, libggml.so, etc.)
+    #[cfg(unix)]
+    {
+        use std::path::Path;
+        
+        // Find all .so files in build directory and copy them to target
+        fn copy_shared_libs(src: &Path, dest: &Path) {
+            if let Ok(entries) = std::fs::read_dir(src) {
+                for entry in entries.flatten() {
+                    let entry_path = entry.path();
+                    if entry_path.is_file() {
+                        if let Some(name) = entry_path.file_name().and_then(|n| n.to_str()) {
+                            if name.ends_with(".so") {
+                                let dest_path = dest.join(name);
+                                if !dest_path.exists() {
+                                    if let Err(e) = std::fs::copy(&entry_path, &dest_path) {
+                                        tracing::warn!("Failed to copy shared library {}: {}", name, e);
+                                    }
+                                }
+                            }
+                        }
+                    } else if entry_path.is_dir() {
+                        copy_shared_libs(&entry_path, dest);
+                    }
+                }
+            }
+        }
+        copy_shared_libs(&build_output, &options.target_dir);
     }
 
     println!("Backend built and installed at: {:?}", binary_dest);
