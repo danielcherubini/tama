@@ -394,14 +394,16 @@ match tags_output {
                         let stdout_str = String::from_utf8_lossy(&output.stdout);
                         let lines: Vec<&str> = stdout_str.lines().collect();
                         if let Some(tag_line) = lines.iter().find(|l| !l.is_empty()) {
-                            let tag_name: &str = tag_line.split('\t').next().unwrap_or("unknown");
+                            // Parse ref field (second tab-separated value), strip "refs/tags/" prefix and trailing "^{}"
+                            let ref_field: &str = tag_line.split('\t').nth(1).unwrap_or("refs/tags/unknown");
+                            let tag_name: &str = ref_field.trim_start_matches("refs/tags/").trim_end_matches("^{}");
                             println!("Resolving 'latest' to tag: {}", tag_name);
                             let tag_clone = tokio::process::Command::new("git")
                                 .args(["clone", "--depth", "1", "--branch", tag_name, git_url, &source_dir.to_string_lossy()])
                                 .status()
                                 .await?;
                             if tag_clone.success() {
-                                return Ok(source_dir);
+                                // Continue with normal build flow, don't return early
                             }
                         }
                     }

@@ -3,6 +3,7 @@ use clap::{Args, Subcommand};
 use kronk_core::backends::*;
 use kronk_core::config::Config;
 use kronk_core::gpu;
+use std::time::Duration;
 
 #[derive(Debug, Args)]
 pub struct BackendArgs {
@@ -85,7 +86,7 @@ fn backends_dir() -> Result<std::path::PathBuf> {
 fn current_unix_timestamp() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or(Duration::ZERO)
         .as_secs() as i64
 }
 

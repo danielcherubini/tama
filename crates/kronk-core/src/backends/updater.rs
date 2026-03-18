@@ -70,9 +70,7 @@ pub async fn check_latest_version(backend: &BackendType) -> Result<String> {
                 .map(|r| r.tag_name.clone())
                 .ok_or_else(|| anyhow!("No releases found for ik_llama"))
         }
-        BackendType::Custom => {
-            Err(anyhow!("Cannot check updates for custom backends"))
-        }
+        _ => Err(anyhow!("Cannot check updates for custom backends")),
     }
 }
 
