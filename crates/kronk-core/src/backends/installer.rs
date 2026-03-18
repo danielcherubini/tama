@@ -70,9 +70,6 @@ pub fn get_prebuilt_url(
                 ("windows", "aarch64", _) => {
                     format!("llama-{}-bin-win-cpu-arm64.zip", tag)
                 }
-                ("windows", _, Some(GpuType::Custom)) => {
-                    format!("llama-{}-bin-win-cuda-{}-x64.zip", tag, "12.4")
-                }
                 // macOS
                 ("macos", "aarch64", _) => {
                     format!("llama-{}-bin-macos-arm64.tar.gz", tag)

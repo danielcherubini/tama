@@ -125,10 +125,7 @@ fn detect_cuda_version_from_smi() -> Option<String> {
 /// Uses `rocminfo` to detect ROCm and parse version from header.
 fn detect_rocm() -> Option<GpuCapability> {
     // Check if rocminfo is available
-    let output = std::process::Command::new("rocminfo")
-        .args(["--help"])
-        .output()
-        .ok()?;
+    let output = std::process::Command::new("rocminfo").output().ok()?;
 
     if !output.status.success() {
         return None;

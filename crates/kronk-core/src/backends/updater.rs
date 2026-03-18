@@ -35,9 +35,11 @@ pub async fn check_latest_version(backend: &BackendType) -> Result<String> {
         BackendType::Custom => return Err(anyhow!("Cannot check updates for custom backends")),
     };
 
-    let response = client
-        .get(url)
-        .header("Authorization", token.as_deref().unwrap_or(""))
+    let mut request = client.get(url);
+    if let Some(t) = token.as_deref() {
+        request = request.header("Authorization", t);
+    }
+    let response = request
         .send()
         .await
         .with_context(|| format!("Failed to fetch from {}", url))?;
