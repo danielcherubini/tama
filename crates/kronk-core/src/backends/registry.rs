@@ -103,6 +103,7 @@ pub enum BackendSource {
 
 pub struct BackendRegistry {
     path: PathBuf,
+    base_dir: PathBuf,
     data: RegistryData,
 }
 
@@ -135,19 +136,19 @@ impl BackendRegistry {
 
         Ok(Self {
             path: path.to_path_buf(),
+            base_dir,
             data,
         })
     }
 
     pub fn save(&self) -> Result<()> {
         let canonical_path = Self::canonicalize_path(&self.path)?;
-        let base_dir = Self::canonicalize_base_dir(None)?;
 
-        if !canonical_path.starts_with(&base_dir) {
+        if !canonical_path.starts_with(&self.base_dir) {
             return Err(anyhow!(
                 "Registry path {:?} is outside base directory {:?}",
                 self.path,
-                base_dir
+                self.base_dir
             ));
         }
 
@@ -172,6 +173,7 @@ impl BackendRegistry {
 
         Ok(Self {
             path: path.to_path_buf(),
+            base_dir: path.parent().unwrap_or(Path::new("/")).to_path_buf(),
             data,
         })
     }
@@ -187,26 +189,72 @@ impl BackendRegistry {
         Ok(())
     }
 
+    /// Load registry without path validation (for tests) with base_dir
+    #[cfg(test)]
+    pub fn load_unchecked_with_base_dir(path: &Path, base_dir: &Path) -> Result<Self> {
+        let data = if path.exists() {
+            let content = std::fs::read_to_string(path)
+                .with_context(|| format!("Failed to read registry at {:?}", path))?;
+            toml::from_str(&content).with_context(|| "Failed to parse registry")?
+        } else {
+            RegistryData::default()
+        };
+
+        Ok(Self {
+            path: path.to_path_buf(),
+            base_dir: base_dir.to_path_buf(),
+            data,
+        })
+    }
+
     pub fn add(&mut self, backend: BackendInfo) -> Result<()> {
-        self.data.backends.insert(backend.name.clone(), backend);
-        self.save()
+        // Use transactional pattern: modify on scratch copy, only replace after save succeeds
+        let original_backends = std::mem::take(&mut self.data.backends);
+        let mut new_backends = original_backends.clone();
+        new_backends.insert(backend.name.clone(), backend);
+        self.data.backends = new_backends;
+        if let Err(e) = self.save() {
+            // Rollback: restore original state
+            self.data.backends = original_backends;
+            return Err(e);
+        }
+        Ok(())
     }
 
     pub fn remove(&mut self, name: &str) -> Result<()> {
-        self.data.backends.remove(name);
-        self.save()
+        // Use transactional pattern: modify on scratch copy, only replace after save succeeds
+        let original_backends = std::mem::take(&mut self.data.backends);
+        let mut new_backends = original_backends.clone();
+        new_backends.remove(name);
+        self.data.backends = new_backends;
+        if let Err(e) = self.save() {
+            // Rollback: restore original state
+            self.data.backends = original_backends;
+            return Err(e);
+        }
+        Ok(())
     }
 
     #[cfg(test)]
     pub fn add_unchecked(&mut self, backend: BackendInfo) {
-        self.data.backends.insert(backend.name.clone(), backend);
-        self.save_unchecked().unwrap();
+        let original_backends = std::mem::take(&mut self.data.backends);
+        let mut new_backends = original_backends.clone();
+        new_backends.insert(backend.name.clone(), backend);
+        self.data.backends = new_backends;
+        if let Err(_) = self.save_unchecked() {
+            self.data.backends = original_backends;
+        }
     }
 
     #[cfg(test)]
     pub fn remove_unchecked(&mut self, name: &str) {
-        self.data.backends.remove(name);
-        self.save_unchecked().unwrap();
+        let original_backends = std::mem::take(&mut self.data.backends);
+        let mut new_backends = original_backends.clone();
+        new_backends.remove(name);
+        self.data.backends = new_backends;
+        if let Err(_) = self.save_unchecked() {
+            self.data.backends = original_backends;
+        }
     }
 
     pub fn get(&self, name: &str) -> Option<&BackendInfo> {
@@ -226,16 +274,18 @@ impl BackendRegistry {
     ) -> Result<()> {
         // Validate new_binary_path is within managed backends directory
         let new_binary_path_canonical = Self::canonicalize_path(&new_binary_path)?;
-        let base_dir = Self::canonicalize_base_dir(None)?;
-        if !new_binary_path_canonical.starts_with(&base_dir) {
+        if !new_binary_path_canonical.starts_with(&self.base_dir) {
             return Err(anyhow!(
                 "Backend binary path {:?} is outside managed directory {:?}",
                 new_binary_path,
-                base_dir
+                self.base_dir
             ));
         }
 
-        if let Some(info) = self.data.backends.get_mut(name) {
+        // Use transactional pattern: modify on scratch copy, only replace after save succeeds
+        let original_backends = std::mem::take(&mut self.data.backends);
+        let mut new_backends = original_backends.clone();
+        if let Some(info) = new_backends.get_mut(name) {
             info.version = new_version;
             info.path = new_binary_path;
             info.installed_at = std::time::SystemTime::now()
@@ -243,9 +293,17 @@ impl BackendRegistry {
                 .map_or(0, |d| d.as_secs() as i64);
             info.source = new_source;
         } else {
+            // Rollback: restore original state
+            self.data.backends = original_backends;
             return Err(anyhow!("Backend '{}' not found", name));
         }
-        self.save()
+        self.data.backends = new_backends;
+        if let Err(e) = self.save() {
+            // Rollback: restore original state
+            self.data.backends = original_backends;
+            return Err(e);
+        }
+        Ok(())
     }
 }
 
@@ -258,7 +316,9 @@ mod tests {
     fn test_registry_add_and_list() {
         let temp_dir = TempDir::new().unwrap();
         let registry_path = temp_dir.path().join("test_registry.toml");
-        let mut registry = BackendRegistry::load_unchecked(&registry_path).unwrap();
+        let base_dir = temp_dir.path().to_path_buf();
+        let mut registry =
+            BackendRegistry::load_unchecked_with_base_dir(&registry_path, &base_dir).unwrap();
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -286,7 +346,9 @@ mod tests {
     fn test_registry_remove() {
         let temp_dir = TempDir::new().unwrap();
         let registry_path = temp_dir.path().join("test_registry_remove.toml");
-        let mut registry = BackendRegistry::load_unchecked(&registry_path).unwrap();
+        let base_dir = temp_dir.path().to_path_buf();
+        let mut registry =
+            BackendRegistry::load_unchecked_with_base_dir(&registry_path, &base_dir).unwrap();
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -311,6 +373,7 @@ mod tests {
     fn test_registry_roundtrip_serialization() {
         let temp_dir = TempDir::new().unwrap();
         let registry_path = temp_dir.path().join("test_registry_roundtrip.toml");
+        let base_dir = temp_dir.path().to_path_buf();
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -319,7 +382,8 @@ mod tests {
 
         // Write
         {
-            let mut registry = BackendRegistry::load_unchecked(&registry_path).unwrap();
+            let mut registry =
+                BackendRegistry::load_unchecked_with_base_dir(&registry_path, &base_dir).unwrap();
             registry.add_unchecked(BackendInfo {
                 name: "test".to_string(),
                 backend_type: BackendType::LlamaCpp,
