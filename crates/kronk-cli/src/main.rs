@@ -12,6 +12,7 @@ use tokio::time::interval;
 
 mod args;
 mod commands;
+use commands::backend::{BackendArgs, BackendSubcommand};
 
 #[derive(Parser, Debug)]
 #[command(name = "kronk")]
@@ -86,9 +87,14 @@ enum Commands {
         #[command(subcommand)]
         command: ModelCommands,
     },
-    /// View backend logs for a server
+    /// Manage backends — install, update, list, remove
+    Backend {
+        #[command(subcommand)]
+        command: BackendSubcommand,
+    },
+    /// View server logs
     Logs {
-        /// Server name (required)
+        /// Server name
         name: String,
         /// Follow log output (like tail -f)
         #[arg(short, long)]
@@ -294,6 +300,9 @@ fn main() -> Result<()> {
             Commands::Profile { command } => cmd_profile(&config, command),
             Commands::Config { command } => cmd_config(&config, command),
             Commands::Model { command } => commands::model::run(&config, command).await,
+            Commands::Backend { command } => {
+                commands::backend::run(&config, BackendArgs { command }).await
+            }
             Commands::Logs {
                 name,
                 follow,

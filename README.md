@@ -125,6 +125,40 @@ kronk config path                                  Show the config file path
 kronk logs <name>                                  View backend logs (follow with -f)
 ```
 
+### Backend Management
+
+Kronk manages LLM backend installations (llama.cpp, ik_llama) with automatic version tracking and updates:
+
+```bash
+kronk backend install llama_cpp    # Install latest llama.cpp
+kronk backend install ik_llama     # Install latest ik_llama (builds from source)
+kronk backend install llama_cpp --version b8407  # Install specific version
+kronk backend install llama_cpp --build    # Force build from source
+kronk backend update <name>        # Update to latest version
+kronk backend list                 # List installed backends
+kronk backend remove <name>        # Remove a backend
+kronk backend check-updates        # Check for updates
+```
+
+### Installation Details
+
+- **llama.cpp**: Downloads pre-built binaries for your platform, or builds from source with GPU support
+- **ik_llama**: Always builds from source (no pre-built binaries available)
+- **Linux/macOS:** Backends in `~/.config/kronk/backends/`
+- **Windows:** Backends in `%APPDATA%\kronk\backends\`
+- Version tracking in `~/.config/kronk/backend_registry.toml` (Linux/macOS) or `%APPDATA%\kronk\backend_registry.toml` (Windows)
+
+### GPU Support
+
+The installer detects your GPU and prompts you to select acceleration:
+
+- **CUDA** (NVIDIA) — CUDA cores for faster inference
+- **Vulkan** (AMD/Intel/NVIDIA) — Cross-platform GPU acceleration
+- **Metal** (Apple Silicon) — macOS GPU acceleration
+- **ROCm** (AMD) — AMD GPU support on Linux
+- **CPU** — Fallback when no GPU is available
+
+---
 ---
 
 ## Configuration
