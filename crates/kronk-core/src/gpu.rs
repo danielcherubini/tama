@@ -1,3 +1,24 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum GpuType {
+    Cuda { version: String },
+    Vulkan,
+    Metal,
+    RocM { version: String },
+    CpuOnly,
+    Custom,
+}
+
+#[derive(Debug, Clone)]
+pub struct BuildPrerequisites {
+    pub os: String,
+    pub arch: String,
+    pub cmake_available: bool,
+    pub compiler_available: bool,
+    pub git_available: bool,
+}
+
 /// VRAM usage in MiB.
 #[derive(Debug, Clone)]
 pub struct VramInfo {
@@ -21,6 +42,62 @@ impl VramInfo {
     /// Total VRAM in bytes
     pub fn total_bytes(&self) -> u64 {
         self.total_mib * 1024 * 1024
+    }
+}
+
+pub fn detect_build_prerequisites() -> BuildPrerequisites {
+    let os = std::env::consts::OS.to_string();
+    let arch = std::env::consts::ARCH.to_string();
+
+    let cmake_available = std::process::Command::new("cmake")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    let git_available = std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    let compiler_available = {
+        #[cfg(target_os = "windows")]
+        {
+            // Try MSVC (cl.exe) first, then MinGW (g++)
+            std::process::Command::new("cl.exe")
+                .arg("/?")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+                || std::process::Command::new("g++")
+                    .arg("--version")
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            // Try g++ first (C++ compiler needed for llama.cpp), then c++
+            std::process::Command::new("g++")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+                || std::process::Command::new("c++")
+                    .arg("--version")
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false)
+        }
+    };
+
+    BuildPrerequisites {
+        os,
+        arch,
+        cmake_available,
+        compiler_available,
+        git_available,
     }
 }
 
@@ -191,5 +268,13 @@ mod tests {
         // 24 GiB - 5.3 GiB model - 0.5 GiB overhead = ~18 GiB for KV
         // 8K = ~512 MiB, 16K = ~1GiB, 32K = ~2GiB — all should fit
         assert!(fitting.len() >= 4);
+    }
+
+    #[test]
+    fn test_detect_build_prerequisites() {
+        let caps = detect_build_prerequisites();
+        assert!(!caps.os.is_empty());
+        assert!(!caps.arch.is_empty());
+        // No gpu field — that's the point
     }
 }
