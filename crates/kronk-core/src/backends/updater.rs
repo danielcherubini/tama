@@ -117,7 +117,8 @@ pub async fn update_backend(
     };
 
     // Validate backend exists before installing to prevent orphaned files
-    registry.get(backend_name)
+    registry
+        .get(backend_name)
         .ok_or_else(|| anyhow!("Backend '{}' not found", backend_name))?;
 
     registry.update_version(
