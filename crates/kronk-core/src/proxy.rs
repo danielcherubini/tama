@@ -3,9 +3,10 @@ use crate::config::ProxyConfig;
 use crate::models::card::ModelCard;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info, warn};
 
 /// Represents the state of a loaded model.
@@ -13,17 +14,19 @@ use tracing::{debug, info, warn};
 pub struct ModelState {
     pub model_name: String,
     pub backend: String,
+    pub backend_pid: Option<u32>,
+    pub backend_url: String,
     pub load_time: Instant,
     pub last_accessed: Instant,
 }
 
 /// Manages proxy state and model lifecycle.
-#[derive(Debug, Clone)]
 pub struct ProxyState {
     pub config: ProxyConfig,
     pub models: Arc<RwLock<HashMap<String, ModelState>>>,
     pub registry: Arc<RwLock<BackendRegistry>>,
     pub config_data: Arc<RwLock<crate::config::Config>>,
+    pub process_map: Arc<Mutex<HashMap<u32, String>>>,
 }
 
 impl ProxyState {
@@ -37,7 +40,23 @@ impl ProxyState {
             models: Arc::new(RwLock::new(HashMap::new())),
             registry: Arc::new(RwLock::new(registry)),
             config_data: Arc::new(RwLock::new(config_data)),
+            process_map: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Get the backend URL for a server name.
+    pub async fn get_backend_url(&self, server_name: &str) -> Result<String> {
+        let config = self.config_data.read().await;
+        let server = config
+            .servers
+            .get(server_name)
+            .with_context(|| format!("Server '{}' not found", server_name))?;
+
+        let backend_url = config.resolve_health_url(server).with_context(|| {
+            format!("No backend URL resolved for server '{}'", server_name)
+        })?;
+
+        Ok(backend_url)
     }
 
     /// Check if a model is already loaded.
@@ -87,18 +106,23 @@ impl ProxyState {
         );
 
         let start = Instant::now();
-        let mut child = tokio::process::Command::new(&backend_path)
+        let mut child = std::process::Command::new(&backend_path)
             .args(&args)
             .env("MODEL_NAME", model_name)
             .spawn()
             .with_context(|| format!("Failed to start backend '{}'", backend_name))?;
 
+        let pid = child.id();
         info!(
             "Backend '{}' started for model '{}' (pid: {:?})",
             backend_name,
             model_name,
-            child.id()
+            pid
         );
+
+        // Register PID in process map
+        let mut processes = self.process_map.lock().await;
+        processes.insert(pid, model_name.to_string());
 
         // Wait for health check to pass
         let timeout = Duration::from_secs(30);
@@ -117,8 +141,9 @@ impl ProxyState {
         }
 
         if elapsed >= timeout {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = processes.remove(&pid);
             return Err(anyhow::anyhow!(
                 "Backend '{}' failed to start for model '{}' (timeout after {}s)",
                 backend_name,
@@ -135,6 +160,8 @@ impl ProxyState {
                 ModelState {
                     model_name: model_name.to_string(),
                     backend: backend_name,
+                    backend_pid: Some(pid),
+                    backend_url: health_url,
                     load_time: start,
                     last_accessed: start,
                 },
@@ -155,16 +182,33 @@ impl ProxyState {
             .with_context(|| format!("Model '{}' not loaded", model_name))?;
 
         let backend_name = state.backend.clone();
-
-        drop(self.models.write().await);
+        let pid = state.backend_pid;
 
         info!(
             "Stopping backend '{}' for model '{}'",
             backend_name, model_name
         );
 
-        // For now, we'll just remove from state
-        // A full implementation would track PIDs and kill them
+        // Kill the process if we have the PID
+        if let Some(pid) = pid {
+            info!("Sending SIGTERM to backend process {}", pid);
+            // Send SIGTERM signal
+            let _ = std::process::Command::new("kill")
+                .arg("-TERM")
+                .arg(pid.to_string())
+                .spawn();
+            
+            // Wait up to 5 seconds for graceful shutdown
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+
+        // Remove from process map
+        let mut processes = self.process_map.lock().await;
+        if let Some(pid) = pid {
+            processes.remove(&pid);
+        }
+
+        // Remove from models
         let mut models = self.models.write().await;
         models.remove(model_name);
 
@@ -195,7 +239,12 @@ impl ProxyState {
 
         drop(models);
 
-        to_unload
+        // Actually unload the models
+        for model_name in to_unload {
+            let _ = self.unload_model(&model_name).await;
+        }
+
+        Vec::new()
     }
 
     /// Update the last accessed time for a model.

@@ -10,8 +10,13 @@ use axum::{
 };
 use bytes::Bytes;
 use futures_util::{stream, StreamExt};
+use serde_json;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::Mutex;
+use toml;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
@@ -72,27 +77,21 @@ async fn handle_chat_completions(
 
     if !is_loaded {
         // Try to load the model
-        // For now, we'll just return an error since we don't have the model card
-        // In a full implementation, we would load the model card and start the backend
-        warn!("Model '{}' not loaded, skipping", model_name);
+        let model_card = state
+            .get_model_card(model_name)
+            .await
+            .ok();
+
+        if let Err(e) = state.load_model(model_name, &model_card).await {
+            warn!("Failed to load model '{}': {}", model_name, e);
+        }
     }
 
     // Update last accessed time
     state.update_last_accessed(model_name).await;
 
     // Forward the request to the backend
-    // For now, we'll just return a placeholder response
-    // In a full implementation, we would:
-    // 1. Find the correct backend URL
-    // 2. Forward the request
-    // 3. Stream the response back
-
-    let response = serde_json::json!({
-        "error": {
-            "message": "Proxy not fully implemented yet",
-            "type": "InternalServerError"
-        }
-    });
+    let response = forward_request_to_backend(state, body, model_name).await?;
 
     Ok((
         [(header::CONTENT_TYPE, "application/json")],
@@ -163,17 +162,65 @@ async fn handle_fallback() -> impl IntoResponse {
     )
 }
 
+/// Forward a request to the backend and stream the response back.
+async fn forward_request_to_backend(
+    state: Arc<ProxyState>,
+    body: Bytes,
+    model_name: String,
+) -> Result<Bytes> {
+    // Get the backend URL for this model
+    let backend_url = state
+        .get_backend_url(&model_name)
+        .await
+        .with_context(|| format!("No backend URL for model '{}'", model_name))?;
+
+    info!("Forwarding request to backend at {}", backend_url);
+
+    // For now, return a placeholder response
+    // In a full implementation, we would:
+    // 1. Make a request to the backend
+    // 2. Stream the SSE response back to the client
+    // 3. Handle errors and timeouts
+
+    let response = serde_json::json!({
+        "error": {
+            "message": "Backend forwarding not fully implemented yet",
+            "type": "InternalServerError"
+        }
+    });
+
+    Ok(response.to_string().into_bytes())
+}
+
+/// Get the model card for a model name.
+async fn get_model_card(state: &ProxyState, model_name: &str) -> Option<crate::models::card::ModelCard> {
+    let configs_dir = state.config_data.read().await.configs_dir().ok()?;
+    
+    // Try to find the model card file
+    // Format: configs.d/<company>--<model>.toml
+    let card_path = configs_dir.join(format!("{}--{}.toml", model_name.split('/').next().unwrap_or(""), model_name));
+    
+    if card_path.exists() {
+        let content = std::fs::read_to_string(&card_path).ok()?;
+        let card: crate::models::card::ModelCard = toml::from_str(&content).ok()?;
+        Some(card)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_proxy_server_creation() {
+    #[tokio::test]
+    async fn test_proxy_server_creation() {
         let state = Arc::new(ProxyState {
             config: ProxyConfig::default(),
             models: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             registry: Arc::new(tokio::sync::RwLock::new(crate::backends::registry::BackendRegistry::default())),
             config_data: Arc::new(tokio::sync::RwLock::new(crate::config::Config::default())),
+            process_map: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         });
 
         let server = ProxyServer::new(state);
