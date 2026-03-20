@@ -4,11 +4,12 @@ use crate::backends::registry::BackendRegistry;
 use crate::config::ProxyConfig;
 use crate::models::card::ModelCard;
 use anyhow::{Context, Result};
+use reqwest::Client;
 use std::collections::HashMap;
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info, warn};
 
@@ -20,7 +21,7 @@ pub enum ModelState {
         model_name: String,
         backend: String,
         backend_url: String,
-        last_accessed: Instant,
+        last_accessed: SystemTime,
         consecutive_failures: Arc<AtomicU32>,
     },
     /// Backend is ready and accepting traffic
@@ -29,8 +30,8 @@ pub enum ModelState {
         backend: String,
         backend_pid: u32,
         backend_url: String,
-        load_time: Instant,
-        last_accessed: Instant,
+        load_time: SystemTime,
+        last_accessed: SystemTime,
         consecutive_failures: Arc<AtomicU32>,
     },
     /// Backend failed to start
@@ -83,18 +84,18 @@ impl ModelState {
         }
     }
 
-    pub fn load_time(&self) -> Option<Instant> {
+    pub fn load_time(&self) -> Option<SystemTime> {
         match self {
             ModelState::Ready { load_time, .. } => Some(*load_time),
             _ => None,
         }
     }
 
-    pub fn last_accessed(&self) -> Instant {
+    pub fn last_accessed(&self) -> SystemTime {
         match self {
             ModelState::Ready { last_accessed, .. } => *last_accessed,
             ModelState::Starting { last_accessed, .. } => *last_accessed,
-            ModelState::Failed { .. } => Instant::now(),
+            ModelState::Failed { .. } => SystemTime::now(),
         }
     }
 }
@@ -117,6 +118,7 @@ pub struct ProxyState {
     pub config_data: Arc<RwLock<crate::config::Config>>,
     pub process_map: Arc<Mutex<HashMap<u32, String>>>,
     pub process_handles: Arc<Mutex<HashMap<u32, std::process::Child>>>,
+    pub client: Arc<Client>,
     pub metrics: Arc<ProxyMetrics>,
 }
 
@@ -133,6 +135,7 @@ impl ProxyState {
             config_data: Arc::new(RwLock::new(config_data)),
             process_map: Arc::new(Mutex::new(HashMap::new())),
             process_handles: Arc::new(Mutex::new(HashMap::new())),
+            client: Arc::new(Client::new()),
             metrics: Arc::new(ProxyMetrics::default()),
         }
     }
@@ -169,7 +172,7 @@ impl ProxyState {
     pub async fn get_model_state_with_access(
         &self,
         server_name: &str,
-    ) -> Option<(ModelState, Instant)> {
+    ) -> Option<(ModelState, SystemTime)> {
         let models = self.models.read().await;
         models
             .get(server_name)
@@ -260,7 +263,7 @@ impl ProxyState {
                             model_name: model_name.to_string(),
                             backend: server_config.backend.clone(),
                             backend_url: String::new(),
-                            last_accessed: Instant::now(),
+                            last_accessed: SystemTime::now(),
                             consecutive_failures: Arc::new(AtomicU32::new(0)),
                         },
                     );
@@ -363,8 +366,8 @@ impl ProxyState {
                         backend: server_config.backend.clone(),
                         backend_pid: pid,
                         backend_url,
-                        load_time: Instant::now(),
-                        last_accessed: Instant::now(),
+                        load_time: SystemTime::now(),
+                        last_accessed: SystemTime::now(),
                         consecutive_failures: Arc::new(AtomicU32::new(0)),
                     };
                 }
@@ -436,12 +439,14 @@ impl ProxyState {
 
     /// Check if any server has been idle for longer than the timeout.
     pub async fn check_idle_timeouts(&self) -> Vec<String> {
-        let now = Instant::now();
+        let now = SystemTime::now();
         let mut to_unload = Vec::new();
 
         let models = self.models.read().await;
         for (server_name, state) in models.iter() {
-            let idle_duration = now - state.last_accessed();
+            let idle_duration = now
+                .duration_since(state.last_accessed())
+                .unwrap_or(Duration::ZERO);
             let timeout = Duration::from_secs(self.config.idle_timeout_secs);
 
             if idle_duration > timeout {
@@ -471,10 +476,10 @@ impl ProxyState {
         if let Some(state) = models.get_mut(server_name) {
             match state {
                 ModelState::Starting { last_accessed, .. } => {
-                    *last_accessed = Instant::now();
+                    *last_accessed = SystemTime::now();
                 }
                 ModelState::Ready { last_accessed, .. } => {
-                    *last_accessed = Instant::now();
+                    *last_accessed = SystemTime::now();
                 }
                 ModelState::Failed { .. } => {}
             }

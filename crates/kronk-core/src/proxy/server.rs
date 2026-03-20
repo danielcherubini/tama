@@ -12,7 +12,7 @@ use axum::{
 
 use reqwest::Client;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::info;
 
 fn json_error_response() -> Response {
@@ -219,12 +219,16 @@ async fn handle_get_model(state: State<Arc<ProxyState>>, Path(model_id): Path<St
     let model_state = state.get_model_state(&model_id).await;
 
     if let Some(state) = model_state {
-        let load_time = state.load_time().unwrap_or(Instant::now());
+        let load_time = state.load_time().unwrap_or(SystemTime::now());
         let owned_by = state.backend();
+        let created = load_time
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs();
         Json(serde_json::json!({
             "id": model_id,
             "object": "model",
-            "created": load_time.elapsed().as_secs(),
+            "created": created,
             "owned_by": owned_by,
             "ready": true
         }))
