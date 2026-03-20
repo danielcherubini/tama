@@ -58,8 +58,10 @@ fn default_proxy_host() -> String {
     "0.0.0.0".to_string()
 }
 
+pub const DEFAULT_PROXY_PORT: u16 = 11434;
+
 fn default_proxy_port() -> u16 {
-    8081
+    DEFAULT_PROXY_PORT
 }
 
 fn default_proxy_timeout() -> u64 {
@@ -318,7 +320,7 @@ impl Config {
 
         // backend.health_check_url is None, try server.port fallback
         if let Some(port) = server.port {
-            return Some(format!("http://localhost:{}/", port));
+            return Some(format!("http://localhost:{}", port));
         }
 
         // Neither backend.health_check_url nor server.port present

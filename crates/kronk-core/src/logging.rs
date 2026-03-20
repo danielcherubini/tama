@@ -7,9 +7,12 @@ const MAX_LOG_SIZE: u64 = 10 * 1024 * 1024; // 10 MB
 const MAX_LOG_FILES: usize = 5;
 
 pub fn init() {
-    fmt()
+    if let Err(e) = fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
-        .init();
+        .try_init()
+    {
+        tracing::debug!("Tracing subscriber already initialized: {}", e);
+    }
 }
 
 /// Get the log file path for a profile.

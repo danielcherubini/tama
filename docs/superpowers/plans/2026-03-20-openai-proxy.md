@@ -269,7 +269,6 @@ async fn proxy_request(
     let target_url = format!("http://127.0.0.1:{}{}{}", port, path, query);
 
     // 5. Forward the request using Reqwest
-```rust
     let reqwest_res = state.client.post(&target_url)
         .header("Content-Type", "application/json")
         .body(reqwest::Body::from(body_bytes)) // Pass along exact bytes received

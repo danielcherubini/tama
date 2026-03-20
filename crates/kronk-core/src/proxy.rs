@@ -208,10 +208,12 @@ impl ProxyState {
         let models = self.models.read().await;
 
         // Simple round-robin or first available
-        // For simplicity, we just pick the first one that is loaded and hasn't tripped the circuit breaker
+        // For simplicity, we just pick the first one that is loaded (Ready or Starting)
+        // and hasn't tripped the circuit breaker
         for (server_name, _, _) in servers {
             if let Some(state) = models.get(&server_name) {
                 if state.is_ready()
+                    || matches!(state, ModelState::Starting { .. })
                     && state
                         .consecutive_failures()
                         .map(|f| f.load(Ordering::Relaxed))
@@ -310,7 +312,9 @@ impl ProxyState {
             .spawn()
             .with_context(|| format!("Failed to start backend '{}'", server_config.backend))?;
 
-        let pid = child.id().unwrap();
+        let pid = child
+            .id()
+            .ok_or_else(|| anyhow::anyhow!("Failed to get PID for backend '{}'", server_config.backend))?;
         info!(
             "Backend '{}' started for server '{}' (pid: {:?})",
             server_config.backend, server_name, pid
@@ -519,19 +523,27 @@ impl ProxyState {
 async fn kill_process(pid: u32) -> Result<()> {
     #[cfg(unix)]
     {
-        let _ = Command::new("kill")
+        let mut child = Command::new("kill")
             .arg("-TERM")
             .arg(pid.to_string())
-            .spawn();
+            .spawn()?;
+        let status = child.wait()?;
+        if !status.success() {
+            return Err(anyhow::anyhow!("Failed to send SIGTERM to PID {}", pid));
+        }
     }
     #[cfg(windows)]
     {
-        let _ = Command::new("taskkill")
+        let mut child = Command::new("taskkill")
             .arg("/PID")
             .arg(pid.to_string())
             .arg("/T")
             .arg("/F")
-            .spawn();
+            .spawn()?;
+        let status = child.wait()?;
+        if !status.success() {
+            return Err(anyhow::anyhow!("Failed to terminate process with PID {}", pid));
+        }
     }
     Ok(())
 }

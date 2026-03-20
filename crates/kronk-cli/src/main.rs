@@ -1548,11 +1548,15 @@ async fn cmd_proxy(config: &Config, command: ProxyCommands) -> Result<()> {
     proxy_config.idle_timeout_secs = idle_timeout;
 
     // Parse host and port
-    let addr = SocketAddr::new(
-        host.parse::<std::net::IpAddr>()
-            .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1))),
-        port,
-    );
+    let (host_addr, warning) = match host.parse::<std::net::IpAddr>() {
+        Ok(addr) => (addr, false),
+        Err(_) => (std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)), true),
+    };
+    let addr = SocketAddr::new(host_addr, port);
+
+    if warning {
+        tracing::warn!("Invalid host '{}' - using 127.0.0.1", host);
+    }
 
     tracing::info!("Starting Kronk Proxy on {}", addr);
     tracing::info!("Idle timeout: {}s", idle_timeout);
