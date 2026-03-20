@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use kronk_core::config::Config;
+use kronk_core::logging;
 use kronk_core::process::{ProcessEvent, ProcessSupervisor};
 use kronk_core::profiles::SamplingParams;
 use std::collections::HashMap;
@@ -1543,9 +1544,10 @@ let ProxyCommands::Start {
     } = command;
 
     // Apply CLI overrides to config
-    config.proxy.host = host.clone();
-    config.proxy.port = port;
-    config.proxy.idle_timeout_secs = idle_timeout;
+    let mut proxy_config = config.proxy.clone();
+    proxy_config.host = host.clone();
+    proxy_config.port = port;
+    proxy_config.idle_timeout_secs = idle_timeout;
 
     // Parse host and port
     let addr = SocketAddr::new(
@@ -1582,7 +1584,7 @@ let ProxyCommands::Start {
     };
 
     let state = Arc::new(ProxyState::new(
-        config.proxy.clone(),
+        proxy_config,
         registry,
         config.clone(),
     ));

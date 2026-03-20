@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use tracing_subscriber::{fmt, EnvFilter};
 
 const MAX_LOG_SIZE: u64 = 10 * 1024 * 1024; // 10 MB

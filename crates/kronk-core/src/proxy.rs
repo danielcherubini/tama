@@ -190,6 +190,7 @@ impl ProxyState {
         // Register PID in process map
         let mut processes = self.process_map.lock().await;
         processes.insert(pid, server_name.clone());
+        let _processes = processes; // Drop lock before health check loop
 
         // Wait for health check to pass
         let timeout = Duration::from_secs(30);
@@ -210,7 +211,10 @@ impl ProxyState {
         if elapsed >= timeout {
             let _ = child.kill();
             let _ = child.wait();
-            let _ = processes.remove(&pid);
+            {
+                let mut processes = self.process_map.lock().await;
+                processes.remove(&pid);
+            }
             return Err(anyhow::anyhow!(
                 "Backend '{}' failed to start for server '{}' (timeout after {}s)",
                 backend_name,

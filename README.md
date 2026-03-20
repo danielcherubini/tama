@@ -192,7 +192,7 @@ Kronk auto-generates a config on first run:
 ```toml
 [backends.llama_cpp]
 path = "C:\\path\\to\\llama-server.exe"
-health_check_url = "http://localhost:8080/health"
+health_check_url = "http://localhost:11434/health"
 
 [servers.default]
 backend = "llama_cpp"
@@ -216,7 +216,7 @@ health_check_interval_ms = 5000
 [proxy]
 enabled = false
 host = "0.0.0.0"
-port = 8080
+port = 11434
 idle_timeout_secs = 300
 circuit_breaker_threshold = 3
 ```
@@ -262,7 +262,7 @@ Kronk spawns your LLM backend as a child process and watches it:
 
 ### Firewall (Windows)
 
-`kronk service install` automatically adds an inbound firewall rule for port 8080. `kronk service remove` cleans it up.
+`kronk service install` automatically adds an inbound firewall rule for port 11434. `kronk service remove` cleans it up.
 
 ---
 

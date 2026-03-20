@@ -35,6 +35,9 @@ pub struct ProxyConfig {
     pub circuit_breaker_threshold: u32,
 }
 
+/// Maximum request body size in bytes (16 MB)
+pub const MAX_REQUEST_BODY_SIZE: usize = 16 * 1024 * 1024;
+
 fn default_proxy_enabled() -> bool {
     false
 }

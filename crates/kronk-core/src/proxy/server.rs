@@ -1,9 +1,10 @@
+use crate::config::MAX_REQUEST_BODY_SIZE;
 use crate::proxy::ProxyState;
 use anyhow::Context;
 use axum::{
     body::{to_bytes, Body},
     extract::{Request, State},
-    http::{header, StatusCode},
+    http::StatusCode,
     response::{IntoResponse, Json, Response},
     routing::{get, post},
     Router,
@@ -11,8 +12,6 @@ use axum::{
 use reqwest::Client;
 use std::sync::Arc;
 use tracing::info;
-
-const MAX_REQUEST_BODY_SIZE: usize = 16 * 1024 * 1024; // 16 MB
 
 fn json_error_response() -> Response {
     Json(serde_json::json!({
@@ -33,9 +32,7 @@ impl ProxyServer {
         Self { state }
     }
 
-    pub async fn run(self, addr: std::net::SocketAddr) -> anyhow::Result<()> {
-        info!("Starting proxy server on {}", addr);
-
+    pub fn into_router(self) -> Router {
         let state_clone = self.state.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
@@ -45,7 +42,7 @@ impl ProxyServer {
             }
         });
 
-        let app = Router::new()
+        Router::new()
             .route("/chat/completions", post(handle_chat_completions))
             .route("/v1/chat/completions", post(handle_chat_completions))
             .route(
@@ -57,8 +54,13 @@ impl ProxyServer {
             .route("/health", get(handle_health))
             .route("/metrics", get(handle_metrics))
             .fallback(handle_fallback)
-            .with_state(self.state.clone());
+            .with_state(self.state.clone())
+    }
 
+    pub async fn run(self, addr: std::net::SocketAddr) -> anyhow::Result<()> {
+        info!("Starting proxy server on {}", addr);
+        
+        let app = self.into_router();
         let listener = tokio::net::TcpListener::bind(addr).await?;
         axum::serve(listener, app).await?;
 
@@ -71,7 +73,7 @@ async fn handle_chat_completions(state: State<Arc<ProxyState>>, req: Request<Bod
     let (parts, body) = req.into_parts();
     let body_bytes = match to_bytes(body, MAX_REQUEST_BODY_SIZE).await {
         Ok(b) => b,
-        Err(_) => return JSON_ERROR_RESPONSE,
+        Err(_) => return json_error_response(),
     };
 
     let request: serde_json::Value =
@@ -103,13 +105,16 @@ async fn handle_chat_completions(state: State<Arc<ProxyState>>, req: Request<Bod
                 Ok(name) => name,
                 Err(e) => {
                     info!("Failed to load model {}: {}", model_name, e);
-                    return Json(serde_json::json!({
-                        "error": {
-                            "message": format!("Failed to load model: {}", e),
-                            "type": "LoadModelError"
-                        }
-                    }))
-                    .into_response();
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({
+                            "error": {
+                                "message": format!("Failed to load model: {}", e),
+                                "type": "LoadModelError"
+                            }
+                        })),
+                    )
+                        .into_response();
                 }
             }
         }
@@ -128,7 +133,7 @@ async fn handle_stream_chat_completions(
     let (parts, body) = req.into_parts();
     let body_bytes = match to_bytes(body, MAX_REQUEST_BODY_SIZE).await {
         Ok(b) => b,
-        Err(_) => return JSON_ERROR_RESPONSE,
+        Err(_) => return json_error_response(),
     };
 
     let request: serde_json::Value =
@@ -271,33 +276,21 @@ async fn forward_request(
         });
 
     // Combine backend_url with the request path
-    let target_uri = if parts.uri.path().starts_with('/') {
-        format!("{}{}", backend_url, parts.uri.path())
-    } else {
-        format!("{}{}", &backend_url[..backend_url.len()-1], parts.uri.path())
-    };
+    let target_uri = format!("{}{}", backend_url, parts.uri.path());
 
     info!("Forwarding request to: {}", target_uri);
 
     let client = Client::new();
     let method = parts.method.clone();
 
-    let mut headers = reqwest::header::HeaderMap::new();
+let mut headers = reqwest::header::HeaderMap::new();
     for (key, value) in &parts.headers {
-        // Skip hop-by-hop headers: connection, keep-alive, proxy-authenticate,
-        // proxy-authorization, te, transfer-encoding, upgrade, trailer
-        if key.as_str() != "connection"
-            && key.as_str() != "keep-alive"
-            && key.as_str() != "proxy-authenticate"
-            && key.as_str() != "proxy-authorization"
-            && key.as_str() != "te"
-            && key.as_str() != "transfer-encoding"
-            && key.as_str() != "upgrade"
-            && key.as_str() != "trailer"
+        // Skip hop-by-hop headers
+        if !["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "transfer-encoding", "upgrade", "trailer"]
+            .contains(&key.as_str())
+            && value.to_str().is_ok()
         {
-            if let Ok(v) = value.to_str() {
-                headers.insert(key.clone(), value.clone());
-            }
+            headers.insert(key.clone(), value.clone());
         }
     }
 
@@ -370,109 +363,105 @@ async fn forward_request(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::Request;
-    use reqwest::Method;
     use std::sync::Arc;
 
     #[tokio::test]
-    async fn test_sse_streaming_response() {
+    async fn test_proxy_routes_exist() {
         let config = crate::proxy::ProxyConfig::default();
         let registry = crate::backends::registry::BackendRegistry::default();
         let config_data = crate::config::Config::default();
         let state = Arc::new(crate::proxy::ProxyState::new(config, registry, config_data));
 
-        let socket = std::net::SocketAddr::new(
-            std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
-            0,
-        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound_addr = listener.local_addr().unwrap();
 
         let server = ProxyServer::new(state.clone());
-        tokio::spawn(async move {
-            server.run(socket).await.unwrap();
+        let app = server.into_router();
+        let _handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        let response: Request<Body> = Request::builder()
-            .method(Method::GET)
-            .uri("/test")
-            .header("content-type", "text/event-stream; charset=utf-8")
-            .body(Body::from("test"))
+        // Test health endpoint
+        let client = reqwest::Client::new();
+        let response = client
+            .get(format!("http://{}/health", bound_addr))
+            .send()
+            .await
             .unwrap();
+        assert_eq!(response.status(), 200);
 
-        assert_eq!(
-            response.headers().get("content-type").unwrap(),
-            "text/event-stream; charset=utf-8"
-        );
+        // Test models endpoint
+        let response = client
+            .get(format!("http://{}/models", bound_addr))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
     }
 
     #[tokio::test]
-    async fn test_sse_streaming_timeout() {
+    async fn test_chat_completions_route() {
         let config = crate::proxy::ProxyConfig::default();
         let registry = crate::backends::registry::BackendRegistry::default();
         let config_data = crate::config::Config::default();
         let state = Arc::new(crate::proxy::ProxyState::new(config, registry, config_data));
 
-        let socket = std::net::SocketAddr::new(
-            std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
-            0,
-        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound_addr = listener.local_addr().unwrap();
 
         let server = ProxyServer::new(state.clone());
-        tokio::spawn(async move {
-            server.run(socket).await.unwrap();
+        let app = server.into_router();
+        let _handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        let response_body = String::from("data: {\"id\":\"1\"}\n\n");
-        let response_bytes = response_body.into_bytes();
-
-        let response: Request<Body> = Request::builder()
-            .method(Method::GET)
-            .uri("/test")
-            .header("content-type", "text/event-stream; charset=utf-8")
-            .body(response_bytes.into())
+        let client = reqwest::Client::new();
+        let response = client
+            .post(format!("http://{}/chat/completions", bound_addr))
+            .json(&serde_json::json!({
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "hello"}]
+            }))
+            .send()
+            .await
             .unwrap();
 
-        assert_eq!(
-            response.headers().get("content-type").unwrap(),
-            "text/event-stream; charset=utf-8"
-        );
+        assert_eq!(response.status(), 500); // Fails to load unknown model
     }
 
     #[tokio::test]
-    async fn test_sse_streaming_error_response() {
+    async fn test_stream_route() {
         let config = crate::proxy::ProxyConfig::default();
         let registry = crate::backends::registry::BackendRegistry::default();
         let config_data = crate::config::Config::default();
         let state = Arc::new(crate::proxy::ProxyState::new(config, registry, config_data));
 
-        let socket = std::net::SocketAddr::new(
-            std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
-            0,
-        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound_addr = listener.local_addr().unwrap();
 
         let server = ProxyServer::new(state.clone());
-        tokio::spawn(async move {
-            server.run(socket).await.unwrap();
+        let app = server.into_router();
+        let _handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        let response_body = String::from("data: {\"error\":{\"message\":\"Backend error\",\"type\":\"InternalServerError\"}}\n\n");
-        let response_bytes = response_body.into_bytes();
-
-        let response: Request<Body> = Request::builder()
-            .method(Method::GET)
-            .uri("/test")
-            .header("content-type", "text/event-stream; charset=utf-8")
-            .body(response_bytes.into())
+        let client = reqwest::Client::new();
+        let response = client
+            .post(format!("http://{}/chat/completions/stream", bound_addr))
+            .json(&serde_json::json!({
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "hello"}]
+            }))
+            .send()
+            .await
             .unwrap();
 
-        assert_eq!(
-            response.headers().get("content-type").unwrap(),
-            "text/event-stream; charset=utf-8"
-        );
+        assert_eq!(response.status(), 500); // Fails to load unknown model
     }
 }
