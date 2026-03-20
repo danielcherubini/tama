@@ -146,7 +146,6 @@ The installer detects your GPU and prompts you to select acceleration:
 - **CPU** — Fallback when no GPU is available
 
 ---
----
 
 ## Configuration
 
@@ -160,7 +159,7 @@ Kronk auto-generates a config on first run:
 path = "C:\\path\\to\\llama-server.exe"
 health_check_url = "http://localhost:8080/health"
 
-[servers.my-model]
+[models.my-model]
 backend = "llama_cpp"
 model = "bartowski/OmniCoder-8B-GGUF"
 quant = "Q4_K_M"
@@ -171,6 +170,7 @@ enabled = true
 host = "0.0.0.0"
 port = 11434
 idle_timeout_secs = 300
+startup_timeout_secs = 120
 
 [supervisor]
 restart_policy = "always"
@@ -179,7 +179,7 @@ restart_delay_ms = 3000
 health_check_interval_ms = 5000
 ```
 
-You can define multiple backends and servers. When `kronk serve` is running, request any configured model and it will be started automatically. Backend ports are auto-assigned — you don't need to configure them.
+The `[models.*]` key (e.g. `my-model`) is the alias used by clients in `"model": "my-model"`. You can define multiple models. When `kronk serve` is running, request any enabled model and its backend will start automatically. Backend ports are auto-assigned — you don't need to configure them.
 
 Model cards are stored in `~/.config/kronk/configs.d/<company>--<model>.toml` and contain quant info, context settings, and sampling presets.
 
@@ -204,18 +204,15 @@ Model cards are stored in `~/.config/kronk/configs.d/<company>--<model>.toml` an
 
 ## How It Works
 
-### Process Supervision
-
-Kronk spawns your LLM backend as a child process and watches it:
-
-- Streams stdout/stderr in real-time
-- Periodic HTTP health checks against your server
-- Auto-restart with configurable backoff on crash
-- Clean shutdown on ctrl-c or service stop
+1. `kronk serve` starts an OpenAI-compatible API server on a single port (default 11434)
+2. When a request arrives with `"model": "my-model"`, kronk looks up the config key in `[models.*]`
+3. If the backend isn't running, kronk auto-assigns a free port, starts the backend with the right GGUF file, and waits for it to become healthy
+4. The request is forwarded to the backend and the response is streamed back
+5. After `idle_timeout_secs` of inactivity, the backend is shut down to free resources
 
 ### Service Integration
 
-- **Windows:** Native Service Control Manager via the `windows-service` crate. `kronk.exe` registers itself as a Windows Service — no NSSM or wrapper needed. Auto-starts on boot.
+- **Windows:** Native Service Control Manager via the `windows-service` crate. `kronk service install` registers kronk as a Windows Service that auto-starts on boot. No NSSM or wrappers needed.
 - **Linux:** Generates and manages systemd user units. `kronk service install` creates the unit file, enables it, and starts the service.
 
 ### Firewall (Windows)
