@@ -58,15 +58,12 @@ impl ProxyServer {
 
     pub fn into_router(self) -> Router {
         Router::new()
-            .route("/chat/completions", post(handle_chat_completions))
             .route("/v1/chat/completions", post(handle_chat_completions))
             .route(
-                "/chat/completions/stream",
+                "/v1/chat/completions/stream",
                 post(handle_stream_chat_completions),
             )
-            .route("/models", get(handle_list_models))
             .route("/v1/models", get(handle_list_models))
-            .route("/models/:model_id", get(handle_get_model))
             .route("/v1/models/:model_id", get(handle_get_model))
             .route("/health", get(handle_health))
             .route("/metrics", get(handle_metrics))
@@ -222,35 +219,54 @@ async fn handle_stream_chat_completions(
 
 #[axum::debug_handler]
 async fn handle_get_model(state: State<Arc<ProxyState>>, Path(model_id): Path<String>) -> Response {
+    // Check if already loaded (by server name or model name)
     let model_state = state.get_model_state(&model_id).await;
 
-    if let Some(state) = model_state {
-        let load_time = state.load_time().unwrap_or(SystemTime::now());
-        let owned_by = state.backend();
+    if let Some(ms) = model_state {
+        let load_time = ms.load_time().unwrap_or(SystemTime::now());
+        let owned_by = ms.backend();
         let created = load_time
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
             .as_secs();
-        Json(serde_json::json!({
+        return Json(serde_json::json!({
             "id": model_id,
             "object": "model",
             "created": created,
             "owned_by": owned_by,
-            "ready": true
+            "ready": ms.is_ready()
         }))
-        .into_response()
-    } else {
-        (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({
-                "error": {
-                    "message": "Model not found",
-                    "type": "NotFoundError"
-                }
-            })),
-        )
-            .into_response()
+        .into_response();
     }
+
+    // Check if it's a configured (but not loaded) model
+    for (server_name, server_cfg) in &state.config.servers {
+        if !server_cfg.enabled {
+            continue;
+        }
+        let cfg_model = server_cfg.model.as_deref().unwrap_or(server_name.as_str());
+        if cfg_model == model_id || server_name == &model_id {
+            return Json(serde_json::json!({
+                "id": cfg_model,
+                "object": "model",
+                "created": 0,
+                "owned_by": server_cfg.backend,
+                "ready": false
+            }))
+            .into_response();
+        }
+    }
+
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({
+            "error": {
+                "message": "Model not found",
+                "type": "NotFoundError"
+            }
+        })),
+    )
+        .into_response()
 }
 
 #[axum::debug_handler]
@@ -276,23 +292,39 @@ async fn handle_metrics(state: State<Arc<ProxyState>>) -> Json<serde_json::Value
 
 #[axum::debug_handler]
 async fn handle_list_models(state: State<Arc<ProxyState>>) -> Json<serde_json::Value> {
-    let models = state.models.read().await;
-    let data: Vec<serde_json::Value> = models
-        .iter()
-        .map(|(name, model_state)| {
+    let loaded_models = state.models.read().await;
+
+    // Build a list of all configured (enabled) models, enriched with runtime state
+    let mut data: Vec<serde_json::Value> = Vec::new();
+    for (server_name, server_cfg) in &state.config.servers {
+        if !server_cfg.enabled {
+            continue;
+        }
+        let model_id = server_cfg.model.as_deref().unwrap_or(server_name.as_str());
+
+        if let Some(model_state) = loaded_models.get(server_name) {
             let created = model_state
                 .load_time()
                 .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            serde_json::json!({
-                "id": name,
+            data.push(serde_json::json!({
+                "id": model_id,
                 "object": "model",
                 "created": created,
-                "owned_by": model_state.backend()
-            })
-        })
-        .collect();
+                "owned_by": model_state.backend(),
+                "ready": model_state.is_ready()
+            }));
+        } else {
+            data.push(serde_json::json!({
+                "id": model_id,
+                "object": "model",
+                "created": 0,
+                "owned_by": server_cfg.backend,
+                "ready": false
+            }));
+        }
+    }
 
     Json(serde_json::json!({
         "object": "list",
@@ -569,7 +601,7 @@ mod tests {
 
         // Test models endpoint
         let response = client
-            .get(format!("http://{}/models", bound_addr))
+            .get(format!("http://{}/v1/models", bound_addr))
             .send()
             .await
             .unwrap();
@@ -594,7 +626,7 @@ mod tests {
 
         let client = reqwest::Client::new();
         let response = client
-            .post(format!("http://{}/chat/completions", bound_addr))
+            .post(format!("http://{}/v1/chat/completions", bound_addr))
             .json(&serde_json::json!({
                 "model": "test-model",
                 "messages": [{"role": "user", "content": "hello"}]
@@ -624,7 +656,7 @@ mod tests {
 
         let client = reqwest::Client::new();
         let response = client
-            .post(format!("http://{}/chat/completions/stream", bound_addr))
+            .post(format!("http://{}/v1/chat/completions/stream", bound_addr))
             .json(&serde_json::json!({
                 "model": "test-model",
                 "messages": [{"role": "user", "content": "hello"}]

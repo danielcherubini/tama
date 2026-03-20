@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::process::Command as TokioCommand;
 use tokio::sync::RwLock;
-use tokio::time::interval;
 use tracing::{debug, info, warn};
 
 /// State for a model backend.
@@ -150,7 +149,7 @@ impl ProxyState {
                     config_clone.proxy.idle_timeout_secs + 30,
                 ))
                 .build()
-                .unwrap(),
+                .expect("failed to build HTTP client"),
             metrics: Arc::new(ProxyMetrics::default()),
         }
     }
@@ -547,18 +546,6 @@ impl ProxyState {
         } else {
             None
         }
-    }
-
-    /// Start the idle reaper background task.
-    pub fn start_idle_reaper(&self) {
-        let state = self.clone();
-        tokio::spawn(async move {
-            let mut interval = interval(Duration::from_secs(10));
-            loop {
-                interval.tick().await;
-                let _ = state.check_idle_timeouts().await;
-            }
-        });
     }
 }
 

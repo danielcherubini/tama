@@ -309,20 +309,21 @@ impl Config {
             }
         };
 
-        // If backend has health_check_url, strip /health and return as base URL
-        if let Some(ref backend_url) = backend.health_check_url {
+        // If backend has health_check_url, derive the base URL from it
+        if let Some(ref health_url) = backend.health_check_url {
+            let mut url = url::Url::parse(health_url).ok()?;
+
+            // Override port if the server specifies one
             if let Some(port) = server.port {
-                let mut url = url::Url::parse(backend_url).ok()?;
                 url.set_port(Some(port)).ok()?;
-                // Strip /health and trailing slash
-                let url_str = url.to_string();
-                let base_url = url_str.trim_end_matches("/health").trim_end_matches('/');
-                return Some(base_url.to_string());
             }
-            // Strip /health and trailing slash
-            let url_str = backend_url.clone();
-            let base_url = url_str.trim_end_matches("/health").trim_end_matches('/');
-            return Some(base_url.to_string());
+
+            // Strip the path to get the base origin (scheme + host + port)
+            url.set_path("");
+            url.set_query(None);
+            url.set_fragment(None);
+            let base = url.to_string().trim_end_matches('/').to_string();
+            return Some(base);
         }
 
         // backend.health_check_url is None, try server.port fallback
