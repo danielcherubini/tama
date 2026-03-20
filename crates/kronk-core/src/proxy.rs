@@ -5,6 +5,7 @@ use crate::config::ProxyConfig;
 use crate::models::card::ModelCard;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
+use std::process::Command;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -132,13 +133,27 @@ impl ProxyState {
         let mut target_server = None;
         let mut target_backend = None;
 
+        // Reserve a server immediately to prevent race conditions
         {
-            let models = self.models.read().await;
+            let mut models = self.models.write().await;
             for (server_name, server, backend) in servers {
                 if !models.contains_key(&server_name) {
-                    target_server_name = Some(server_name);
+                    target_server_name = Some(server_name.clone());
                     target_server = Some(server.clone());
                     target_backend = Some(backend.clone());
+                    // Reserve this server by inserting a placeholder
+                    models.insert(
+                        server_name.clone(),
+                        ModelState {
+                            model_name: model_name.to_string(),
+                            backend: server.backend.clone(),
+                            backend_pid: None,
+                            backend_url: String::new(),
+                            load_time: Instant::now(),
+                            last_accessed: Instant::now(),
+                            consecutive_failures: Arc::new(AtomicU32::new(0)),
+                        },
+                    );
                     break;
                 }
             }
@@ -146,9 +161,11 @@ impl ProxyState {
 
         let server_name = target_server_name.unwrap_or_else(|| model_name.to_string());
         let server = target_server.ok_or_else(|| {
-            anyhow::anyhow!("All servers for model {} are already loaded", model_name)
+            anyhow::anyhow!("Failed to resolve server for model {}", model_name)
         })?;
-        let backend_config = target_backend.unwrap();
+        let backend_config = target_backend.ok_or_else(|| {
+            anyhow::anyhow!("Failed to resolve backend for model {}", model_name)
+        })?;
 
         // Get backend config from registry
         let backend_info = self
@@ -166,6 +183,9 @@ impl ProxyState {
         let health_url = config
             .resolve_health_url(&server)
             .with_context(|| format!("No health URL resolved for server: {}", server_name))?;
+        let backend_url = config
+            .resolve_backend_url(&server)
+            .with_context(|| format!("No backend URL resolved for server: {}", server_name))?;
 
         drop(config);
 
@@ -174,8 +194,7 @@ impl ProxyState {
             backend_name, server_name, model_name
         );
 
-        let start = Instant::now();
-        let mut child = std::process::Command::new(&backend_path)
+        let child = std::process::Command::new(&backend_path)
             .args(&args)
             .env("MODEL_NAME", model_name)
             .spawn()
@@ -188,19 +207,22 @@ impl ProxyState {
         );
 
         // Register PID in process map
-        let mut processes = self.process_map.lock().await;
-        processes.insert(pid, server_name.clone());
-        drop(processes);
+        {
+            let mut processes = self.process_map.lock().await;
+            processes.insert(pid, server_name.clone());
+        } // Lock dropped here
 
         // Wait for health check to pass
         let timeout = Duration::from_secs(30);
-        let mut elapsed = Duration::from_secs(0);
+        let start = Instant::now();
 
-        while elapsed < timeout {
+        loop {
             tokio::time::sleep(Duration::from_millis(500)).await;
-            elapsed += Duration::from_millis(500);
+            if start.elapsed() >= timeout {
+                break;
+            }
 
-            if let Ok(response) = check_health(&health_url).await {
+            if let Ok(response) = check_health(&health_url, Some(30)).await {
                 if response.status().is_success() {
                     debug!("Health check passed for server: {}", server_name);
                     break;
@@ -208,36 +230,37 @@ impl ProxyState {
             }
         }
 
-        if elapsed >= timeout {
-            let _ = child.kill();
-            let _ = child.wait();
+        if start.elapsed() >= timeout {
+            let _ = kill_process(pid).await;
+
+            // Remove from process map
             {
                 let mut processes = self.process_map.lock().await;
                 processes.remove(&pid);
             }
+
+            // Remove from models (cleanup failed reservation)
+            {
+                let mut models = self.models.write().await;
+                models.remove(&server_name);
+            }
+
             return Err(anyhow::anyhow!(
                 "Backend '{}' failed to start for server '{}' (timeout after {}s)",
                 backend_name,
                 server_name,
-                elapsed.as_secs()
+                timeout.as_secs()
             ));
         }
 
-        // Register the loaded model
+        // Update the loaded model state (update pid and backend_url)
         {
             let mut models = self.models.write().await;
-            models.insert(
-                server_name.clone(),
-                ModelState {
-                    model_name: model_name.to_string(),
-                    backend: backend_name,
-                    backend_pid: Some(pid),
-                    backend_url: health_url,
-                    load_time: start,
-                    last_accessed: start,
-                    consecutive_failures: Arc::new(AtomicU32::new(0)),
-                },
-            );
+            if let Some(state) = models.get_mut(&server_name) {
+                state.backend_pid = Some(pid);
+                state.backend_url = backend_url;
+                state.last_accessed = Instant::now();
+            }
         }
 
         info!("Server '{}' loaded successfully", server_name);
@@ -265,32 +288,18 @@ impl ProxyState {
         // Kill the process if we have the PID
         if let Some(pid) = pid {
             info!("Sending SIGTERM to backend process {}", pid);
-            #[cfg(unix)]
-            {
-                use std::process::Command;
-                let _ = Command::new("kill")
-                    .arg("-TERM")
-                    .arg(pid.to_string())
-                    .spawn();
-            }
-            #[cfg(windows)]
-            {
-                let _ = Command::new("taskkill")
-                    .arg("/PID")
-                    .arg(pid.to_string())
-                    .arg("/T")
-                    .arg("/F")
-                    .spawn();
-            }
+            let _ = kill_process(pid).await;
 
             // Wait up to 5 seconds for graceful shutdown
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
 
         // Remove from process map
-        let mut processes = self.process_map.lock().await;
-        if let Some(pid) = pid {
-            processes.remove(&pid);
+        {
+            let mut processes = self.process_map.lock().await;
+            if let Some(pid) = pid {
+                processes.remove(&pid);
+            }
         }
 
         // Remove from models
@@ -347,11 +356,8 @@ impl ProxyState {
 
         // Try to find the model card file
         // Format: configs.d/<company>--<model>.toml
-        let card_path = configs_dir.join(format!(
-            "{}--{}.toml",
-            model_name.split('/').next().unwrap_or(""),
-            model_name.split('/').next_back().unwrap_or(model_name)
-        ));
+        let (org, name) = model_name.split_once('/').unwrap_or(("", model_name));
+        let card_path = configs_dir.join(format!("{}--{}.toml", org, name));
 
         if card_path.exists() {
             let content = std::fs::read_to_string(&card_path).ok()?;
@@ -363,9 +369,32 @@ impl ProxyState {
     }
 }
 
+/// Kill a process by PID (cross-platform).
+async fn kill_process(pid: u32) -> Result<()> {
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill")
+            .arg("-TERM")
+            .arg(pid.to_string())
+            .spawn();
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .arg("/PID")
+            .arg(pid.to_string())
+            .arg("/T")
+            .arg("/F")
+            .spawn();
+    }
+    Ok(())
+}
+
 /// Check the health of a backend by making a request to its health endpoint.
-async fn check_health(url: &str) -> Result<reqwest::Response> {
-    let client = reqwest::Client::new();
+async fn check_health(url: &str, timeout: Option<u64>) -> Result<reqwest::Response> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout.unwrap_or(10)))
+        .build()?;
     client
         .get(url)
         .send()
@@ -399,9 +428,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_model_card() {
+        use tempfile::TempDir;
+        
         let config = ProxyConfig::default();
         let registry = BackendRegistry::default();
-        let config_data = crate::config::Config::default();
+        
+        // Create a temporary directory for configs to make test hermetic
+        let temp_dir = TempDir::new().unwrap();
+        let config_data = crate::config::Config {
+            general: crate::config::General {
+                log_level: "info".to_string(),
+                models_dir: None,
+                logs_dir: None,
+            },
+            backends: HashMap::new(),
+            servers: HashMap::new(),
+            supervisor: crate::config::Supervisor {
+                restart_policy: "always".to_string(),
+                max_restarts: 0,
+                restart_delay_ms: 0,
+                health_check_interval_ms: 0,
+            },
+            custom_profiles: None,
+            proxy: config.clone(),
+            loaded_from: Some(temp_dir.path().to_path_buf()),
+        };
         let state = ProxyState::new(config, registry, config_data);
 
         let card = state.get_model_card("test-model").await;

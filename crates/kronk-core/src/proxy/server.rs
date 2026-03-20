@@ -303,6 +303,7 @@ async fn forward_request(
             "transfer-encoding",
             "upgrade",
             "trailer",
+            "host",
         ]
         .contains(&key.as_str())
             && value.to_str().is_ok()
