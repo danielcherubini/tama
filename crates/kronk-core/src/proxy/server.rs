@@ -8,7 +8,6 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use bytes::Bytes;
 use reqwest::Client;
 use std::sync::Arc;
 use tracing::{debug, info};
@@ -47,8 +46,8 @@ impl ProxyServer {
 
 #[axum::debug_handler]
 async fn handle_chat_completions(state: State<Arc<ProxyState>>, req: Request<Body>) -> Response {
-    let body_bytes = match to_bytes(req.into_body(), usize::MAX).await {
-        Ok(bytes) => bytes,
+    let (parts, body_bytes) = match to_bytes(req.into_body(), usize::MAX).await {
+        Ok(body) => (parts, body),
         Err(_) => {
             return StatusCode::BAD_REQUEST.into_response();
         }
@@ -95,8 +94,7 @@ async fn handle_chat_completions(state: State<Arc<ProxyState>>, req: Request<Bod
 
     state.update_last_accessed(model_name).await;
 
-    // Forward the request to the backend
-    forward_request(&state, model_name, body_bytes.to_vec(), &req).await
+    forward_request(&state, model_name, &parts, &body_bytes).await
 }
 
 #[axum::debug_handler]
@@ -104,8 +102,8 @@ async fn handle_stream_chat_completions(
     state: State<Arc<ProxyState>>,
     req: Request<Body>,
 ) -> Response {
-    let body_bytes = match to_bytes(req.into_body(), usize::MAX).await {
-        Ok(bytes) => bytes,
+    let (parts, body_bytes) = match to_bytes(req.into_body(), usize::MAX).await {
+        Ok(body) => (parts, body),
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
     };
 
@@ -139,8 +137,7 @@ async fn handle_stream_chat_completions(
 
     state.update_last_accessed(model_name).await;
 
-    // Forward the request to the backend for streaming
-    forward_request(&state, model_name, body_bytes.to_vec(), &req).await
+    forward_request(&state, model_name, &parts, &body_bytes).await
 }
 
 #[axum::debug_handler]
@@ -191,14 +188,12 @@ async fn handle_fallback() -> StatusCode {
     StatusCode::NOT_FOUND
 }
 
-/// Forward a request to the backend and stream the response back.
 async fn forward_request(
     state: &Arc<ProxyState>,
     model_name: &str,
-    body_bytes: Vec<u8>,
-    req: &Request<Body>,
+    parts: &http::request::Parts,
+    body_bytes: &[u8],
 ) -> Response {
-    // Get the backend URL for the model
     let backend_url = state.get_backend_url(model_name).await.unwrap_or_else(|e| {
         info!("Failed to get backend URL for {}: {}", model_name, e);
         return format!("http://127.0.0.1:8080");
@@ -207,11 +202,11 @@ async fn forward_request(
     info!("Forwarding request to: {}", backend_url);
 
     let client = Client::new();
-    let method = req.method().clone();
-    let uri: String = req.uri().to_string();
+    let method = parts.method.clone();
+    let uri: String = parts.uri.to_string();
 
     let mut headers = reqwest::header::HeaderMap::new();
-    if let Some(content_type) = req.headers().get("Content-Type") {
+    if let Some(content_type) = parts.headers.get("Content-Type") {
         if let Ok(ct) = content_type.to_str() {
             headers.insert(
                 reqwest::header::CONTENT_TYPE,
@@ -263,7 +258,6 @@ mod tests {
     use reqwest::Method;
     use std::sync::Arc;
 
-    /// Test SSE streaming response for chat completions
     #[tokio::test]
     async fn test_sse_streaming_response() {
         let config = crate::proxy::ProxyConfig::default();
@@ -281,10 +275,8 @@ mod tests {
             server.run(socket).await.unwrap();
         });
 
-        // Give server time to start
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        // Test that SSE response has correct content type
         let response: Request<Body> = Request::builder()
             .method(Method::GET)
             .uri("/test")
@@ -292,14 +284,12 @@ mod tests {
             .body(Body::from("test"))
             .unwrap();
 
-        // Verify content type
         assert_eq!(
             response.headers().get("content-type").unwrap(),
             "text/event-stream; charset=utf-8"
         );
     }
 
-    /// Test SSE streaming with timeout
     #[tokio::test]
     async fn test_sse_streaming_timeout() {
         let config = crate::proxy::ProxyConfig::default();
@@ -319,7 +309,6 @@ mod tests {
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        // Create a slow streaming response (will timeout)
         let response_body = String::from("data: {\"id\":\"1\"}\n\n");
         let response_bytes = response_body.into_bytes();
 
@@ -330,14 +319,12 @@ mod tests {
             .body(response_bytes.into())
             .unwrap();
 
-        // Verify response is valid SSE
         assert_eq!(
             response.headers().get("content-type").unwrap(),
             "text/event-stream; charset=utf-8"
         );
     }
 
-    /// Test SSE streaming error handling
     #[tokio::test]
     async fn test_sse_streaming_error_response() {
         let config = crate::proxy::ProxyConfig::default();
@@ -357,7 +344,6 @@ mod tests {
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        // Create an error response in SSE format
         let response_body = String::from("data: {\"error\":{\"message\":\"Backend error\",\"type\":\"InternalServerError\"}}\n\n");
         let response_bytes = response_body.into_bytes();
 
