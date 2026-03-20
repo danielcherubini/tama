@@ -65,17 +65,18 @@ impl ProxyServer {
                 post(handle_stream_chat_completions),
             )
             .route("/models", get(handle_list_models))
+            .route("/v1/models", get(handle_list_models))
             .route("/models/:model_id", get(handle_get_model))
+            .route("/v1/models/:model_id", get(handle_get_model))
             .route("/health", get(handle_health))
             .route("/metrics", get(handle_metrics))
             .fallback(handle_fallback)
             .with_state(self.state.clone())
     }
 
-    pub async fn run(mut self, addr: std::net::SocketAddr) -> anyhow::Result<()> {
+    pub async fn run(self, addr: std::net::SocketAddr) -> anyhow::Result<()> {
         info!("Starting proxy server on {}", addr);
 
-        self.cancel_idle_timeout_checker();
         let app = self.into_router();
         let listener = tokio::net::TcpListener::bind(addr).await?;
         axum::serve(listener, app).await?;
@@ -96,13 +97,7 @@ async fn handle_chat_completions(state: State<Arc<ProxyState>>, req: Request<Bod
         match serde_json::from_slice(&body_bytes).context("Failed to parse request body") {
             Ok(r) => r,
             Err(_) => {
-                return Json(serde_json::json!({
-                    "error": {
-                        "message": "Bad Request",
-                        "type": "BadRequestError"
-                    }
-                }))
-                .into_response();
+                return json_error_response();
             }
         };
 
@@ -281,11 +276,27 @@ async fn handle_metrics(state: State<Arc<ProxyState>>) -> Json<serde_json::Value
 
 #[axum::debug_handler]
 async fn handle_list_models(state: State<Arc<ProxyState>>) -> Json<serde_json::Value> {
-    let models: Vec<String> = state.models.read().await.keys().cloned().collect();
+    let models = state.models.read().await;
+    let data: Vec<serde_json::Value> = models
+        .iter()
+        .map(|(name, model_state)| {
+            let created = model_state
+                .load_time()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            serde_json::json!({
+                "id": name,
+                "object": "model",
+                "created": created,
+                "owned_by": model_state.backend()
+            })
+        })
+        .collect();
 
     Json(serde_json::json!({
         "object": "list",
-        "data": models
+        "data": data
     }))
 }
 
@@ -478,6 +489,21 @@ async fn forward_request(
             let mut builder = Response::builder().status(status);
 
             for (key, value) in response.headers().iter() {
+                // Skip hop-by-hop headers in response
+                if [
+                    "connection",
+                    "keep-alive",
+                    "proxy-authenticate",
+                    "proxy-authorization",
+                    "te",
+                    "transfer-encoding",
+                    "upgrade",
+                    "trailer",
+                ]
+                .contains(&key.as_str())
+                {
+                    continue;
+                }
                 if let Ok(v) = value.to_str() {
                     builder = builder.header(key.as_str(), v);
                 }
@@ -519,8 +545,6 @@ mod tests {
     #[tokio::test]
     async fn test_proxy_routes_exist() {
         let config = crate::config::Config::default();
-        let _registry = crate::backends::registry::BackendRegistry::default();
-        let _config_data = crate::config::ProxyConfig::default();
         let state = Arc::new(crate::proxy::ProxyState::new(config));
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -555,8 +579,6 @@ mod tests {
     #[tokio::test]
     async fn test_chat_completions_route() {
         let config = crate::config::Config::default();
-        let _registry = crate::backends::registry::BackendRegistry::default();
-        let _config_data = crate::config::ProxyConfig::default();
         let state = Arc::new(crate::proxy::ProxyState::new(config));
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -587,8 +609,6 @@ mod tests {
     #[tokio::test]
     async fn test_stream_route() {
         let config = crate::config::Config::default();
-        let _registry = crate::backends::registry::BackendRegistry::default();
-        let _config_data = crate::config::ProxyConfig::default();
         let state = Arc::new(crate::proxy::ProxyState::new(config));
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

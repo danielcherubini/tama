@@ -1,19 +1,8 @@
 pub mod server;
 
 use crate::config::Config;
-use crate::models::card::ModelCard;
 use anyhow::{Context, Result};
-use axum::{
-    body::Body,
-    extract::{Path, State},
-    http::{Response, StatusCode},
-    response::IntoResponse,
-    routing::{get, post},
-    Router,
-};
-
 use reqwest::Client;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -102,11 +91,11 @@ impl ModelState {
         }
     }
 
-    pub fn last_accessed(&self) -> Instant {
+    pub fn last_accessed(&self) -> Option<Instant> {
         match self {
-            ModelState::Ready { last_accessed, .. } => *last_accessed,
-            ModelState::Starting { last_accessed, .. } => *last_accessed,
-            ModelState::Failed { .. } => Instant::now(),
+            ModelState::Ready { last_accessed, .. } => Some(*last_accessed),
+            ModelState::Starting { last_accessed, .. } => Some(*last_accessed),
+            ModelState::Failed { .. } => None,
         }
     }
 
@@ -152,10 +141,16 @@ pub struct ProxyState {
 
 impl ProxyState {
     pub fn new(config: Config) -> Self {
+        let config_clone = config.clone();
         Self {
             config,
             models: Arc::new(RwLock::new(HashMap::new())),
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(
+                    config_clone.proxy.idle_timeout_secs + 30,
+                ))
+                .build()
+                .unwrap(),
             metrics: Arc::new(ProxyMetrics::default()),
         }
     }
@@ -192,7 +187,7 @@ impl ProxyState {
     pub async fn get_model_state_with_access(
         &self,
         server_name: &str,
-    ) -> Option<(ModelState, Instant)> {
+    ) -> Option<(ModelState, Option<Instant>)> {
         let models = self.models.read().await;
         models
             .get(server_name)
@@ -234,7 +229,7 @@ impl ProxyState {
                         .consecutive_failures()
                         .map(|f| f.load(std::sync::atomic::Ordering::Relaxed))
                         .unwrap_or(0)
-                        > self.config.proxy.circuit_breaker_threshold
+                        <= self.config.proxy.circuit_breaker_threshold
                 {
                     return Some(server_name);
                 }
@@ -248,7 +243,7 @@ impl ProxyState {
     pub async fn load_model(
         &self,
         model_name: &str,
-        _model_card: Option<&ModelCard>,
+        _model_card: Option<&crate::models::card::ModelCard>,
     ) -> Result<String> {
         debug!("Loading model: {}", model_name);
 
@@ -352,6 +347,8 @@ impl ProxyState {
         loop {
             tokio::time::sleep(Duration::from_millis(500)).await;
             if start.elapsed() >= timeout {
+                // Kill the process on timeout to prevent orphan
+                let _ = kill_process(pid).await;
                 break;
             }
 
@@ -425,12 +422,29 @@ impl ProxyState {
             backend_name, server_name
         );
 
-        // Kill the process if we have the PID
+        // Send SIGTERM for graceful shutdown
         info!("Sending SIGTERM to backend process {}", pid);
         let _ = kill_process(pid).await;
 
-        // Wait up to 5 seconds for graceful shutdown
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        // Wait up to 5 seconds for the process to exit, polling every 250ms
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            if !is_process_alive(pid) {
+                debug!("Backend process {} exited gracefully", pid);
+                break;
+            }
+            if Instant::now() >= deadline {
+                warn!(
+                    "Backend process {} did not exit after SIGTERM, sending SIGKILL",
+                    pid
+                );
+                let _ = force_kill_process(pid).await;
+                // Brief wait for SIGKILL to take effect
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                break;
+            }
+        }
 
         // Remove from models
         let mut models = self.models.write().await;
@@ -450,7 +464,19 @@ impl ProxyState {
 
         let models = self.models.read().await;
         for (server_name, state) in models.iter() {
-            let idle_duration = now.duration_since(state.last_accessed());
+            // Failed models have no last_accessed; always mark them for cleanup
+            let last = match state.last_accessed() {
+                Some(t) => t,
+                None => {
+                    warn!(
+                        "Server '{}' is in Failed state, marking for cleanup",
+                        server_name,
+                    );
+                    to_unload.push(server_name.clone());
+                    continue;
+                }
+            };
+            let idle_duration = now.duration_since(last);
             let timeout = Duration::from_secs(self.config.proxy.idle_timeout_secs);
 
             if idle_duration > timeout {
@@ -526,6 +552,24 @@ impl ProxyState {
     }
 }
 
+/// Check if a process is still alive by PID.
+fn is_process_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        // Check /proc/<pid> existence (Linux) as a no-dependency check
+        std::path::Path::new(&format!("/proc/{}", pid)).exists()
+    }
+    #[cfg(windows)]
+    {
+        // On Windows, use tasklist to check if PID is running
+        std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {}", pid), "/NH"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
+            .unwrap_or(false)
+    }
+}
+
 /// Kill a process by PID (cross-platform).
 async fn kill_process(pid: u32) -> Result<()> {
     #[cfg(unix)]
@@ -560,6 +604,40 @@ async fn kill_process(pid: u32) -> Result<()> {
     Ok(())
 }
 
+/// Forcefully kill a process by PID (SIGKILL on Unix, taskkill /F on Windows).
+async fn force_kill_process(pid: u32) -> Result<()> {
+    #[cfg(unix)]
+    {
+        let mut child: tokio::process::Child = TokioCommand::new("kill")
+            .arg("-KILL")
+            .arg(pid.to_string())
+            .spawn()
+            .with_context(|| format!("Failed to execute kill -KILL for PID {}", pid))?;
+        let status: std::process::ExitStatus = child.wait().await?;
+        if !status.success() {
+            return Err(anyhow::anyhow!("Failed to send SIGKILL to PID {}", pid));
+        }
+    }
+    #[cfg(windows)]
+    {
+        let mut child: tokio::process::Child = TokioCommand::new("taskkill")
+            .arg("/PID")
+            .arg(pid.to_string())
+            .arg("/T")
+            .arg("/F")
+            .spawn()
+            .with_context(|| format!("Failed to execute taskkill /F for PID {}", pid))?;
+        let status: std::process::ExitStatus = child.wait().await?;
+        if !status.success() {
+            return Err(anyhow::anyhow!(
+                "Failed to forcefully terminate process with PID {}",
+                pid
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Check the health of a backend by making a request to its health endpoint.
 async fn check_health(url: &str, timeout: Option<u64>) -> Result<reqwest::Response> {
     let client = reqwest::Client::builder()
@@ -572,139 +650,26 @@ async fn check_health(url: &str, timeout: Option<u64>) -> Result<reqwest::Respon
         .with_context(|| format!("Failed to check health: {}", url))
 }
 
-/// List all available models (OpenAI API compatible).
-async fn list_models(State(state): State<ProxyState>) -> impl IntoResponse {
-    let mut data = Vec::new();
-    for name in state.config.servers.keys() {
-        data.push(serde_json::json!({
-            "id": name,
-            "object": "model",
-            "created": 0,
-            "owned_by": "kronk"
-        }));
-    }
-    (
-        StatusCode::OK,
-        axum::Json(serde_json::json!({ "object": "list", "data": data })),
-    )
-}
-
-/// Get details for a single model (OpenAI API compatible).
-async fn get_model(
-    Path(model_name): Path<String>,
-    State(state): State<ProxyState>,
-) -> Result<impl IntoResponse, StatusCode> {
-    if state.config.servers.contains_key(&model_name) {
-        Ok(axum::Json(serde_json::json!({
-            "id": model_name,
-            "object": "model",
-            "created": 0,
-            "owned_by": "kronk"
-        })))
-    } else {
-        Err(StatusCode::NOT_FOUND)
-    }
-}
-
-/// Proxy handler for all other /v1/* paths.
-async fn proxy_request(
-    State(state): State<ProxyState>,
-    req: axum::extract::Request,
-) -> Result<Response<Body>, (StatusCode, String)> {
-    let path = req.uri().path().to_string();
-    let query = req
-        .uri()
-        .query()
-        .map(|q| format!("?{}", q))
-        .unwrap_or_default();
-
-    // 1. Read the entire body into memory to parse it and forward it
-    let body_bytes = axum::body::to_bytes(req.into_body(), usize::MAX)
-        .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
-
-    // 2. Parse JSON just to find the "model" key
-    let json_body: Value = serde_json::from_slice(&body_bytes)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid JSON: {}", e)))?;
-
-    let model_name = json_body.get("model").and_then(|m| m.as_str()).ok_or((
-        StatusCode::BAD_REQUEST,
-        "Missing 'model' field in JSON payload".to_string(),
-    ))?;
-
-    // 3. Ensure model is running and get its local port
-    let server_name = state
-        .load_model(model_name, None)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    // 4. Construct upstream URL
-    let backend_url = state
-        .get_backend_url(&server_name)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let mut target_url = format!("http://{}{}", backend_url, path);
-    if !query.is_empty() {
-        target_url.push_str(&query);
-    }
-
-    // 5. Forward the request using Reqwest
-    let reqwest_res = state
-        .client
-        .post(&target_url)
-        .header("Content-Type", "application/json")
-        .body(reqwest::Body::from(body_bytes))
-        .send()
-        .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
-
-    // 6. Convert the Reqwest response (SSE stream) directly into an Axum body
-    let mut response_builder = Response::builder().status(reqwest_res.status());
-    for (key, value) in reqwest_res.headers() {
-        response_builder = response_builder.header(key, value);
-    }
-    let axum_body = Body::from_stream(reqwest_res.bytes_stream());
-
-    Ok(response_builder.body(axum_body).unwrap())
-}
-
-/// Start the OpenAI proxy server.
-pub async fn start_server(config: Config) -> Result<()> {
-    let state = ProxyState::new(config.clone());
-
-    state.start_idle_reaper();
-
-    let app = Router::new()
-        .route("/v1/models", get(list_models))
-        .route("/v1/models/:model", get(get_model))
-        // Catch-all POST for the proxy handler
-        .route("/v1/*path", post(proxy_request))
-        .with_state(state);
-
-    let bind_addr = format!("{}:{}", config.proxy.host, config.proxy.port);
-    info!("Starting OpenAI proxy server on http://{}", bind_addr);
-
-    let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
-    axum::serve(listener, app).await?;
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_list_models() {
+    async fn test_proxy_state_new() {
+        let config = Config::default();
+        let state = ProxyState::new(config.clone());
+        assert!(state.models.read().await.is_empty());
+        assert_eq!(
+            state.config.proxy.idle_timeout_secs,
+            config.proxy.idle_timeout_secs
+        );
+    }
+
+    #[tokio::test]
+    async fn test_no_available_server_for_unknown_model() {
         let config = Config::default();
         let state = ProxyState::new(config);
-
-        let response = list_models(State(state)).await;
-        let body_bytes = axum::body::to_bytes(response.into_response().into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let body = serde_json::from_slice::<serde_json::Value>(&body_bytes).unwrap();
-        assert_eq!(body["object"], "list");
+        let result = state.get_available_server_for_model("nonexistent").await;
+        assert!(result.is_none());
     }
 }
