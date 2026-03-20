@@ -28,23 +28,35 @@ fn json_error_response() -> Response {
 
 pub struct ProxyServer {
     state: Arc<ProxyState>,
+    idle_timeout_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl ProxyServer {
     pub fn new(state: Arc<ProxyState>) -> Self {
-        Self { state }
+        let handle = Self::start_idle_timeout_checker(state.clone());
+        Self {
+            state,
+            idle_timeout_handle: Some(handle),
+        }
     }
 
-    pub fn into_router(self) -> Router {
-        let state_clone = self.state.clone();
+    fn start_idle_timeout_checker(state: Arc<ProxyState>) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
             loop {
                 interval.tick().await;
-                let _ = state_clone.check_idle_timeouts().await;
+                let _ = state.check_idle_timeouts().await;
             }
-        });
+        })
+    }
 
+    pub fn cancel_idle_timeout_checker(&mut self) {
+        if let Some(handle) = self.idle_timeout_handle.take() {
+            handle.abort();
+        }
+    }
+
+    pub fn into_router(self) -> Router {
         Router::new()
             .route("/chat/completions", post(handle_chat_completions))
             .route("/v1/chat/completions", post(handle_chat_completions))
@@ -60,9 +72,10 @@ impl ProxyServer {
             .with_state(self.state.clone())
     }
 
-    pub async fn run(self, addr: std::net::SocketAddr) -> anyhow::Result<()> {
+    pub async fn run(mut self, addr: std::net::SocketAddr) -> anyhow::Result<()> {
         info!("Starting proxy server on {}", addr);
 
+        self.cancel_idle_timeout_checker();
         let app = self.into_router();
         let listener = tokio::net::TcpListener::bind(addr).await?;
         axum::serve(listener, app).await?;
@@ -299,6 +312,23 @@ async fn forward_request(
             .map(|f| f.load(std::sync::atomic::Ordering::Relaxed))
             .unwrap_or(0);
         if failures >= state.config.circuit_breaker_threshold {
+            // Check if cooldown has elapsed
+            if !ms.can_reload(state.config.circuit_breaker_cooldown_seconds) {
+                info!(
+                    "Circuit breaker cooldown active for server '{}' ({} failures). Waiting for cooldown.",
+                    server_name, failures
+                );
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({
+                        "error": {
+                            "message": format!("Server {} is in cooldown due to repeated failures", server_name),
+                            "type": "ServiceUnavailableError"
+                        }
+                    })),
+                )
+                    .into_response();
+            }
             info!(
                 "Circuit breaker tripped for server '{}' ({} failures). Unloading server.",
                 server_name, failures
@@ -391,7 +421,8 @@ async fn forward_request(
         query_string = format!("?{}", query_string);
     }
 
-    match state.client
+    match state
+        .client
         .request(method, format!("{}{}", target_uri, query_string))
         .headers(headers)
         .body(body_bytes.to_vec())
@@ -419,6 +450,25 @@ async fn forward_request(
                     if let Some(ms) = &model_state {
                         if let Some(f) = ms.consecutive_failures() {
                             f.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        // Set failure timestamp for cooldown
+                        if ms.is_ready() {
+                            let new_ts = SystemTime::now();
+                            let mut models = state.models.write().await;
+                            if let Some(existing) = models.get_mut(server_name) {
+                                match existing {
+                                    crate::proxy::ModelState::Ready {
+                                        failure_timestamp, ..
+                                    }
+                                    | crate::proxy::ModelState::Starting {
+                                        failure_timestamp,
+                                        ..
+                                    } => {
+                                        *failure_timestamp = Some(new_ts);
+                                    }
+                                    _ => {}
+                                }
+                            }
                         }
                     }
                 }

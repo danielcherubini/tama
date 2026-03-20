@@ -29,6 +29,7 @@ impl Default for ProxyConfig {
             port: default_proxy_port(),
             idle_timeout_secs: default_proxy_timeout(),
             circuit_breaker_threshold: default_circuit_breaker_threshold(),
+            circuit_breaker_cooldown_seconds: default_circuit_breaker_cooldown(),
         }
     }
 }
@@ -45,6 +46,8 @@ pub struct ProxyConfig {
     pub idle_timeout_secs: u64,
     #[serde(default = "default_circuit_breaker_threshold")]
     pub circuit_breaker_threshold: u32,
+    #[serde(default = "default_circuit_breaker_cooldown")]
+    pub circuit_breaker_cooldown_seconds: u64,
 }
 
 /// Maximum request body size in bytes (16 MB)
@@ -70,6 +73,10 @@ fn default_proxy_timeout() -> u64 {
 
 fn default_circuit_breaker_threshold() -> u32 {
     3
+}
+
+fn default_circuit_breaker_cooldown() -> u64 {
+    60
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -656,6 +663,7 @@ impl Default for Config {
                 port: default_proxy_port(),
                 idle_timeout_secs: 300,
                 circuit_breaker_threshold: 3,
+                circuit_breaker_cooldown_seconds: default_circuit_breaker_cooldown(),
             },
             loaded_from: None,
         }

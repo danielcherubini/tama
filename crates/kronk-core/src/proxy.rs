@@ -6,10 +6,10 @@ use crate::models::card::ModelCard;
 use anyhow::{Context, Result};
 use reqwest::Client;
 use std::collections::HashMap;
-use std::process::Command;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
+use tokio::process::Command as TokioCommand;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info, warn};
 
@@ -23,6 +23,7 @@ pub enum ModelState {
         backend_url: String,
         last_accessed: SystemTime,
         consecutive_failures: Arc<AtomicU32>,
+        failure_timestamp: Option<SystemTime>,
     },
     /// Backend is ready and accepting traffic
     Ready {
@@ -33,6 +34,7 @@ pub enum ModelState {
         load_time: SystemTime,
         last_accessed: SystemTime,
         consecutive_failures: Arc<AtomicU32>,
+        failure_timestamp: Option<SystemTime>,
     },
     /// Backend failed to start
     Failed {
@@ -96,6 +98,26 @@ impl ModelState {
             ModelState::Ready { last_accessed, .. } => *last_accessed,
             ModelState::Starting { last_accessed, .. } => *last_accessed,
             ModelState::Failed { .. } => SystemTime::now(),
+        }
+    }
+
+    /// Check if the server has failed and the cooldown has elapsed.
+    pub fn can_reload(&self, cooldown_seconds: u64) -> bool {
+        match self {
+            ModelState::Failed { .. } => false,
+            ModelState::Starting {
+                failure_timestamp, ..
+            }
+            | ModelState::Ready {
+                failure_timestamp, ..
+            } => failure_timestamp
+                .map(|ts| {
+                    SystemTime::now()
+                        .duration_since(ts.clone())
+                        .map(|d| d.as_secs() >= cooldown_seconds)
+                        .unwrap_or(false)
+                })
+                .unwrap_or(true),
         }
     }
 }
@@ -253,7 +275,10 @@ impl ProxyState {
             let models = self.models.read().await;
             if let Some(state) = models.get(&server_name) {
                 if state.is_ready() {
-                    debug!("Server '{}' already loaded for model '{}'", server_name, model_name);
+                    debug!(
+                        "Server '{}' already loaded for model '{}'",
+                        server_name, model_name
+                    );
                     drop(models);
                     drop(config);
                     return Ok(server_name);
@@ -283,6 +308,7 @@ impl ProxyState {
                             backend_url: String::new(),
                             last_accessed: SystemTime::now(),
                             consecutive_failures: Arc::new(AtomicU32::new(0)),
+                            failure_timestamp: None,
                         },
                     );
                     break;
@@ -311,9 +337,9 @@ impl ProxyState {
             .spawn()
             .with_context(|| format!("Failed to start backend '{}'", server_config.backend))?;
 
-        let pid = child
-            .id()
-            .ok_or_else(|| anyhow::anyhow!("Failed to get PID for backend '{}'", server_config.backend))?;
+        let pid = child.id().ok_or_else(|| {
+            anyhow::anyhow!("Failed to get PID for backend '{}'", server_config.backend)
+        })?;
         info!(
             "Backend '{}' started for server '{}' (pid: {:?})",
             server_config.backend, server_name, pid
@@ -346,15 +372,15 @@ impl ProxyState {
         }
 
         if start.elapsed() >= timeout {
-// Remove Child handle and wait
-        let child = self.process_handles.lock().await.remove(&pid);
-        if let Some(mut child) = child {
-            tokio::task::spawn_blocking(move || {
-                std::mem::drop(child.wait());
-            })
-            .await
-            .unwrap();
-        }
+            // Remove Child handle and wait
+            let child = self.process_handles.lock().await.remove(&pid);
+            if let Some(mut child) = child {
+                tokio::task::spawn_blocking(move || {
+                    std::mem::drop(child.wait());
+                })
+                .await
+                .unwrap();
+            }
             let mut processes = self.process_map.lock().await;
             processes.remove(&pid);
 
@@ -385,6 +411,7 @@ impl ProxyState {
                         load_time: SystemTime::now(),
                         last_accessed: SystemTime::now(),
                         consecutive_failures: Arc::new(AtomicU32::new(0)),
+                        failure_timestamp: None,
                     };
                 }
             }
@@ -527,26 +554,31 @@ impl ProxyState {
 async fn kill_process(pid: u32) -> Result<()> {
     #[cfg(unix)]
     {
-        let mut child = Command::new("kill")
+        let mut child: tokio::process::Child = TokioCommand::new("kill")
             .arg("-TERM")
             .arg(pid.to_string())
-            .spawn()?;
-        let status = child.wait()?;
+            .spawn()
+            .with_context(|| format!("Failed to start backend '{}'", pid))?;
+        let status: std::process::ExitStatus = child.wait().await?;
         if !status.success() {
             return Err(anyhow::anyhow!("Failed to send SIGTERM to PID {}", pid));
         }
     }
     #[cfg(windows)]
     {
-        let mut child = Command::new("taskkill")
+        let mut child: tokio::process::Child = TokioCommand::new("taskkill")
             .arg("/PID")
             .arg(pid.to_string())
             .arg("/T")
             .arg("/F")
-            .spawn()?;
-        let status = child.wait()?;
+            .spawn()
+            .with_context(|| format!("Failed to start backend '{}'", pid))?;
+        let status: std::process::ExitStatus = child.wait().await?;
         if !status.success() {
-            return Err(anyhow::anyhow!("Failed to terminate process with PID {}", pid));
+            return Err(anyhow::anyhow!(
+                "Failed to terminate process with PID {}",
+                pid
+            ));
         }
     }
     Ok(())

@@ -1550,7 +1550,10 @@ async fn cmd_proxy(config: &Config, command: ProxyCommands) -> Result<()> {
     // Parse host and port
     let (host_addr, warning) = match host.parse::<std::net::IpAddr>() {
         Ok(addr) => (addr, false),
-        Err(_) => (std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)), true),
+        Err(_) => (
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
+            true,
+        ),
     };
     let addr = SocketAddr::new(host_addr, port);
 
