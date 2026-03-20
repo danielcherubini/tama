@@ -1,9 +1,10 @@
+pub mod server;
+
 use crate::backends::registry::BackendRegistry;
 use crate::config::ProxyConfig;
 use crate::models::card::ModelCard;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
@@ -52,9 +53,9 @@ impl ProxyState {
             .get(server_name)
             .with_context(|| format!("Server '{}' not found", server_name))?;
 
-        let backend_url = config.resolve_health_url(server).with_context(|| {
-            format!("No backend URL resolved for server '{}'", server_name)
-        })?;
+        let backend_url = config
+            .resolve_health_url(server)
+            .with_context(|| format!("No backend URL resolved for server '{}'", server_name))?;
 
         Ok(backend_url)
     }
@@ -72,7 +73,11 @@ impl ProxyState {
     }
 
     /// Load a model by starting its backend process.
-    pub async fn load_model(&self, model_name: &str, _model_card: &ModelCard) -> Result<()> {
+    pub async fn load_model(
+        &self,
+        model_name: &str,
+        _model_card: Option<&ModelCard>,
+    ) -> Result<()> {
         debug!("Loading model: {}", model_name);
 
         // Get backend config from registry
@@ -94,9 +99,9 @@ impl ProxyState {
             .with_context(|| format!("No server configured for model: {}", model_name))?;
 
         let args = config.build_args(server, backend_config);
-        let health_url = config.resolve_health_url(server).with_context(|| {
-            format!("No health URL resolved for model: {}", model_name)
-        })?;
+        let health_url = config
+            .resolve_health_url(server)
+            .with_context(|| format!("No health URL resolved for model: {}", model_name))?;
 
         drop(config);
 
@@ -115,9 +120,7 @@ impl ProxyState {
         let pid = child.id();
         info!(
             "Backend '{}' started for model '{}' (pid: {:?})",
-            backend_name,
-            model_name,
-            pid
+            backend_name, model_name, pid
         );
 
         // Register PID in process map
@@ -197,7 +200,7 @@ impl ProxyState {
                 .arg("-TERM")
                 .arg(pid.to_string())
                 .spawn();
-            
+
             // Wait up to 5 seconds for graceful shutdown
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
@@ -254,6 +257,27 @@ impl ProxyState {
             state.last_accessed = Instant::now();
         }
     }
+
+    /// Get the model card for a model name.
+    pub async fn get_model_card(&self, model_name: &str) -> Option<crate::models::card::ModelCard> {
+        let configs_dir = self.config_data.read().await.configs_dir().ok()?;
+
+        // Try to find the model card file
+        // Format: configs.d/<company>--<model>.toml
+        let card_path = configs_dir.join(format!(
+            "{}--{}.toml",
+            model_name.split('/').next().unwrap_or(""),
+            model_name
+        ));
+
+        if card_path.exists() {
+            let content = std::fs::read_to_string(&card_path).ok()?;
+            let card: crate::models::card::ModelCard = toml::from_str(&content).ok()?;
+            Some(card)
+        } else {
+            None
+        }
+    }
 }
 
 /// Check the health of a backend by making a request to its health endpoint.
@@ -288,5 +312,16 @@ mod tests {
         let state = ProxyState::new(config, registry, config_data);
 
         assert!(state.get_model_state("test-model").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_model_card() {
+        let config = ProxyConfig::default();
+        let registry = BackendRegistry::default();
+        let config_data = crate::config::Config::default();
+        let state = ProxyState::new(config, registry, config_data);
+
+        let card = state.get_model_card("test-model").await;
+        assert!(card.is_none());
     }
 }

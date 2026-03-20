@@ -92,6 +92,12 @@ enum Commands {
         #[command(subcommand)]
         command: BackendSubcommand,
     },
+    /// OpenAI-compliant proxy for local AI models
+    Proxy {
+        /// Proxy settings
+        #[command(subcommand)]
+        command: ProxyCommands,
+    },
     /// View server logs
     Logs {
         /// Server name
@@ -102,6 +108,22 @@ enum Commands {
         /// Number of lines to show (default: 50)
         #[arg(short = 'n', long, default_value = "50")]
         lines: usize,
+    },
+}
+
+#[derive(Parser, Debug)]
+pub enum ProxyCommands {
+    /// Start the proxy server
+    Start {
+        /// Host to bind to
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        /// Port to bind to
+        #[arg(long, default_value = "11434")]
+        port: u16,
+        /// Idle timeout in seconds (models unload after this many seconds of inactivity)
+        #[arg(long, default_value = "300")]
+        idle_timeout: u64,
     },
 }
 
@@ -303,6 +325,7 @@ fn main() -> Result<()> {
             Commands::Backend { command } => {
                 commands::backend::run(&config, BackendArgs { command }).await
             }
+            Commands::Proxy { command } => cmd_proxy(&config, command).await,
             Commands::Logs {
                 name,
                 follow,
@@ -1511,6 +1534,73 @@ fn cmd_profile(config: &Config, command: ProfileCommands) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// Start the OpenAI-compliant proxy server
+async fn cmd_proxy(config: &Config, command: ProxyCommands) -> Result<()> {
+    use kronk_core::proxy::server::ProxyServer;
+    use kronk_core::proxy::ProxyState;
+    use std::net::SocketAddr;
+    use std::sync::Arc;
+
+    let ProxyCommands::Start {
+        host: _,
+        port,
+        idle_timeout,
+    } = command;
+
+    // Parse host and port
+    let addr = SocketAddr::new(
+        std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
+        port,
+    );
+
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive(tracing::Level::INFO.into()),
+        )
+        .init();
+
+    tracing::info!("Starting Kronk Proxy on {}", addr);
+    tracing::info!("Idle timeout: {}s", idle_timeout);
+    tracing::info!("Use `kronk proxy start --help` for more options");
+
+    // Create BackendRegistry for dynamic model loading
+    let registry = {
+        let _base_dir = std::env::current_dir().context("Failed to get current directory")?;
+        let mut data = kronk_core::backends::registry::RegistryData::default();
+        for (name, backend) in &config.backends {
+            data.backends.insert(
+                name.clone(),
+                kronk_core::backends::registry::BackendInfo {
+                    name: name.clone(),
+                    backend_type: kronk_core::backends::registry::BackendType::Custom,
+                    version: "1.0.0".to_string(),
+                    path: backend.path.clone().into(),
+                    installed_at: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64,
+                    gpu_type: None,
+                    source: None,
+                },
+            );
+        }
+        kronk_core::backends::registry::BackendRegistry::from_backends(data.backends)
+    };
+
+    let state = Arc::new(ProxyState::new(
+        config.proxy.clone(),
+        registry,
+        config.clone(),
+    ));
+
+    // Create and run proxy server
+    let server = ProxyServer::new(state.clone());
+    server.run(addr).await?;
+
+    Ok(())
 }
 
 #[cfg(test)]

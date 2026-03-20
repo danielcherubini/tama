@@ -88,9 +88,9 @@ pub struct BackendInfo {
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
-struct RegistryData {
+pub struct RegistryData {
     #[serde(default)]
-    backends: HashMap<String, BackendInfo>,
+    pub backends: HashMap<String, BackendInfo>,
 }
 
 /// Source of a backend installation
@@ -140,6 +140,25 @@ impl BackendRegistry {
             base_dir,
             data,
         })
+    }
+
+    /// Create a new BackendRegistry from a HashMap of backends
+    pub fn from_backends(backends: HashMap<String, BackendInfo>) -> Self {
+        Self {
+            path: PathBuf::from("dynamic"),
+            base_dir: PathBuf::from("/"),
+            data: RegistryData { backends },
+        }
+    }
+
+    /// Create a default BackendRegistry (for tests)
+    #[cfg(test)]
+    pub fn default() -> Self {
+        Self {
+            path: PathBuf::from("/tmp/test-registry.toml"),
+            base_dir: PathBuf::from("/tmp"),
+            data: RegistryData::default(),
+        }
     }
 
     pub fn save(&self) -> Result<()> {
