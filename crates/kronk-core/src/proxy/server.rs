@@ -3,7 +3,7 @@ use anyhow::Context;
 use axum::{
     body::{to_bytes, Body},
     extract::{Request, State},
-    http::StatusCode,
+    http::{header, StatusCode},
     response::{IntoResponse, Json, Response},
     routing::{get, post},
     Router,
@@ -11,6 +11,18 @@ use axum::{
 use reqwest::Client;
 use std::sync::Arc;
 use tracing::info;
+
+const MAX_REQUEST_BODY_SIZE: usize = 16 * 1024 * 1024; // 16 MB
+
+fn json_error_response() -> Response {
+    Json(serde_json::json!({
+        "error": {
+            "message": "Bad Request",
+            "type": "BadRequestError"
+        }
+    }))
+    .into_response()
+}
 
 pub struct ProxyServer {
     state: Arc<ProxyState>,
@@ -57,11 +69,9 @@ impl ProxyServer {
 #[axum::debug_handler]
 async fn handle_chat_completions(state: State<Arc<ProxyState>>, req: Request<Body>) -> Response {
     let (parts, body) = req.into_parts();
-    let body_bytes = match to_bytes(body, usize::MAX).await {
+    let body_bytes = match to_bytes(body, MAX_REQUEST_BODY_SIZE).await {
         Ok(b) => b,
-        Err(_) => {
-            return StatusCode::BAD_REQUEST.into_response();
-        }
+        Err(_) => return JSON_ERROR_RESPONSE,
     };
 
     let request: serde_json::Value =
@@ -116,9 +126,9 @@ async fn handle_stream_chat_completions(
     req: Request<Body>,
 ) -> Response {
     let (parts, body) = req.into_parts();
-    let body_bytes = match to_bytes(body, usize::MAX).await {
+    let body_bytes = match to_bytes(body, MAX_REQUEST_BODY_SIZE).await {
         Ok(b) => b,
-        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+        Err(_) => return JSON_ERROR_RESPONSE,
     };
 
     let request: serde_json::Value =
@@ -260,23 +270,39 @@ async fn forward_request(
             "http://127.0.0.1:8080".to_string()
         });
 
-    info!("Forwarding request to: {}", backend_url);
+    // Combine backend_url with the request path
+    let target_uri = if parts.uri.path().starts_with('/') {
+        format!("{}{}", backend_url, parts.uri.path())
+    } else {
+        format!("{}{}", &backend_url[..backend_url.len()-1], parts.uri.path())
+    };
+
+    info!("Forwarding request to: {}", target_uri);
 
     let client = Client::new();
     let method = parts.method.clone();
-    let uri: String = parts.uri.to_string();
 
     let mut headers = reqwest::header::HeaderMap::new();
-    if let Some(content_type) = parts.headers.get("Content-Type") {
-        if let Ok(ct) = content_type.to_str() {
-            if let Ok(val) = reqwest::header::HeaderValue::from_str(ct) {
-                headers.insert(reqwest::header::CONTENT_TYPE, val);
+    for (key, value) in &parts.headers {
+        // Skip hop-by-hop headers: connection, keep-alive, proxy-authenticate,
+        // proxy-authorization, te, transfer-encoding, upgrade, trailer
+        if key != &header::CONNECTION
+            && key != &header::KEEP_ALIVE
+            && key != &header::PROXY_AUTHENTICATE
+            && key != &header::PROXY_AUTHORIZATION
+            && key != &header::TE
+            && key != &header::TRANSFER_ENCODING
+            && key != &header::UPGRADE
+            && key != &header::TRAILER
+        {
+            if let Ok(v) = value.to_str() {
+                headers.insert(key.clone(), value.clone());
             }
         }
     }
 
     match client
-        .request(method, &uri)
+        .request(method, &target_uri)
         .headers(headers)
         .body(body_bytes.to_vec())
         .send()

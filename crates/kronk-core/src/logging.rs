@@ -1,9 +1,17 @@
 use anyhow::{Context, Result};
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use tracing_subscriber::{fmt, EnvFilter};
 
 const MAX_LOG_SIZE: u64 = 10 * 1024 * 1024; // 10 MB
 const MAX_LOG_FILES: usize = 5;
+
+pub fn init() {
+    fmt()
+        .with_env_filter(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
+        .init();
+}
 
 /// Get the log file path for a profile.
 pub fn log_path(logs_dir: &Path, profile: &str) -> PathBuf {

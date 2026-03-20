@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use kronk_core::config::Config;
-use kronk_core::logging;
 use kronk_core::process::{ProcessEvent, ProcessSupervisor};
 use kronk_core::profiles::SamplingParams;
 use std::collections::HashMap;
@@ -296,14 +295,6 @@ fn main() -> Result<()> {
         anyhow::bail!("Windows service mode is only available on Windows");
     }
 
-    // Normal CLI mode
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::INFO.into()),
-        )
-        .init();
-
     let args = Args::parse();
     let config = Config::load()?;
 
@@ -458,15 +449,13 @@ fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
     let log_file = std::fs::File::create(log_dir.join(format!("{}.log", service_name)))
         .unwrap_or_else(|_| std::fs::File::create("kronk-service.log").unwrap());
 
-    tracing_subscriber::fmt()
-        .with_writer(std::sync::Mutex::new(log_file))
-        .with_env_filter("info")
-        .init();
+    
 
-    tracing::info!("Service starting for server: {}", server);
-    if let Some(ref dir) = config_dir {
-        tracing::info!("Config dir: {}", dir.display());
-    }
+    tracing::info!(
+        "Service starting for server: {}, config dir: {:?}",
+        server,
+        config_dir.as_ref().map(|d| d.display())
+    );
 
     // Create a shutdown channel
     let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel::<()>();
@@ -515,7 +504,11 @@ fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
     } {
         Ok(c) => c,
         Err(e) => {
-            tracing::error!("Failed to load config: {}", e);
+            tracing::error!(
+        "Failed to load config: {}, config dir: {:?}",
+        e,
+        config_dir.as_ref().map(|d| d.display())
+    );
             let _ = status_handle.set_service_status(ServiceStatus {
                 service_type: ServiceType::OWN_PROCESS,
                 current_state: ServiceState::Stopped,
@@ -1543,24 +1536,22 @@ async fn cmd_proxy(config: &Config, command: ProxyCommands) -> Result<()> {
     use std::net::SocketAddr;
     use std::sync::Arc;
 
-    let ProxyCommands::Start {
-        host: _,
+let ProxyCommands::Start {
+        host,
         port,
         idle_timeout,
     } = command;
 
+    // Apply CLI overrides to config
+    config.proxy.host = host.clone();
+    config.proxy.port = port;
+    config.proxy.idle_timeout_secs = idle_timeout;
+
     // Parse host and port
     let addr = SocketAddr::new(
-        std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
+        std::net::IpAddr::V4(host.parse().unwrap_or(std::net::Ipv4Addr::new(127, 0, 0, 1))),
         port,
     );
-
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::INFO.into()),
-        )
-        .init();
 
     tracing::info!("Starting Kronk Proxy on {}", addr);
     tracing::info!("Idle timeout: {}s", idle_timeout);

@@ -69,10 +69,10 @@ Kronk includes a built-in proxy that acts as a drop-in replacement for the OpenA
 kronk proxy start
 ```
 
-You can then point any OpenAI-compatible client to `http://localhost:8080/v1`:
+You can then point any OpenAI-compatible client to `http://localhost:11434/v1`:
 
 ```bash
-curl http://localhost:8080/v1/chat/completions \
+curl http://localhost:11434/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "bartowski/OmniCoder-8B-GGUF",
