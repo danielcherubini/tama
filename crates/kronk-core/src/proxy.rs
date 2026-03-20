@@ -158,7 +158,7 @@ impl ProxyState {
     pub async fn get_backend_url(&self, server_name: &str) -> Result<String> {
         let config = self.config.clone();
         let server = config
-            .servers
+            .models
             .get(server_name)
             .with_context(|| format!("Server '{}' not found", server_name))?;
 

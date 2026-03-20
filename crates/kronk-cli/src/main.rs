@@ -714,7 +714,7 @@ fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
 /// Merges: backend.default_args + server.args + model card (-m, -c, -ngl) + sampling
 fn build_full_args(
     config: &Config,
-    server: &kronk_core::config::ServerConfig,
+    server: &kronk_core::config::ModelConfig,
     backend: &kronk_core::config::BackendConfig,
     ctx_override: Option<u32>,
 ) -> Result<Vec<String>> {
@@ -779,7 +779,7 @@ async fn cmd_run(config: &Config, server_name: &str, ctx_override: Option<u32>) 
 
     println!("Oh yeah, it's all coming together.");
     println!();
-    println!("  Server:   {}", server_name);
+    println!("  Model:    {}", server_name);
     println!("  Backend:  {}", backend.path);
     if let Some(ctx) = ctx_override {
         println!("  Context:  {}", ctx);
@@ -805,7 +805,7 @@ async fn cmd_run(config: &Config, server_name: &str, ctx_override: Option<u32>) 
             match event {
                 ProcessEvent::Started => println!("[kronk] Pull the lever!"),
                 ProcessEvent::Ready => println!("[kronk] Oh yeah, it's all coming together."),
-                ProcessEvent::Output(line) => println!("[server] {}", line),
+                ProcessEvent::Output(line) => println!("[backend] {}", line),
                 ProcessEvent::Crashed(msg) => eprintln!("[kronk] WRONG LEVER! {}", msg),
                 ProcessEvent::Restarting { attempt, max } => {
                     println!(
@@ -873,7 +873,7 @@ fn cmd_service(config: &Config, command: ServiceCommands) -> Result<()> {
                     anyhow::bail!("Service management not supported on this platform");
                 }
 
-                println!("Installed service for server '{}'.", server_name);
+                println!("Installed service for model '{}'.", server_name);
             } else {
                 // Default: install the proxy as a service
                 #[cfg(target_os = "windows")]
@@ -971,7 +971,7 @@ async fn cmd_status(config: &Config) -> Result<()> {
         .build()
         .unwrap_or_default();
 
-    for (name, srv) in &config.servers {
+    for (name, srv) in &config.models {
         let _backend = config.backends.get(&srv.backend);
         let backend_path = _backend.map(|b| b.path.as_str()).unwrap_or("???");
 
@@ -1008,7 +1008,7 @@ async fn cmd_status(config: &Config) -> Result<()> {
         };
 
         println!();
-        println!("  Server:   {}", name);
+        println!("  Model:    {}", name);
         println!("  Backend:  {} ({})", srv.backend, backend_path);
         println!("  Service:  {}", service_status);
         println!("  Health:   {}", health);
@@ -1031,7 +1031,7 @@ async fn cmd_server(config: &Config, command: ServerCommands) -> Result<()> {
             cmd_server_add(config, &name, command, false).await
         }
         ServerCommands::Edit { name, command } => {
-            if !config.servers.contains_key(&name) {
+            if !config.models.contains_key(&name) {
                 anyhow::bail!(
                     "Server '{}' not found. Use `kronk server add` to create it.",
                     name
@@ -1044,11 +1044,10 @@ async fn cmd_server(config: &Config, command: ServerCommands) -> Result<()> {
 }
 
 async fn cmd_server_ls(config: &Config) -> Result<()> {
-    if config.servers.is_empty() {
-        println!("No servers configured.");
+    if config.models.is_empty() {
+        println!("No models configured.");
         println!();
-        println!("Add one:  kronk server add <name> <command...>");
-        println!("Or pull:  kronk model pull <repo>");
+        println!("Pull one: kronk model pull <repo>");
         return Ok(());
     }
 
@@ -1057,10 +1056,10 @@ async fn cmd_server_ls(config: &Config) -> Result<()> {
         .build()
         .unwrap_or_default();
 
-    println!("Servers:");
+    println!("Models:");
     println!("{}", "-".repeat(60));
 
-    for (name, srv) in &config.servers {
+    for (name, srv) in &config.models {
         let _backend = config.backends.get(&srv.backend);
         let profile_name = srv
             .profile
@@ -1126,7 +1125,7 @@ async fn cmd_server_ls(config: &Config) -> Result<()> {
 }
 
 fn cmd_server_rm(config: &Config, name: &str, force: bool) -> Result<()> {
-    if !config.servers.contains_key(name) {
+    if !config.models.contains_key(name) {
         anyhow::bail!("Server '{}' not found.", name);
     }
 
@@ -1160,7 +1159,7 @@ fn cmd_server_rm(config: &Config, name: &str, force: bool) -> Result<()> {
     }
 
     if !force {
-        let confirm = inquire::Confirm::new(&format!("Remove server '{}'?", name))
+        let confirm = inquire::Confirm::new(&format!("Remove model '{}'?", name))
             .with_default(false)
             .prompt()
             .context("Confirmation cancelled")?;
@@ -1171,10 +1170,10 @@ fn cmd_server_rm(config: &Config, name: &str, force: bool) -> Result<()> {
     }
 
     let mut config = config.clone();
-    config.servers.remove(name);
+    config.models.remove(name);
     config.save()?;
 
-    println!("Server '{}' removed.", name);
+    println!("Model '{}' removed.", name);
     Ok(())
 }
 
@@ -1184,7 +1183,7 @@ async fn cmd_server_add(
     command: Vec<String>,
     overwrite: bool,
 ) -> Result<()> {
-    use kronk_core::config::{BackendConfig, ServerConfig};
+    use kronk_core::config::{BackendConfig, ModelConfig};
 
     if command.is_empty() {
         anyhow::bail!("No command provided");
@@ -1253,16 +1252,16 @@ async fn cmd_server_add(
     };
 
     // Check for duplicate server
-    if config.servers.contains_key(name) && !overwrite {
+    if config.models.contains_key(name) && !overwrite {
         anyhow::bail!(
             "Server '{}' already exists. Use `kronk server edit` to modify it.",
             name
         );
     }
 
-    config.servers.insert(
+    config.models.insert(
         name.to_string(),
-        ServerConfig {
+        ModelConfig {
             backend: backend_key.clone(),
             args,
             profile: None,
@@ -1279,11 +1278,11 @@ async fn cmd_server_add(
 
     println!("Oh yeah, it's all coming together.");
     println!();
-    println!("  Server:   {}", name);
+    println!("  Model:    {}", name);
     println!("  Backend:  {} ({})", backend_key, exe_str);
     println!();
-    println!("Run it:     kronk run {}", name);
-    println!("Install it: kronk service install {}", name);
+    println!("Enable it:  kronk model enable {}", name);
+    println!("Start:      kronk serve");
 
     Ok(())
 }
@@ -1358,7 +1357,7 @@ async fn cmd_server_edit(config: &mut Config, name: &str, command: Vec<String>) 
     // Load config, update only the command string for the existing server
     let mut config = config.clone();
     let srv = config
-        .servers
+        .models
         .get_mut(name)
         .ok_or_else(|| anyhow::anyhow!("Server '{}' not found", name))?;
 
@@ -1369,11 +1368,8 @@ async fn cmd_server_edit(config: &mut Config, name: &str, command: Vec<String>) 
 
     println!("Oh yeah, it's all coming together.");
     println!();
-    println!("  Server:   {}", name);
+    println!("  Model:    {}", name);
     println!("  Backend:  {} ({})", backend_key, exe_str);
-    println!();
-    println!("Run it:     kronk run {}", name);
-    println!("Install it: kronk service install {}", name);
 
     Ok(())
 }
@@ -1471,9 +1467,9 @@ fn cmd_profile(config: &Config, command: ProfileCommands) -> Result<()> {
                 }
             }
 
-            // Show which servers use which profile
-            println!("Server assignments:");
-            for (name, srv) in &config.servers {
+            // Show which models use which profile
+            println!("Model assignments:");
+            for (name, srv) in &config.models {
                 let profile_str = srv
                     .profile
                     .as_ref()
@@ -1488,8 +1484,8 @@ fn cmd_profile(config: &Config, command: ProfileCommands) -> Result<()> {
             let mut config = config.clone();
 
             // Validate server exists
-            if !config.servers.contains_key(&server) {
-                anyhow::bail!("Server '{}' not found", server);
+            if !config.models.contains_key(&server) {
+                anyhow::bail!("Model '{}' not found", server);
             }
 
             // Resolve profile name before mutable borrow
@@ -1524,25 +1520,25 @@ fn cmd_profile(config: &Config, command: ProfileCommands) -> Result<()> {
                 }
             };
 
-            config.servers.get_mut(&server).unwrap().profile = Some(resolved);
+            config.models.get_mut(&server).unwrap().profile = Some(resolved);
             config.save()?;
 
             println!("Oh yeah, it's all coming together.");
-            println!("  Server '{}' now uses '{}' preset.", server, profile);
+            println!("  Model '{}' now uses '{}' preset.", server, profile);
 
             Ok(())
         }
         ProfileCommands::Clear { server } => {
             let mut config = config.clone();
             let srv = config
-                .servers
+                .models
                 .get_mut(&server)
-                .with_context(|| format!("Server '{}' not found", server))?;
+                .with_context(|| format!("Model '{}' not found", server))?;
 
             srv.profile = None;
             config.save()?;
 
-            println!("Profile cleared for server '{}'.", server);
+            println!("Profile cleared for model '{}'.", server);
             Ok(())
         }
         ProfileCommands::Add {
@@ -1586,7 +1582,7 @@ fn cmd_profile(config: &Config, command: ProfileCommands) -> Result<()> {
             config.save()?;
 
             println!("Custom profile '{}' created.", name);
-            println!("Assign it: kronk profile set <server> {}", name);
+            println!("Assign it: kronk profile set <model> {}", name);
             Ok(())
         }
         ProfileCommands::Remove { name } => {
@@ -1603,7 +1599,7 @@ fn cmd_profile(config: &Config, command: ProfileCommands) -> Result<()> {
 
             // Check if any servers reference this profile
             let referencing: Vec<&str> = config
-                .servers
+                .models
                 .iter()
                 .filter(
                     |(_, s)| matches!(&s.profile, Some(Profile::Custom { name: n }) if n == &name),
