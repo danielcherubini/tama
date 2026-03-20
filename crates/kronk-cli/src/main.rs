@@ -270,24 +270,24 @@ enum ProfileCommands {
 
 #[derive(Parser, Debug)]
 enum ServiceCommands {
-    /// Install server(s) as system service(s)
+    /// Install kronk as a system service (proxy mode)
     Install {
-        /// Server name (omit to install all enabled servers)
+        /// Server name (omit to install the proxy; provide a name for legacy single-backend mode)
         name: Option<String>,
     },
-    /// Start an installed service
+    /// Start the kronk service
     Start {
-        /// Server name (omit to start all enabled servers)
+        /// Server name (omit to start the proxy service)
         name: Option<String>,
     },
-    /// Stop a running service
+    /// Stop the kronk service
     Stop {
-        /// Server name (omit to stop all enabled servers)
+        /// Server name (omit to stop the proxy service)
         name: Option<String>,
     },
-    /// Remove an installed service
+    /// Remove the kronk service
     Remove {
-        /// Server name (omit to remove all enabled servers)
+        /// Server name (omit to remove the proxy service)
         name: Option<String>,
     },
 }
@@ -324,11 +324,7 @@ fn main() -> Result<()> {
         match args.command {
             Commands::Run { name, ctx } => cmd_run(&config, &name, ctx).await,
             Commands::Service { command } => cmd_service(&config, command),
-            Commands::ServiceRun {
-                server,
-                ctx,
-                proxy,
-            } => {
+            Commands::ServiceRun { server, ctx, proxy } => {
                 if proxy {
                     let host = config.proxy.host.clone();
                     let port = config.proxy.port;
@@ -682,11 +678,7 @@ fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
                             uptime_secs,
                             ..
                         } => {
-                            tracing::debug!(
-                                "Health: healthy={}, uptime={}s",
-                                healthy,
-                                uptime_secs
-                            )
+                            tracing::debug!("Health: healthy={}, uptime={}s", healthy, uptime_secs)
                         }
                     }
                 }
@@ -841,35 +833,13 @@ async fn cmd_run(config: &Config, server_name: &str, ctx_override: Option<u32>) 
     Ok(())
 }
 
-/// Resolve server names: if given, use that one; if None, use all enabled.
-fn resolve_server_names(config: &Config, name: Option<String>) -> Result<Vec<String>> {
-    match name {
-        Some(n) => {
-            config.resolve_server(&n)?;
-            Ok(vec![n])
-        }
-        None => {
-            let enabled: Vec<String> = config
-                .servers
-                .iter()
-                .filter(|(_, s)| s.enabled)
-                .map(|(n, _)| n.clone())
-                .collect();
-            if enabled.is_empty() {
-                anyhow::bail!("No enabled servers. Enable one with `kronk config edit`.");
-            }
-            Ok(enabled)
-        }
-    }
-}
-
 fn cmd_service(config: &Config, command: ServiceCommands) -> Result<()> {
     match command {
         ServiceCommands::Install { name } => {
-            let names = resolve_server_names(config, name)?;
-            for server_name in &names {
-                let (srv, backend) = config.resolve_server(server_name)?;
-                let service_name = Config::service_name(server_name);
+            if let Some(server_name) = name {
+                // Legacy: install a single backend as a service
+                let (srv, backend) = config.resolve_server(&server_name)?;
+                let service_name = Config::service_name(&server_name);
 
                 #[cfg(target_os = "windows")]
                 {
@@ -879,7 +849,7 @@ fn cmd_service(config: &Config, command: ServiceCommands) -> Result<()> {
                     kronk_core::platform::windows::install_service(
                         &service_name,
                         &display_name,
-                        server_name,
+                        &server_name,
                         &config_dir,
                         port,
                     )?;
@@ -904,37 +874,57 @@ fn cmd_service(config: &Config, command: ServiceCommands) -> Result<()> {
                 }
 
                 println!("Installed service for server '{}'.", server_name);
+            } else {
+                // Default: install the proxy as a service
+                #[cfg(target_os = "windows")]
+                {
+                    let config_dir = Config::base_dir()?;
+                    let port = config.proxy.port;
+                    kronk_core::platform::windows::install_proxy_service(&config_dir, port)?;
+                }
+
+                #[cfg(target_os = "linux")]
+                kronk_core::platform::linux::install_proxy_service()?;
+
+                #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+                anyhow::bail!("Service management not supported on this platform");
+
+                println!("Installed kronk service.");
+                println!("Start it: kronk service start");
             }
         }
         ServiceCommands::Start { name } => {
-            let names = resolve_server_names(config, name)?;
-            for server_name in &names {
-                let service_name = Config::service_name(server_name);
-                service_start_inner(&service_name)?;
-                println!("Pull the lever! '{}' started.", service_name);
-            }
+            let service_name = name
+                .map(|n| Config::service_name(&n))
+                .unwrap_or_else(|| "kronk".to_string());
+            service_start_inner(&service_name)?;
+            println!("Pull the lever! '{}' started.", service_name);
         }
         ServiceCommands::Stop { name } => {
-            let names = resolve_server_names(config, name)?;
-            for server_name in &names {
-                let service_name = Config::service_name(server_name);
-                service_stop_inner(&service_name)?;
-                println!("Wrong lever! '{}' stopped.", service_name);
-            }
+            let service_name = name
+                .map(|n| Config::service_name(&n))
+                .unwrap_or_else(|| "kronk".to_string());
+            service_stop_inner(&service_name)?;
+            println!("Wrong lever! '{}' stopped.", service_name);
         }
         ServiceCommands::Remove { name } => {
-            let names = resolve_server_names(config, name)?;
-            for server_name in &names {
-                let service_name = Config::service_name(server_name);
+            let service_name = name
+                .map(|n| Config::service_name(&n))
+                .unwrap_or_else(|| "kronk".to_string());
 
-                #[cfg(target_os = "windows")]
-                kronk_core::platform::windows::remove_service(&service_name)?;
+            #[cfg(target_os = "windows")]
+            kronk_core::platform::windows::remove_service(&service_name)?;
 
-                #[cfg(target_os = "linux")]
-                kronk_core::platform::linux::remove_service(&service_name)?;
+            #[cfg(target_os = "linux")]
+            kronk_core::platform::linux::remove_service(&service_name)?;
 
-                println!("No touchy! '{}' removed.", service_name);
+            #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+            {
+                let _ = service_name;
+                anyhow::bail!("Not supported on this platform");
             }
+
+            println!("No touchy! '{}' removed.", service_name);
         }
     }
     Ok(())
@@ -1682,12 +1672,7 @@ async fn start_proxy_server(
 }
 
 /// Start the kronk server.
-async fn cmd_serve(
-    config: &Config,
-    host: String,
-    port: u16,
-    idle_timeout: u64,
-) -> Result<()> {
+async fn cmd_serve(config: &Config, host: String, port: u16, idle_timeout: u64) -> Result<()> {
     start_proxy_server(config, host, port, idle_timeout).await
 }
 
