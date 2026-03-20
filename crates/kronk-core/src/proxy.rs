@@ -344,7 +344,7 @@ impl ProxyState {
         });
 
         // Wait for health check to pass
-        let timeout = Duration::from_secs(30);
+        let timeout = Duration::from_secs(self.config.proxy.startup_timeout_secs);
         let start = Instant::now();
 
         loop {

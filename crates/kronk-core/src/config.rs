@@ -28,6 +28,7 @@ impl Default for ProxyConfig {
             host: default_proxy_host(),
             port: default_proxy_port(),
             idle_timeout_secs: default_proxy_timeout(),
+            startup_timeout_secs: default_startup_timeout(),
             circuit_breaker_threshold: default_circuit_breaker_threshold(),
             circuit_breaker_cooldown_seconds: default_circuit_breaker_cooldown(),
         }
@@ -44,6 +45,8 @@ pub struct ProxyConfig {
     pub port: u16,
     #[serde(default = "default_proxy_timeout")]
     pub idle_timeout_secs: u64,
+    #[serde(default = "default_startup_timeout")]
+    pub startup_timeout_secs: u64,
     #[serde(default = "default_circuit_breaker_threshold")]
     pub circuit_breaker_threshold: u32,
     #[serde(default = "default_circuit_breaker_cooldown")]
@@ -69,6 +72,10 @@ fn default_proxy_port() -> u16 {
 
 fn default_proxy_timeout() -> u64 {
     300
+}
+
+fn default_startup_timeout() -> u64 {
+    120
 }
 
 fn default_circuit_breaker_threshold() -> u32 {
@@ -741,6 +748,7 @@ impl Default for Config {
                 host: "0.0.0.0".to_string(),
                 port: default_proxy_port(),
                 idle_timeout_secs: 300,
+                startup_timeout_secs: default_startup_timeout(),
                 circuit_breaker_threshold: 3,
                 circuit_breaker_cooldown_seconds: default_circuit_breaker_cooldown(),
             },
