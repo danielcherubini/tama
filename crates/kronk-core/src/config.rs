@@ -31,6 +31,8 @@ pub struct ProxyConfig {
     pub port: u16,
     #[serde(default = "default_proxy_timeout")]
     pub idle_timeout_secs: u64,
+    #[serde(default = "default_circuit_breaker_threshold")]
+    pub circuit_breaker_threshold: u32,
 }
 
 fn default_proxy_enabled() -> bool {
@@ -47,6 +49,10 @@ fn default_proxy_port() -> u16 {
 
 fn default_proxy_timeout() -> u64 {
     300
+}
+
+fn default_circuit_breaker_threshold() -> u32 {
+    3
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -194,16 +200,39 @@ impl Config {
         let server = self
             .servers
             .get(name)
-            .with_context(|| format!("Server '{}' not found in config", name))?;
+            .or_else(|| {
+                // Fallback: search for a server where the 'model' field matches the requested name
+                self.servers
+                    .values()
+                    .find(|s| s.model.as_deref() == Some(name))
+            })
+            .with_context(|| format!("Server or model '{}' not found in config", name))?;
 
         let backend = self.backends.get(&server.backend).with_context(|| {
             format!(
-                "Backend '{}' referenced by server '{}' not found in config",
-                server.backend, name
+                "Backend '{}' referenced by server not found in config",
+                server.backend
             )
         })?;
 
         Ok((server, backend))
+    }
+
+    pub fn resolve_servers_for_model(
+        &self,
+        model_name: &str,
+    ) -> Vec<(String, &ServerConfig, &BackendConfig)> {
+        let mut results = Vec::new();
+
+        for (server_name, server) in &self.servers {
+            if server_name == model_name || server.model.as_deref() == Some(model_name) {
+                if let Some(backend) = self.backends.get(&server.backend) {
+                    results.push((server_name.clone(), server, backend));
+                }
+            }
+        }
+
+        results
     }
 
     /// Resolve the health check URL for a server, taking into account:
@@ -569,6 +598,7 @@ impl Default for Config {
                 host: "0.0.0.0".to_string(),
                 port: 8080,
                 idle_timeout_secs: 300,
+                circuit_breaker_threshold: 3,
             },
             loaded_from: None,
         }

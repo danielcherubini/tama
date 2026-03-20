@@ -3,14 +3,14 @@ use anyhow::Context;
 use axum::{
     body::{to_bytes, Body},
     extract::{Request, State},
-    http::{header, StatusCode},
+    http::StatusCode,
     response::{IntoResponse, Json, Response},
     routing::{get, post},
     Router,
 };
 use reqwest::Client;
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::info;
 
 pub struct ProxyServer {
     state: Arc<ProxyState>,
@@ -34,6 +34,7 @@ impl ProxyServer {
             .route("/models", get(handle_list_models))
             .route("/models/:model_id", get(handle_get_model))
             .route("/health", get(handle_health))
+            .route("/metrics", get(handle_metrics))
             .fallback(handle_fallback)
             .with_state(self.state.clone());
 
@@ -46,8 +47,9 @@ impl ProxyServer {
 
 #[axum::debug_handler]
 async fn handle_chat_completions(state: State<Arc<ProxyState>>, req: Request<Body>) -> Response {
-    let (parts, body_bytes) = match to_bytes(req.into_body(), usize::MAX).await {
-        Ok(body) => (parts, body),
+    let (parts, body) = req.into_parts();
+    let body_bytes = match to_bytes(body, usize::MAX).await {
+        Ok(b) => b,
         Err(_) => {
             return StatusCode::BAD_REQUEST.into_response();
         }
@@ -74,27 +76,29 @@ async fn handle_chat_completions(state: State<Arc<ProxyState>>, req: Request<Bod
 
     info!("Routing request for model: {}", model_name);
 
-    let is_loaded = state.is_model_loaded(model_name).await;
-
-    if !is_loaded {
-        let model_card = state.get_model_card(model_name).await;
-        if let Some(card) = model_card {
-            if let Err(e) = state.load_model(model_name, Some(&card)).await {
-                info!("Failed to load model {}: {}", model_name, e);
-                return Json(serde_json::json!({
-                    "error": {
-                        "message": format!("Failed to load model: {}", e),
-                        "type": "LoadModelError"
-                    }
-                }))
-                .into_response();
+    let server_name = match state.get_available_server_for_model(model_name).await {
+        Some(name) => name,
+        None => {
+            let model_card = state.get_model_card(model_name).await;
+            match state.load_model(model_name, model_card.as_ref()).await {
+                Ok(name) => name,
+                Err(e) => {
+                    info!("Failed to load model {}: {}", model_name, e);
+                    return Json(serde_json::json!({
+                        "error": {
+                            "message": format!("Failed to load model: {}", e),
+                            "type": "LoadModelError"
+                        }
+                    }))
+                    .into_response();
+                }
             }
         }
-    }
+    };
 
-    state.update_last_accessed(model_name).await;
+    state.update_last_accessed(&server_name).await;
 
-    forward_request(&state, model_name, &parts, &body_bytes).await
+    forward_request(&state, &server_name, &parts, &body_bytes).await
 }
 
 #[axum::debug_handler]
@@ -102,8 +106,9 @@ async fn handle_stream_chat_completions(
     state: State<Arc<ProxyState>>,
     req: Request<Body>,
 ) -> Response {
-    let (parts, body_bytes) = match to_bytes(req.into_body(), usize::MAX).await {
-        Ok(body) => (parts, body),
+    let (parts, body) = req.into_parts();
+    let body_bytes = match to_bytes(body, usize::MAX).await {
+        Ok(b) => b,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
     };
 
@@ -120,24 +125,26 @@ async fn handle_stream_chat_completions(
 
     info!("Streaming request for model: {}", model_name);
 
-    let is_loaded = state.is_model_loaded(model_name).await;
-
-    if !is_loaded {
-        let model_card = state.get_model_card(model_name).await;
-        if let Some(card) = model_card {
-            if let Err(e) = state.load_model(model_name, Some(&card)).await {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to load model: {}", e),
-                )
-                    .into_response();
+    let server_name = match state.get_available_server_for_model(model_name).await {
+        Some(name) => name,
+        None => {
+            let model_card = state.get_model_card(model_name).await;
+            match state.load_model(model_name, model_card.as_ref()).await {
+                Ok(name) => name,
+                Err(e) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to load model: {}", e),
+                    )
+                        .into_response();
+                }
             }
         }
-    }
+    };
 
-    state.update_last_accessed(model_name).await;
+    state.update_last_accessed(&server_name).await;
 
-    forward_request(&state, model_name, &parts, &body_bytes).await
+    forward_request(&state, &server_name, &parts, &body_bytes).await
 }
 
 #[axum::debug_handler]
@@ -174,6 +181,19 @@ async fn handle_health() -> Json<serde_json::Value> {
 }
 
 #[axum::debug_handler]
+async fn handle_metrics(state: State<Arc<ProxyState>>) -> Json<serde_json::Value> {
+    let metrics = &state.metrics;
+    Json(serde_json::json!({
+        "total_requests": metrics.total_requests.load(std::sync::atomic::Ordering::Relaxed),
+        "successful_requests": metrics.successful_requests.load(std::sync::atomic::Ordering::Relaxed),
+        "failed_requests": metrics.failed_requests.load(std::sync::atomic::Ordering::Relaxed),
+        "models_loaded": metrics.models_loaded.load(std::sync::atomic::Ordering::Relaxed),
+        "models_unloaded": metrics.models_unloaded.load(std::sync::atomic::Ordering::Relaxed),
+        "active_models": state.models.read().await.len(),
+    }))
+}
+
+#[axum::debug_handler]
 async fn handle_list_models(state: State<Arc<ProxyState>>) -> Json<serde_json::Value> {
     let models: Vec<String> = state.models.read().await.keys().cloned().collect();
 
@@ -190,14 +210,46 @@ async fn handle_fallback() -> StatusCode {
 
 async fn forward_request(
     state: &Arc<ProxyState>,
-    model_name: &str,
-    parts: &http::request::Parts,
+    server_name: &str,
+    parts: &axum::http::request::Parts,
     body_bytes: &[u8],
 ) -> Response {
-    let backend_url = state.get_backend_url(model_name).await.unwrap_or_else(|e| {
-        info!("Failed to get backend URL for {}: {}", model_name, e);
-        return format!("http://127.0.0.1:8080");
-    });
+    state
+        .metrics
+        .total_requests
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+    let model_state = state.get_model_state(server_name).await;
+    if let Some(ms) = &model_state {
+        let failures = ms
+            .consecutive_failures
+            .load(std::sync::atomic::Ordering::Relaxed);
+        if failures >= state.config.circuit_breaker_threshold {
+            info!(
+                "Circuit breaker tripped for server '{}' ({} failures). Unloading server.",
+                server_name, failures
+            );
+            let _ = state.unload_model(server_name).await;
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": {
+                        "message": format!("Server {} is currently unavailable due to repeated failures", server_name),
+                        "type": "ServiceUnavailableError"
+                    }
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    let backend_url = state
+        .get_backend_url(server_name)
+        .await
+        .unwrap_or_else(|e| {
+            info!("Failed to get backend URL for {}: {}", server_name, e);
+            "http://127.0.0.1:8080".to_string()
+        });
 
     info!("Forwarding request to: {}", backend_url);
 
@@ -208,10 +260,9 @@ async fn forward_request(
     let mut headers = reqwest::header::HeaderMap::new();
     if let Some(content_type) = parts.headers.get("Content-Type") {
         if let Ok(ct) = content_type.to_str() {
-            headers.insert(
-                reqwest::header::CONTENT_TYPE,
-                reqwest::header::HeaderValue::from_static(ct),
-            );
+            if let Ok(val) = reqwest::header::HeaderValue::from_str(ct) {
+                headers.insert(reqwest::header::CONTENT_TYPE, val);
+            }
         }
     }
 
@@ -224,11 +275,33 @@ async fn forward_request(
     {
         Ok(response) => {
             let status = response.status();
+            if status.is_success() {
+                state
+                    .metrics
+                    .successful_requests
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if let Some(ms) = &model_state {
+                    ms.consecutive_failures
+                        .store(0, std::sync::atomic::Ordering::Relaxed);
+                }
+            } else {
+                state
+                    .metrics
+                    .failed_requests
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if status.is_server_error() {
+                    if let Some(ms) = &model_state {
+                        ms.consecutive_failures
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
+            }
+
             let mut builder = Response::builder().status(status);
 
             for (key, value) in response.headers().iter() {
-                if let (Ok(k), Ok(v)) = (key.as_str(), value.to_str()) {
-                    builder = builder.header(k, v);
+                if let Ok(v) = value.to_str() {
+                    builder = builder.header(key.as_str(), v);
                 }
             }
 
@@ -236,6 +309,14 @@ async fn forward_request(
             builder.body(body).unwrap().into_response()
         }
         Err(e) => {
+            state
+                .metrics
+                .failed_requests
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if let Some(ms) = &model_state {
+                ms.consecutive_failures
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
             info!("Failed to forward request: {}", e);
             (
                 StatusCode::BAD_GATEWAY,

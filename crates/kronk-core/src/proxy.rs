@@ -5,6 +5,7 @@ use crate::config::ProxyConfig;
 use crate::models::card::ModelCard;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
@@ -19,6 +20,17 @@ pub struct ModelState {
     pub backend_url: String,
     pub load_time: Instant,
     pub last_accessed: Instant,
+    pub consecutive_failures: Arc<AtomicU32>,
+}
+
+/// Metrics for the proxy server.
+#[derive(Debug, Default)]
+pub struct ProxyMetrics {
+    pub total_requests: AtomicU64,
+    pub successful_requests: AtomicU64,
+    pub failed_requests: AtomicU64,
+    pub models_loaded: AtomicU64,
+    pub models_unloaded: AtomicU64,
 }
 
 /// Manages proxy state and model lifecycle.
@@ -28,6 +40,7 @@ pub struct ProxyState {
     pub registry: Arc<RwLock<BackendRegistry>>,
     pub config_data: Arc<RwLock<crate::config::Config>>,
     pub process_map: Arc<Mutex<HashMap<u32, String>>>,
+    pub metrics: Arc<ProxyMetrics>,
 }
 
 impl ProxyState {
@@ -42,6 +55,7 @@ impl ProxyState {
             registry: Arc::new(RwLock::new(registry)),
             config_data: Arc::new(RwLock::new(config_data)),
             process_map: Arc::new(Mutex::new(HashMap::new())),
+            metrics: Arc::new(ProxyMetrics::default()),
         }
     }
 
@@ -62,14 +76,37 @@ impl ProxyState {
 
     /// Check if a model is already loaded.
     pub async fn is_model_loaded(&self, model_name: &str) -> bool {
-        let models = self.models.read().await;
-        models.contains_key(model_name)
+        self.get_available_server_for_model(model_name)
+            .await
+            .is_some()
     }
 
-    /// Get the state of a loaded model.
-    pub async fn get_model_state(&self, model_name: &str) -> Option<ModelState> {
+    /// Get the state of a loaded model (server).
+    pub async fn get_model_state(&self, server_name: &str) -> Option<ModelState> {
         let models = self.models.read().await;
-        models.get(model_name).cloned()
+        models.get(server_name).cloned()
+    }
+
+    /// Find an available loaded server for a given model name.
+    pub async fn get_available_server_for_model(&self, model_name: &str) -> Option<String> {
+        let config = self.config_data.read().await;
+        let servers = config.resolve_servers_for_model(model_name);
+
+        let models = self.models.read().await;
+
+        // Simple round-robin or first available
+        // For simplicity, we just pick the first one that is loaded and hasn't tripped the circuit breaker
+        for (server_name, _, _) in servers {
+            if let Some(state) = models.get(&server_name) {
+                if state.consecutive_failures.load(Ordering::Relaxed)
+                    < self.config.circuit_breaker_threshold
+                {
+                    return Some(server_name);
+                }
+            }
+        }
+
+        None
     }
 
     /// Load a model by starting its backend process.
@@ -77,37 +114,64 @@ impl ProxyState {
         &self,
         model_name: &str,
         _model_card: Option<&ModelCard>,
-    ) -> Result<()> {
+    ) -> Result<String> {
         debug!("Loading model: {}", model_name);
+
+        let config = self.config_data.read().await;
+
+        // Find a server that provides this model and isn't already loaded
+        let servers = config.resolve_servers_for_model(model_name);
+        if servers.is_empty() {
+            return Err(anyhow::anyhow!(
+                "No server configured for model: {}",
+                model_name
+            ));
+        }
+
+        let mut target_server_name = None;
+        let mut target_server = None;
+        let mut target_backend = None;
+
+        {
+            let models = self.models.read().await;
+            for (server_name, server, backend) in servers {
+                if !models.contains_key(&server_name) {
+                    target_server_name = Some(server_name);
+                    target_server = Some(server.clone());
+                    target_backend = Some(backend.clone());
+                    break;
+                }
+            }
+        }
+
+        let server_name = target_server_name.unwrap_or_else(|| model_name.to_string());
+        let server = target_server.ok_or_else(|| {
+            anyhow::anyhow!("All servers for model {} are already loaded", model_name)
+        })?;
+        let backend_config = target_backend.unwrap();
 
         // Get backend config from registry
         let backend_info = self
             .registry
             .read()
             .await
-            .get(model_name)
-            .ok_or_else(|| anyhow::anyhow!("No backend configured for model: {}", model_name))?
+            .get(&server.backend)
+            .ok_or_else(|| anyhow::anyhow!("No backend configured for: {}", server.backend))?
             .clone();
 
         let backend_name = backend_info.name.clone();
         let backend_path = backend_info.path.to_string_lossy().to_string();
 
-        // Get args from config
-        let config = self.config_data.read().await;
-        let (server, backend_config) = config
-            .resolve_server(model_name)
-            .with_context(|| format!("No server configured for model: {}", model_name))?;
-
-        let args = config.build_args(server, backend_config);
+        let args = config.build_args(&server, &backend_config);
         let health_url = config
-            .resolve_health_url(server)
-            .with_context(|| format!("No health URL resolved for model: {}", model_name))?;
+            .resolve_health_url(&server)
+            .with_context(|| format!("No health URL resolved for server: {}", server_name))?;
 
         drop(config);
 
         info!(
-            "Starting backend '{}' for model '{}'",
-            backend_name, model_name
+            "Starting backend '{}' for server '{}' (model '{}')",
+            backend_name, server_name, model_name
         );
 
         let start = Instant::now();
@@ -119,13 +183,13 @@ impl ProxyState {
 
         let pid = child.id();
         info!(
-            "Backend '{}' started for model '{}' (pid: {:?})",
-            backend_name, model_name, pid
+            "Backend '{}' started for server '{}' (pid: {:?})",
+            backend_name, server_name, pid
         );
 
         // Register PID in process map
         let mut processes = self.process_map.lock().await;
-        processes.insert(pid, model_name.to_string());
+        processes.insert(pid, server_name.clone());
 
         // Wait for health check to pass
         let timeout = Duration::from_secs(30);
@@ -137,7 +201,7 @@ impl ProxyState {
 
             if let Ok(response) = check_health(&health_url).await {
                 if response.status().is_success() {
-                    debug!("Health check passed for model: {}", model_name);
+                    debug!("Health check passed for server: {}", server_name);
                     break;
                 }
             }
@@ -148,9 +212,9 @@ impl ProxyState {
             let _ = child.wait();
             let _ = processes.remove(&pid);
             return Err(anyhow::anyhow!(
-                "Backend '{}' failed to start for model '{}' (timeout after {}s)",
+                "Backend '{}' failed to start for server '{}' (timeout after {}s)",
                 backend_name,
-                model_name,
+                server_name,
                 elapsed.as_secs()
             ));
         }
@@ -159,7 +223,7 @@ impl ProxyState {
         {
             let mut models = self.models.write().await;
             models.insert(
-                model_name.to_string(),
+                server_name.clone(),
                 ModelState {
                     model_name: model_name.to_string(),
                     backend: backend_name,
@@ -167,29 +231,31 @@ impl ProxyState {
                     backend_url: health_url,
                     load_time: start,
                     last_accessed: start,
+                    consecutive_failures: Arc::new(AtomicU32::new(0)),
                 },
             );
         }
 
-        info!("Model '{}' loaded successfully", model_name);
-        Ok(())
+        info!("Server '{}' loaded successfully", server_name);
+        self.metrics.models_loaded.fetch_add(1, Ordering::Relaxed);
+        Ok(server_name)
     }
 
-    /// Unload a model by stopping its backend process.
-    pub async fn unload_model(&self, model_name: &str) -> Result<()> {
-        debug!("Unloading model: {}", model_name);
+    /// Unload a server by stopping its backend process.
+    pub async fn unload_model(&self, server_name: &str) -> Result<()> {
+        debug!("Unloading server: {}", server_name);
 
         let state = self
-            .get_model_state(model_name)
+            .get_model_state(server_name)
             .await
-            .with_context(|| format!("Model '{}' not loaded", model_name))?;
+            .with_context(|| format!("Server '{}' not loaded", server_name))?;
 
         let backend_name = state.backend.clone();
         let pid = state.backend_pid;
 
         info!(
-            "Stopping backend '{}' for model '{}'",
-            backend_name, model_name
+            "Stopping backend '{}' for server '{}'",
+            backend_name, server_name
         );
 
         // Kill the process if we have the PID
@@ -213,47 +279,48 @@ impl ProxyState {
 
         // Remove from models
         let mut models = self.models.write().await;
-        models.remove(model_name);
+        models.remove(server_name);
 
-        info!("Model '{}' unloaded", model_name);
+        info!("Server '{}' unloaded", server_name);
+        self.metrics.models_unloaded.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
-    /// Check if any model has been idle for longer than the timeout.
+    /// Check if any server has been idle for longer than the timeout.
     pub async fn check_idle_timeouts(&self) -> Vec<String> {
         let now = Instant::now();
         let mut to_unload = Vec::new();
 
         let models = self.models.read().await;
-        for (model_name, state) in models.iter() {
+        for (server_name, state) in models.iter() {
             let idle_duration = now - state.last_accessed;
             let timeout = Duration::from_secs(self.config.idle_timeout_secs);
 
             if idle_duration > timeout {
                 warn!(
-                    "Model '{}' has been idle for {}s (timeout: {}s)",
-                    model_name,
+                    "Server '{}' has been idle for {}s (timeout: {}s)",
+                    server_name,
                     idle_duration.as_secs(),
                     self.config.idle_timeout_secs
                 );
-                to_unload.push(model_name.clone());
+                to_unload.push(server_name.clone());
             }
         }
 
         drop(models);
 
         // Actually unload the models
-        for model_name in to_unload {
-            let _ = self.unload_model(&model_name).await;
+        for server_name in to_unload {
+            let _ = self.unload_model(&server_name).await;
         }
 
         Vec::new()
     }
 
-    /// Update the last accessed time for a model.
-    pub async fn update_last_accessed(&self, model_name: &str) {
+    /// Update the last accessed time for a server.
+    pub async fn update_last_accessed(&self, server_name: &str) {
         let mut models = self.models.write().await;
-        if let Some(state) = models.get_mut(model_name) {
+        if let Some(state) = models.get_mut(server_name) {
             state.last_accessed = Instant::now();
         }
     }
