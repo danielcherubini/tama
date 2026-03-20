@@ -68,7 +68,7 @@ impl ProxyState {
             .with_context(|| format!("Server '{}' not found", server_name))?;
 
         let backend_url = config
-            .resolve_health_url(server)
+            .resolve_backend_url(server)
             .with_context(|| format!("No backend URL resolved for server '{}'", server_name))?;
 
         Ok(backend_url)
@@ -190,7 +190,7 @@ impl ProxyState {
         // Register PID in process map
         let mut processes = self.process_map.lock().await;
         processes.insert(pid, server_name.clone());
-        let _processes = processes; // Drop lock before health check loop
+        drop(processes);
 
         // Wait for health check to pass
         let timeout = Duration::from_secs(30);
@@ -265,11 +265,23 @@ impl ProxyState {
         // Kill the process if we have the PID
         if let Some(pid) = pid {
             info!("Sending SIGTERM to backend process {}", pid);
-            // Send SIGTERM signal (cross-platform via ps/kill)
-            let _ = std::process::Command::new("kill")
-                .arg("-TERM")
-                .arg(pid.to_string())
-                .spawn();
+            #[cfg(unix)]
+            {
+                use std::process::Command;
+                let _ = Command::new("kill")
+                    .arg("-TERM")
+                    .arg(pid.to_string())
+                    .spawn();
+            }
+            #[cfg(windows)]
+            {
+                let _ = Command::new("taskkill")
+                    .arg("/PID")
+                    .arg(pid.to_string())
+                    .arg("/T")
+                    .arg("/F")
+                    .spawn();
+            }
 
             // Wait up to 5 seconds for graceful shutdown
             tokio::time::sleep(Duration::from_secs(5)).await;
@@ -314,11 +326,11 @@ impl ProxyState {
         drop(models);
 
         // Actually unload the models
-        for server_name in to_unload {
-            let _ = self.unload_model(&server_name).await;
+        for server_name in &to_unload {
+            let _ = self.unload_model(server_name).await;
         }
 
-        Vec::new()
+        to_unload
     }
 
     /// Update the last accessed time for a server.
@@ -338,7 +350,7 @@ impl ProxyState {
         let card_path = configs_dir.join(format!(
             "{}--{}.toml",
             model_name.split('/').next().unwrap_or(""),
-            model_name
+            model_name.split('/').next_back().unwrap_or(model_name)
         ));
 
         if card_path.exists() {

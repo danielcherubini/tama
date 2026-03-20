@@ -21,7 +21,19 @@ pub struct Config {
     pub loaded_from: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+impl Default for ProxyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_proxy_enabled(),
+            host: default_proxy_host(),
+            port: default_proxy_port(),
+            idle_timeout_secs: default_proxy_timeout(),
+            circuit_breaker_threshold: default_circuit_breaker_threshold(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyConfig {
     #[serde(default = "default_proxy_enabled")]
     pub enabled: bool,
@@ -207,7 +219,7 @@ impl Config {
                 // Fallback: search for a server where the 'model' field matches the requested name
                 self.servers
                     .values()
-                    .find(|s| s.model.as_deref() == Some(name))
+                    .find(|s| s.model.as_deref() == Some(name) && s.enabled)
             })
             .with_context(|| format!("Server or model '{}' not found in config", name))?;
 
@@ -228,7 +240,9 @@ impl Config {
         let mut results = Vec::new();
 
         for (server_name, server) in &self.servers {
-            if server_name == model_name || server.model.as_deref() == Some(model_name) {
+            if (server_name == model_name || server.model.as_deref() == Some(model_name))
+                && server.enabled
+            {
                 if let Some(backend) = self.backends.get(&server.backend) {
                     results.push((server_name.clone(), server, backend));
                 }
@@ -267,6 +281,44 @@ impl Config {
         // backend.health_check_url is None, try server.port fallback
         if let Some(port) = server.port {
             return Some(format!("http://localhost:{}/health", port));
+        }
+
+        // Neither backend.health_check_url nor server.port present
+        None
+    }
+
+    /// Resolve the backend URL (without /health) for a server.
+    pub fn resolve_backend_url(&self, server: &ServerConfig) -> Option<String> {
+        let backend = match self.backends.get(&server.backend) {
+            Some(b) => b,
+            None => {
+                tracing::warn!(
+                    "Backend '{}' not found when resolving backend URL",
+                    server.backend
+                );
+                return None;
+            }
+        };
+
+        // If backend has health_check_url, strip /health and return as base URL
+        if let Some(ref backend_url) = backend.health_check_url {
+            if let Some(port) = server.port {
+                let mut url = url::Url::parse(backend_url).ok()?;
+                url.set_port(Some(port)).ok()?;
+                // Strip /health and trailing slash
+                let url_str = url.to_string();
+                let base_url = url_str.trim_end_matches("/health").trim_end_matches('/');
+                return Some(base_url.to_string());
+            }
+            // Strip /health and trailing slash
+            let url_str = backend_url.clone();
+            let base_url = url_str.trim_end_matches("/health").trim_end_matches('/');
+            return Some(base_url.to_string());
+        }
+
+        // backend.health_check_url is None, try server.port fallback
+        if let Some(port) = server.port {
+            return Some(format!("http://localhost:{}/", port));
         }
 
         // Neither backend.health_check_url nor server.port present
@@ -599,7 +651,7 @@ impl Default for Config {
             proxy: ProxyConfig {
                 enabled: false,
                 host: "0.0.0.0".to_string(),
-                port: 8080,
+                port: default_proxy_port(),
                 idle_timeout_secs: 300,
                 circuit_breaker_threshold: 3,
             },
