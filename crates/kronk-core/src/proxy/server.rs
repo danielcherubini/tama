@@ -455,7 +455,8 @@ async fn forward_request(
                         if ms.is_ready() {
                             let new_ts = SystemTime::now();
                             let mut models = state.models.write().await;
-                            if let Some(existing) = models.get_mut(server_name) {
+                            #[allow(clippy::collapsible_match)]
+if let Some(existing) = models.get_mut(server_name) {
                                 match existing {
                                     crate::proxy::ModelState::Ready {
                                         failure_timestamp, ..

@@ -113,7 +113,7 @@ impl ModelState {
             } => failure_timestamp
                 .map(|ts| {
                     SystemTime::now()
-                        .duration_since(ts.clone())
+                        .duration_since(ts)
                         .map(|d| d.as_secs() >= cooldown_seconds)
                         .unwrap_or(false)
                 })
@@ -335,7 +335,12 @@ impl ProxyState {
             .args(&args)
             .env("MODEL_NAME", model_name)
             .spawn()
-            .with_context(|| format!("Failed to start backend '{}'", server_config.backend))?;
+            .with_context(|| {
+                format!(
+                    "Failed to execute backend process '{}'",
+                    server_config.backend
+                )
+            })?;
 
         let pid = child.id().ok_or_else(|| {
             anyhow::anyhow!("Failed to get PID for backend '{}'", server_config.backend)
@@ -558,7 +563,7 @@ async fn kill_process(pid: u32) -> Result<()> {
             .arg("-TERM")
             .arg(pid.to_string())
             .spawn()
-            .with_context(|| format!("Failed to start backend '{}'", pid))?;
+            .with_context(|| format!("Failed to execute kill command for PID {}", pid))?;
         let status: std::process::ExitStatus = child.wait().await?;
         if !status.success() {
             return Err(anyhow::anyhow!("Failed to send SIGTERM to PID {}", pid));
@@ -572,7 +577,7 @@ async fn kill_process(pid: u32) -> Result<()> {
             .arg("/T")
             .arg("/F")
             .spawn()
-            .with_context(|| format!("Failed to start backend '{}'", pid))?;
+            .with_context(|| format!("Failed to execute taskkill command for PID {}", pid))?;
         let status: std::process::ExitStatus = child.wait().await?;
         if !status.success() {
             return Err(anyhow::anyhow!(
