@@ -17,7 +17,7 @@ use commands::backend::{BackendArgs, BackendSubcommand};
 #[derive(Parser, Debug)]
 #[command(name = "kronk")]
 #[command(version)]
-#[command(about = "Oh yeah, it's all coming together. -- Local AI Service Manager")]
+#[command(about = "Oh yeah, it's all coming together. -- Local AI Server")]
 struct Args {
     #[command(subcommand)]
     command: Commands,
