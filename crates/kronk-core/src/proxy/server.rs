@@ -1,13 +1,15 @@
 use crate::proxy::ProxyState;
 use anyhow::Context;
 use axum::{
-    body::Body,
+    body::{to_bytes, Body},
     extract::{Request, State},
     http::{header, StatusCode},
     response::{IntoResponse, Json, Response},
     routing::{get, post},
     Router,
 };
+use bytes::Bytes;
+use reqwest::Client;
 use std::sync::Arc;
 use tracing::{debug, info};
 
@@ -45,7 +47,7 @@ impl ProxyServer {
 
 #[axum::debug_handler]
 async fn handle_chat_completions(state: State<Arc<ProxyState>>, req: Request<Body>) -> Response {
-    let body_bytes = match axum::body::to_bytes(req.into_body(), usize::MAX).await {
+    let body_bytes = match to_bytes(req.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
         Err(_) => {
             return StatusCode::BAD_REQUEST.into_response();
@@ -93,35 +95,8 @@ async fn handle_chat_completions(state: State<Arc<ProxyState>>, req: Request<Bod
 
     state.update_last_accessed(model_name).await;
 
-    // For now, return a placeholder response
-    // In production, this would forward the request to the backend and stream the response
-    debug!("Model {} is ready", model_name);
-
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "id": "chatcmpl-123",
-            "object": "chat.completion",
-            "created": 1_704_067_200,
-            "model": model_name,
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": "Hello! I'm a placeholder response."
-                    },
-                    "finish_reason": "stop"
-                }
-            ],
-            "usage": {
-                "prompt_tokens": 9,
-                "completion_tokens": 13,
-                "total_tokens": 22
-            }
-        })),
-    )
-        .into_response()
+    // Forward the request to the backend
+    forward_request(&state, model_name, body_bytes.to_vec(), &req).await
 }
 
 #[axum::debug_handler]
@@ -129,7 +104,7 @@ async fn handle_stream_chat_completions(
     state: State<Arc<ProxyState>>,
     req: Request<Body>,
 ) -> Response {
-    let body_bytes = match axum::body::to_bytes(req.into_body(), usize::MAX).await {
+    let body_bytes = match to_bytes(req.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
     };
@@ -164,15 +139,8 @@ async fn handle_stream_chat_completions(
 
     state.update_last_accessed(model_name).await;
 
-    // For now, return a placeholder SSE stream
-    // In production, this would forward the request to the backend and stream the response
-    let response = Response::builder()
-        .status(200)
-        .header(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")
-        .body(Body::from("data: {\"id\":\"1\",\"object\":\"chat.completion\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Hello World\"}}]}\n\ndata: [DONE]\n\n"))
-        .unwrap();
-
-    response
+    // Forward the request to the backend for streaming
+    forward_request(&state, model_name, body_bytes.to_vec(), &req).await
 }
 
 #[axum::debug_handler]
@@ -221,6 +189,71 @@ async fn handle_list_models(state: State<Arc<ProxyState>>) -> Json<serde_json::V
 #[axum::debug_handler]
 async fn handle_fallback() -> StatusCode {
     StatusCode::NOT_FOUND
+}
+
+/// Forward a request to the backend and stream the response back.
+async fn forward_request(
+    state: &Arc<ProxyState>,
+    model_name: &str,
+    body_bytes: Vec<u8>,
+    req: &Request<Body>,
+) -> Response {
+    // Get the backend URL for the model
+    let backend_url = state.get_backend_url(model_name).await.unwrap_or_else(|e| {
+        info!("Failed to get backend URL for {}: {}", model_name, e);
+        return format!("http://127.0.0.1:8080");
+    });
+
+    info!("Forwarding request to: {}", backend_url);
+
+    let client = Client::new();
+    let method = req.method().clone();
+    let uri: String = req.uri().to_string();
+
+    let mut headers = reqwest::header::HeaderMap::new();
+    if let Some(content_type) = req.headers().get("Content-Type") {
+        if let Ok(ct) = content_type.to_str() {
+            headers.insert(
+                reqwest::header::CONTENT_TYPE,
+                reqwest::header::HeaderValue::from_static(ct),
+            );
+        }
+    }
+
+    match client
+        .request(method, &uri)
+        .headers(headers)
+        .body(body_bytes.to_vec())
+        .send()
+        .await
+    {
+        Ok(response) => {
+            let status = response.status();
+            let mut builder = Response::builder().status(status);
+
+            for (key, value) in response.headers().iter() {
+                if let (Ok(k), Ok(v)) = (key.as_str(), value.to_str()) {
+                    builder = builder.header(k, v);
+                }
+            }
+
+            let body = Body::from_stream(response.bytes_stream());
+            builder.body(body).unwrap().into_response()
+        }
+        Err(e) => {
+            info!("Failed to forward request: {}", e);
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({
+                    "error": {
+                        "message": format!("Backend error: {}", e),
+                        "type": "BadRequestError"
+                    }
+                })),
+            )
+                .into_response()
+        }
+    }
 }
 
 #[cfg(test)]
