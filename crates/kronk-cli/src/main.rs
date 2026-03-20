@@ -41,11 +41,15 @@ enum Commands {
     /// Internal: called by Windows SCM (do not use directly)
     #[command(hide = true)]
     ServiceRun {
+        /// Run a single server backend (legacy mode)
         #[arg(short, long)]
-        server: String,
+        server: Option<String>,
         /// Override context size (e.g. 8192, 16384). Takes priority over model card value.
         #[arg(long)]
         ctx: Option<u32>,
+        /// Run the proxy server instead of a single backend
+        #[arg(long)]
+        proxy: bool,
     },
     /// Add a new server from a raw command line
     #[command(hide = true)]
@@ -114,8 +118,8 @@ enum Commands {
     },
     /// View server logs
     Logs {
-        /// Server name
-        name: String,
+        /// Server name (defaults to "kronk" proxy logs)
+        name: Option<String>,
         /// Follow log output (like tail -f)
         #[arg(short, long)]
         follow: bool,
@@ -320,7 +324,25 @@ fn main() -> Result<()> {
         match args.command {
             Commands::Run { name, ctx } => cmd_run(&config, &name, ctx).await,
             Commands::Service { command } => cmd_service(&config, command),
-            Commands::ServiceRun { server, ctx } => cmd_run(&config, &server, ctx).await,
+            Commands::ServiceRun {
+                server,
+                ctx,
+                proxy,
+            } => {
+                if proxy {
+                    let host = config.proxy.host.clone();
+                    let port = config.proxy.port;
+                    let idle_timeout = config.proxy.idle_timeout_secs;
+                    cmd_serve(&config, host, port, idle_timeout).await
+                } else {
+                    let server = server.ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Either --server or --proxy must be provided for service-run"
+                        )
+                    })?;
+                    cmd_run(&config, &server, ctx).await
+                }
+            }
             Commands::Add { name, command } => cmd_server_add(&config, &name, command, false).await,
             Commands::Update { name, command } => {
                 cmd_server_edit(&mut config.clone(), &name, command).await
@@ -343,7 +365,10 @@ fn main() -> Result<()> {
                 name,
                 follow,
                 lines,
-            } => cmd_logs(&config, &name, follow, lines).await,
+            } => {
+                let name = name.unwrap_or_else(|| "kronk".to_string());
+                cmd_logs(&config, &name, follow, lines).await
+            }
         }
     })
 }
@@ -353,10 +378,10 @@ async fn cmd_logs(config: &Config, name: &str, follow: bool, lines: usize) -> Re
     let log_path = logging::log_path(&logs_dir, name);
 
     if !log_path.exists() {
-        println!("No logs found for server '{}'.", name);
+        println!("No logs found for '{}'.", name);
         println!();
         println!("Logs are created when running as a service.");
-        println!("For foreground: kronk run {}", name);
+        println!("Install the service: kronk service install");
         return Ok(());
     }
 
@@ -390,14 +415,19 @@ async fn cmd_logs(config: &Config, name: &str, follow: bool, lines: usize) -> Re
 
 #[cfg(target_os = "windows")]
 fn service_dispatch() -> Result<()> {
-    // Extract server name and config-dir from args before SCM takes over
+    // Extract args from the command line before SCM takes over
     let raw_args: Vec<String> = std::env::args().collect();
+    let is_proxy = raw_args.iter().any(|a| a == "--proxy");
+
     let server = raw_args
         .iter()
         .position(|a| a == "--server")
         .and_then(|i| raw_args.get(i + 1))
-        .cloned()
-        .expect("Missing --server argument. This binary should be launched by the Windows Service Control Manager.");
+        .cloned();
+
+    if !is_proxy && server.is_none() {
+        anyhow::bail!("Either --server or --proxy must be provided. This binary should be launched by the Windows Service Control Manager.");
+    }
 
     let config_dir = raw_args
         .iter()
@@ -411,11 +441,18 @@ fn service_dispatch() -> Result<()> {
         .and_then(|i| raw_args.get(i + 1))
         .and_then(|s| s.parse().ok());
 
-    let service_name = Config::service_name(&server);
+    let service_name = if is_proxy {
+        "kronk".to_string()
+    } else {
+        Config::service_name(server.as_deref().unwrap())
+    };
 
     // Store in globals so service_main can access them
+    SERVICE_PROXY
+        .set(is_proxy)
+        .map_err(|_| anyhow::anyhow!("Failed to set service proxy flag"))?;
     SERVICE_SERVER
-        .set(server)
+        .set(server.unwrap_or_default())
         .map_err(|_| anyhow::anyhow!("Failed to set service server"))?;
     SERVICE_NAME
         .set(service_name.clone())
@@ -437,6 +474,8 @@ fn service_dispatch() -> Result<()> {
 use std::sync::OnceLock;
 
 #[cfg(target_os = "windows")]
+static SERVICE_PROXY: OnceLock<bool> = OnceLock::new();
+#[cfg(target_os = "windows")]
 static SERVICE_SERVER: OnceLock<String> = OnceLock::new();
 #[cfg(target_os = "windows")]
 static SERVICE_NAME: OnceLock<String> = OnceLock::new();
@@ -456,6 +495,7 @@ fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
     };
     use windows_service::service_control_handler;
 
+    let is_proxy = SERVICE_PROXY.get().copied().unwrap_or(false);
     let server = SERVICE_SERVER.get().cloned().unwrap_or_default();
     let service_name = SERVICE_NAME.get().cloned().unwrap_or_default();
     let config_dir = SERVICE_CONFIG_DIR.get().and_then(|o| o.clone());
@@ -545,73 +585,121 @@ fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
     rt.block_on(async {
-        let (srv, backend) = match config.resolve_server(&server) {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::error!("Failed to resolve server '{}': {}", server, e);
-                return;
-            }
-        };
+        if is_proxy {
+            // Proxy mode: start the proxy server
+            use kronk_core::proxy::server::ProxyServer;
+            use kronk_core::proxy::ProxyState;
+            use std::sync::Arc;
 
-        let args = build_full_args(&config, srv, backend, ctx).unwrap_or_else(|e| {
-            tracing::warn!("Failed to build model args: {}", e);
-            let mut args = backend.default_args.clone();
-            args.extend(srv.args.clone());
-            args
-        });
-        let log_dir = config
-            .logs_dir()
-            .ok()
-            .expect("Failed to get logs directory");
-        let health_check = config.resolve_health_check(&srv);
-        let supervisor = ProcessSupervisor::new(
-            backend.path.clone(),
-            args,
-            health_check,
-            config.supervisor.max_restarts,
-            config.supervisor.restart_delay_ms,
-        )
-        .with_log_dir(log_dir);
+            let host = config.proxy.host.clone();
+            let port = config.proxy.port;
+            let (host_addr, _) = match host.parse::<std::net::IpAddr>() {
+                Ok(addr) => (addr, false),
+                Err(_) => (
+                    std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
+                    true,
+                ),
+            };
+            let addr = std::net::SocketAddr::new(host_addr, port);
 
-        let (tx, mut rx) = mpsc::unbounded_channel::<ProcessEvent>();
+            tracing::info!("Starting Kronk proxy service on {}", addr);
 
-        // Create a tokio shutdown channel bridged from the std channel
-        let (shutdown_tx_tokio, shutdown_rx_tokio) = mpsc::channel::<()>(1);
-        tokio::task::spawn_blocking(move || {
-            let _ = shutdown_rx.recv();
-            let _ = shutdown_tx_tokio.blocking_send(());
-        });
+            let state = Arc::new(ProxyState::new(config));
+            let server = ProxyServer::new(state);
 
-        // Log events
-        let logger = tokio::spawn(async move {
-            while let Some(event) = rx.recv().await {
-                match &event {
-                    ProcessEvent::Started => tracing::info!("Backend process started"),
-                    ProcessEvent::Ready => tracing::info!("Backend server ready"),
-                    ProcessEvent::Output(line) => tracing::info!("[backend] {}", line),
-                    ProcessEvent::Crashed(msg) => tracing::warn!("Backend crashed: {}", msg),
-                    ProcessEvent::Restarting { attempt, max } => {
-                        tracing::info!("Restarting backend ({}/{})", attempt, max)
-                    }
-                    ProcessEvent::Stopped => tracing::info!("Backend stopped"),
-                    ProcessEvent::HealthCheck {
-                        healthy,
-                        uptime_secs,
-                        ..
-                    } => {
-                        tracing::debug!("Health: healthy={}, uptime={}s", healthy, uptime_secs)
+            // Bridge SCM shutdown signal to abort the server
+            let (shutdown_tx_tokio, mut shutdown_rx_tokio) = mpsc::channel::<()>(1);
+            tokio::task::spawn_blocking(move || {
+                let _ = shutdown_rx.recv();
+                let _ = shutdown_tx_tokio.blocking_send(());
+            });
+
+            tokio::select! {
+                result = server.run(addr) => {
+                    if let Err(e) = result {
+                        tracing::error!("Proxy server error: {}", e);
                     }
                 }
+                _ = shutdown_rx_tokio.recv() => {
+                    tracing::info!("Received shutdown signal, stopping proxy...");
+                }
             }
-        });
+        } else {
+            // Legacy single-backend mode
+            let (srv, backend) = match config.resolve_server(&server) {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!("Failed to resolve server '{}': {}", server, e);
+                    return;
+                }
+            };
 
-        // Run supervisor — it will exit when shutdown signal is received
-        if let Err(e) = supervisor.run(tx, Some(shutdown_rx_tokio)).await {
-            tracing::error!("Supervisor error: {}", e);
+            let args = build_full_args(&config, srv, backend, ctx).unwrap_or_else(|e| {
+                tracing::warn!("Failed to build model args: {}", e);
+                let mut args = backend.default_args.clone();
+                args.extend(srv.args.clone());
+                args
+            });
+            let log_dir = config
+                .logs_dir()
+                .ok()
+                .expect("Failed to get logs directory");
+            let health_check = config.resolve_health_check(&srv);
+            let supervisor = ProcessSupervisor::new(
+                backend.path.clone(),
+                args,
+                health_check,
+                config.supervisor.max_restarts,
+                config.supervisor.restart_delay_ms,
+            )
+            .with_log_dir(log_dir);
+
+            let (tx, mut rx) = mpsc::unbounded_channel::<ProcessEvent>();
+
+            // Create a tokio shutdown channel bridged from the std channel
+            let (shutdown_tx_tokio, shutdown_rx_tokio) = mpsc::channel::<()>(1);
+            tokio::task::spawn_blocking(move || {
+                let _ = shutdown_rx.recv();
+                let _ = shutdown_tx_tokio.blocking_send(());
+            });
+
+            // Log events
+            let logger = tokio::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                    match &event {
+                        ProcessEvent::Started => tracing::info!("Backend process started"),
+                        ProcessEvent::Ready => tracing::info!("Backend server ready"),
+                        ProcessEvent::Output(line) => tracing::info!("[backend] {}", line),
+                        ProcessEvent::Crashed(msg) => {
+                            tracing::warn!("Backend crashed: {}", msg)
+                        }
+                        ProcessEvent::Restarting { attempt, max } => {
+                            tracing::info!("Restarting backend ({}/{})", attempt, max)
+                        }
+                        ProcessEvent::Stopped => tracing::info!("Backend stopped"),
+                        ProcessEvent::HealthCheck {
+                            healthy,
+                            uptime_secs,
+                            ..
+                        } => {
+                            tracing::debug!(
+                                "Health: healthy={}, uptime={}s",
+                                healthy,
+                                uptime_secs
+                            )
+                        }
+                    }
+                }
+            });
+
+            // Run supervisor — it will exit when shutdown signal is received
+            if let Err(e) = supervisor.run(tx, Some(shutdown_rx_tokio)).await {
+                tracing::error!("Supervisor error: {}", e);
+            }
+
+            tracing::info!("Shutting down...");
+            logger.abort();
         }
-
-        tracing::info!("Shutting down...");
-        logger.abort();
     });
 
     // Report stopped
