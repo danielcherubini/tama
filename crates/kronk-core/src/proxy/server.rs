@@ -24,6 +24,15 @@ impl ProxyServer {
     pub async fn run(self, addr: std::net::SocketAddr) -> anyhow::Result<()> {
         info!("Starting proxy server on {}", addr);
 
+        let state_clone = self.state.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+            loop {
+                interval.tick().await;
+                let _ = state_clone.check_idle_timeouts().await;
+            }
+        });
+
         let app = Router::new()
             .route("/chat/completions", post(handle_chat_completions))
             .route("/v1/chat/completions", post(handle_chat_completions))
