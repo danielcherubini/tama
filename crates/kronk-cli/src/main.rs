@@ -506,12 +506,13 @@ fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
     let config_dir = SERVICE_CONFIG_DIR.get().and_then(|o| o.clone());
     let ctx = SERVICE_CTX.get().and_then(|o| *o);
 
-    // Set up logging to file — use config_dir if available, otherwise fall back
+    // Set up logging to file — use config_dir/logs if available, otherwise fall back
     let log_dir = config_dir.clone().unwrap_or_else(|| {
         directories::ProjectDirs::from("", "", "kronk")
             .map(|p: directories::ProjectDirs| p.data_dir().to_path_buf())
             .unwrap_or_else(|| std::path::PathBuf::from("."))
-    });
+    })
+    .join("logs");
     let _ = std::fs::create_dir_all(&log_dir);
     let log_file = std::fs::File::create(log_dir.join(format!("{}.log", service_name)))
         .unwrap_or_else(|_| std::fs::File::create("kronk-service.log").unwrap());
