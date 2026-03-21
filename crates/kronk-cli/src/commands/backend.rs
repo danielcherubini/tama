@@ -29,6 +29,14 @@ pub enum BackendSubcommand {
         /// Custom name for this backend installation
         #[arg(short, long)]
         name: Option<String>,
+
+        /// GPU acceleration type (cpu, cuda, cuda:12, rocm, rocm:6, vulkan, metal)
+        #[arg(long)]
+        gpu: Option<String>,
+
+        /// Overwrite existing backend installation
+        #[arg(short, long)]
+        force: bool,
     },
 
     /// Update an installed backend to the latest version
@@ -59,7 +67,9 @@ pub async fn run(config: &Config, cmd: BackendArgs) -> Result<()> {
             version,
             build,
             name,
-        } => cmd_install(config, &backend_type, version, build, name).await,
+            gpu,
+            force,
+        } => cmd_install(config, &backend_type, version, build, name, gpu, force).await,
         BackendSubcommand::Update { name } => cmd_update(config, &name).await,
         BackendSubcommand::List => cmd_list(config).await,
         BackendSubcommand::Remove { name } => cmd_remove(config, &name).await,
@@ -76,6 +86,52 @@ fn parse_backend_type(s: &str) -> Result<BackendType> {
             s
         )),
     }
+}
+
+fn parse_gpu_type(gpu_str: &str) -> Option<kronk_core::gpu::GpuType> {
+    let gpu_str = gpu_str.trim().to_lowercase();
+
+    if gpu_str == "cpu" {
+        return Some(kronk_core::gpu::GpuType::CpuOnly);
+    }
+
+    if gpu_str.starts_with("cuda:") {
+        if let Some(version) = gpu_str.strip_prefix("cuda:") {
+            return Some(kronk_core::gpu::GpuType::Cuda {
+                version: version.to_string(),
+            });
+        }
+    }
+
+    if gpu_str == "cuda" {
+        return Some(kronk_core::gpu::GpuType::Cuda {
+            version: "12.4".to_string(),
+        });
+    }
+
+    if gpu_str.starts_with("rocm:") {
+        if let Some(version) = gpu_str.strip_prefix("rocm:") {
+            return Some(kronk_core::gpu::GpuType::RocM {
+                version: version.to_string(),
+            });
+        }
+    }
+
+    if gpu_str == "rocm" {
+        return Some(kronk_core::gpu::GpuType::RocM {
+            version: "6.1".to_string(),
+        });
+    }
+
+    if gpu_str == "vulkan" {
+        return Some(kronk_core::gpu::GpuType::Vulkan);
+    }
+
+    if gpu_str == "metal" {
+        return Some(kronk_core::gpu::GpuType::Metal);
+    }
+
+    None
 }
 
 fn registry_path() -> Result<std::path::PathBuf> {
@@ -101,6 +157,8 @@ async fn cmd_install(
     version: Option<String>,
     force_build: bool,
     name: Option<String>,
+    gpu_flag: Option<String>,
+    force: bool,
 ) -> Result<()> {
     let backend_type = parse_backend_type(backend_type_str)?;
 
@@ -144,31 +202,19 @@ async fn cmd_install(
     };
     println!("Version: {}", version);
 
-    // Determine installation method.
-    // ik_llama has no pre-built binaries, so source is the only option.
-    let use_source = match backend_type {
-        BackendType::IkLlama => {
-            if !force_build {
-                println!("\nik_llama does not provide pre-built binaries. Building from source.");
-            }
-            true
+    // Parse GPU type from flag or use interactive selection
+    let gpu_type = if let Some(gpu_str) = gpu_flag {
+        if let Some(gpu) = parse_gpu_type(&gpu_str) {
+            println!("[--gpu] Using: {:?}", gpu);
+            gpu
+        } else {
+            return Err(anyhow!(
+                "Invalid GPU type '{}'. Supported: cpu, cuda, cuda:12, cuda:13, rocm, rocm:6, vulkan, metal",
+                gpu_str
+            ));
         }
-        _ if force_build => true,
-        _ => {
-            let choice = inquire::Select::new(
-                "Installation method:",
-                vec![
-                    "Download pre-built binary (faster)",
-                    "Build from source (hardware-optimized)",
-                ],
-            )
-            .prompt()?;
-            choice.starts_with("Build")
-        }
-    };
-
-    // Ask user about GPU acceleration
-    let gpu_type = {
+    } else {
+        // Interactive selection
         let gpu_choice = inquire::Select::new(
             "What GPU acceleration do you want?",
             vec![
@@ -194,14 +240,14 @@ async fn cmd_install(
                 )
                 .prompt()?;
 
-                Some(gpu::GpuType::Cuda {
+                gpu::GpuType::Cuda {
                     version: match cuda_ver_choice {
                         "CUDA 11.x (default: 11.1)" => "11.1".to_string(),
                         "CUDA 12.x (default: 12.4)" => "12.4".to_string(),
                         "CUDA 13.x (default: 13.1)" => "13.1".to_string(),
                         _ => unreachable!(),
                     },
-                })
+                }
             }
             "AMD (ROCm)" => {
                 let rocm_ver_choice = inquire::Select::new(
@@ -210,17 +256,40 @@ async fn cmd_install(
                 )
                 .prompt()?;
 
-                Some(gpu::GpuType::RocM {
+                gpu::GpuType::RocM {
                     version: match rocm_ver_choice {
                         "ROCm 5.x (default: 5.7)" => "5.7".to_string(),
                         "ROCm 6.x (default: 6.1)" => "6.1".to_string(),
                         _ => unreachable!(),
                     },
-                })
+                }
             }
-            "Intel / AMD (Vulkan)" => Some(gpu::GpuType::Vulkan),
-            "Apple Silicon (Metal)" => Some(gpu::GpuType::Metal),
-            _ => None,
+            "Intel / AMD (Vulkan)" => gpu::GpuType::Vulkan,
+            "Apple Silicon (Metal)" => gpu::GpuType::Metal,
+            _ => gpu::GpuType::CpuOnly,
+        }
+    };
+
+    // Determine installation method.
+    // ik_llama has no pre-built binaries, so source is the only option.
+    let use_source = match backend_type {
+        BackendType::IkLlama => {
+            if !force_build {
+                println!("\nik_llama does not provide pre-built binaries. Building from source.");
+            }
+            true
+        }
+        _ if force_build => true,
+        _ => {
+            let choice = inquire::Select::new(
+                "Installation method:",
+                vec![
+                    "Download pre-built binary (faster)",
+                    "Build from source (hardware-optimized)",
+                ],
+            )
+            .prompt()?;
+            choice.starts_with("Build")
         }
     };
 
@@ -258,8 +327,8 @@ async fn cmd_install(
         backend_type: backend_type.clone(),
         source: source.clone(),
         target_dir,
-        gpu_type: gpu_type.clone(),
-        allow_overwrite: false,
+        gpu_type: Some(gpu_type.clone()),
+        allow_overwrite: force,
     };
 
     // Install
@@ -274,7 +343,7 @@ async fn cmd_install(
         version,
         path: binary_path.clone(),
         installed_at: current_unix_timestamp(),
-        gpu_type,
+        gpu_type: Some(gpu_type),
         source: Some(source),
     })?;
 

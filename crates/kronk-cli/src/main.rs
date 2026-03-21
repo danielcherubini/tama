@@ -1325,20 +1325,22 @@ fn cmd_server_rm(config: &Config, name: &str, force: bool) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_server_add(
-    config: &Config,
-    name: &str,
-    command: Vec<String>,
-    overwrite: bool,
-) -> Result<()> {
-    use kronk_core::config::{BackendConfig, ModelConfig};
-
-    if command.is_empty() {
-        anyhow::bail!("No command provided");
-    }
-
-    let exe_path = &command[0];
-    let args: Vec<String> = command[1..].to_vec();
+/// Resolve a backend path to a backend key in the config.
+///
+/// This function handles:
+/// - Path absolutization: filesystem paths (containing separators, starting with `./` or `/`)
+///   are resolved to absolute paths; bare command names (e.g., "llama-server") are left as-is
+///   for PATH resolution at runtime.
+/// - Finding an existing backend by path, or creating a new one if not found.
+///
+/// # Arguments
+/// * `config` - Mutable config to store new backends
+/// * `exe_path` - The executable path or bare command name
+///
+/// # Returns
+/// The backend key (name) that should be used for this backend.
+fn resolve_backend(config: &mut Config, exe_path: &str) -> Result<(String, String)> {
+    use kronk_core::config::BackendConfig;
 
     // Only absolutize if it looks like a filesystem path (contains separator or starts with ./..);
     // bare command names (e.g. "llama-server") are left as-is so PATH resolution works at runtime.
@@ -1367,7 +1369,6 @@ async fn cmd_server_add(
     };
 
     // Check if this backend path already exists
-    let mut config = config.clone();
     let backend_name = config
         .backends
         .iter()
@@ -1398,6 +1399,27 @@ async fn cmd_server_add(
             key
         }
     };
+
+    Ok((backend_key, exe_str))
+}
+
+async fn cmd_server_add(
+    config: &Config,
+    name: &str,
+    command: Vec<String>,
+    overwrite: bool,
+) -> Result<()> {
+    use kronk_core::config::ModelConfig;
+
+    if command.is_empty() {
+        anyhow::bail!("No command provided");
+    }
+
+    let exe_path = &command[0];
+    let args: Vec<String> = command[1..].to_vec();
+
+    let mut config = config.clone();
+    let (backend_key, exe_str) = resolve_backend(&mut config, exe_path)?;
 
     // Check for duplicate server
     if config.models.contains_key(name) && !overwrite {
@@ -1438,8 +1460,6 @@ async fn cmd_server_add(
 }
 
 async fn cmd_server_edit(config: &mut Config, name: &str, command: Vec<String>) -> Result<()> {
-    use kronk_core::config::BackendConfig;
-
     if command.is_empty() {
         anyhow::bail!("No command provided");
     }
@@ -1447,62 +1467,7 @@ async fn cmd_server_edit(config: &mut Config, name: &str, command: Vec<String>) 
     let exe_path = &command[0];
     let args: Vec<String> = command[1..].to_vec();
 
-    // Only absolutize if it looks like a filesystem path
-    let exe_abs = std::path::Path::new(exe_path);
-    let is_path = exe_path.contains(std::path::MAIN_SEPARATOR)
-        || exe_path.contains('/')
-        || exe_path.starts_with('.')
-        || exe_abs.is_absolute();
-    let (exe_str, exe_stem) = if is_path {
-        let resolved = if exe_abs.is_absolute() {
-            exe_abs.to_path_buf()
-        } else {
-            std::env::current_dir()?.join(exe_abs)
-        };
-        let stem = resolved
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "backend".to_string());
-        (resolved.to_string_lossy().to_string(), stem)
-    } else {
-        let stem = exe_path
-            .strip_suffix(".exe")
-            .unwrap_or(exe_path)
-            .to_string();
-        (exe_path.to_string(), stem)
-    };
-
-    // Check if this backend path exists
-    let backend_name = config
-        .backends
-        .iter()
-        .find(|(_, b)| b.path == exe_str)
-        .map(|(k, _)| k.clone());
-
-    let backend_key = match backend_name {
-        Some(k) => k,
-        None => {
-            // Derive a backend name from the exe filename, avoiding collisions
-            let base = exe_stem.replace('-', "_");
-
-            let mut key = base.clone();
-            let mut i = 2;
-            while config.backends.contains_key(&key) {
-                key = format!("{}_{}", base, i);
-                i += 1;
-            }
-
-            config.backends.insert(
-                key.clone(),
-                BackendConfig {
-                    path: exe_str.clone(),
-                    default_args: vec![],
-                    health_check_url: Some("http://localhost:8080/health".to_string()),
-                },
-            );
-            key
-        }
-    };
+    let (backend_key, exe_str) = resolve_backend(config, exe_path)?;
 
     // Load config, update only the command string for the existing server
     let mut config = config.clone();
