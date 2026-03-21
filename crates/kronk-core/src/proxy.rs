@@ -565,10 +565,12 @@ impl ProxyState {
 
     /// Build a comprehensive status response for the proxy.
     pub async fn build_status_response(&self) -> serde_json::Value {
-        let vram = tokio::task::spawn_blocking(|| gpu::query_vram())
-            .await
-            .unwrap_or_else(|_| Ok(None))
-            .unwrap();
+        let vram_result = tokio::task::spawn_blocking(|| gpu::query_vram())
+            .await;
+        let vram = match vram_result {
+            Ok(result) => result,
+            Err(_) => None,
+        };
 
         let idle_timeout_secs = self.config.proxy.idle_timeout_secs;
         let models = self.models.read().await;
@@ -611,6 +613,7 @@ impl ProxyState {
                             .unwrap_or(0);
 
                         let load_time_ts = load_time
+                            .as_ref()
                             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                             .map(|d| d.as_secs())
                             .unwrap_or(0);
