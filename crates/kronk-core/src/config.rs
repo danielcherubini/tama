@@ -8,8 +8,11 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub general: General,
+    #[serde(default)]
     pub backends: HashMap<String, BackendConfig>,
+    #[serde(default)]
     pub models: HashMap<String, ModelConfig>,
+    #[serde(default)]
     pub supervisor: Supervisor,
     #[serde(default)]
     pub custom_profiles: Option<HashMap<String, SamplingParams>>,
@@ -141,6 +144,12 @@ pub struct ModelConfig {
     pub health_check: Option<HealthCheck>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// Source identifier (e.g. "nvidia/Nemotron-Mini-4B-Instruct")
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Context length for this model
+    #[serde(default)]
+    pub context_length: Option<u32>,
 }
 
 fn default_enabled() -> bool {
@@ -149,10 +158,41 @@ fn default_enabled() -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Supervisor {
+    #[serde(default = "default_restart_policy")]
     pub restart_policy: String,
+    #[serde(default = "default_max_restarts")]
     pub max_restarts: u32,
+    #[serde(default = "default_restart_delay_ms")]
     pub restart_delay_ms: u64,
+    #[serde(default = "default_health_check_interval_ms")]
     pub health_check_interval_ms: u64,
+}
+
+impl Default for Supervisor {
+    fn default() -> Self {
+        Self {
+            restart_policy: default_restart_policy(),
+            max_restarts: default_max_restarts(),
+            restart_delay_ms: default_restart_delay_ms(),
+            health_check_interval_ms: default_health_check_interval_ms(),
+        }
+    }
+}
+
+fn default_restart_policy() -> String {
+    "always".to_string()
+}
+
+fn default_max_restarts() -> u32 {
+    10
+}
+
+fn default_restart_delay_ms() -> u64 {
+    3000
+}
+
+fn default_health_check_interval_ms() -> u64 {
+    5000
 }
 
 impl Config {
@@ -528,6 +568,13 @@ impl Config {
         format!("kronk-{}", server_name)
     }
 
+    /// Build the proxy base URL from config, e.g. `http://0.0.0.0:11411`.
+    /// Always returns a URL since the proxy may be running even if not
+    /// marked as enabled in config (e.g. started manually via `kronk serve`).
+    pub fn proxy_url(&self) -> Option<String> {
+        Some(format!("http://{}:{}", self.proxy.host, self.proxy.port))
+    }
+
     /// Resolve the profiles.d directory for sampling presets.
     /// `<base_dir>/profiles.d/`
     pub fn profiles_dir(&self) -> Result<PathBuf> {
@@ -563,16 +610,15 @@ impl Config {
     }
 
     /// Resolve the logs directory path.
-    /// Uses `general.logs_dir` if set, otherwise defaults to `~/.kronk/logs/`.
+    /// Uses `general.logs_dir` if set, otherwise defaults to `<base_dir>/logs/`.
+    /// On Windows this is `%APPDATA%\kronk\logs\`, on Linux `~/.config/kronk/logs/`.
     pub fn logs_dir(&self) -> Result<PathBuf> {
         if let Some(ref dir) = self.general.logs_dir {
             Ok(PathBuf::from(dir))
         } else if let Some(ref loaded) = self.loaded_from {
             Ok(loaded.join("logs"))
         } else {
-            let home =
-                directories::UserDirs::new().context("Failed to determine home directory")?;
-            Ok(home.home_dir().join(".kronk").join("logs"))
+            Ok(Self::base_dir()?.join("logs"))
         }
     }
 
@@ -725,6 +771,8 @@ impl Default for Config {
                 port: None,
                 health_check: None,
                 enabled: true,
+                source: None,
+                context_length: None,
             },
         );
 
@@ -775,6 +823,8 @@ mod tests {
             port: None,
             health_check: None,
             enabled: true,
+            source: None,
+            context_length: None,
         };
         let params = config.effective_sampling(&server).unwrap();
         assert_eq!(params.temperature, Some(0.3));
@@ -796,6 +846,8 @@ mod tests {
             port: None,
             health_check: None,
             enabled: true,
+            source: None,
+            context_length: None,
         };
         let params = config.effective_sampling(&server).unwrap();
         assert_eq!(params.temperature, Some(0.5)); // override won
@@ -815,6 +867,8 @@ mod tests {
             port: None,
             health_check: None,
             enabled: true,
+            source: None,
+            context_length: None,
         };
         assert!(config.effective_sampling(&server).is_none());
     }
@@ -853,6 +907,8 @@ mod tests {
                 timeout_ms: None,
             }),
             enabled: true,
+            source: None,
+            context_length: None,
         };
         let toml_str = toml::to_string_pretty(&server).unwrap();
         let loaded: ModelConfig = toml::from_str(&toml_str).unwrap();
@@ -911,6 +967,8 @@ args = ["--host", "0.0.0.0"]
             port: None,
             health_check: None,
             enabled: true,
+            source: None,
+            context_length: None,
         };
 
         // 3-layer merge: Profile::Coding (temp=0.3) -> model card (temp=0.2, top_k=40) -> server (top_p=0.85)
@@ -939,6 +997,8 @@ args = ["--host", "0.0.0.0"]
             port: None,
             health_check: None,
             enabled: true,
+            source: None,
+            context_length: None,
         };
         let params = config.effective_sampling_with_card(&server, None).unwrap();
         assert_eq!(params.temperature, Some(0.5)); // server override

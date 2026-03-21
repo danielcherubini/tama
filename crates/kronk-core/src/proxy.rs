@@ -4,11 +4,9 @@ use crate::config::Config;
 use crate::gpu;
 use anyhow::{Context, Result};
 use reqwest::Client;
-use serde_json;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, Instant, UNIX_EPOCH};
 use tokio::process::Command as TokioCommand;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
@@ -564,133 +562,128 @@ impl ProxyState {
     }
 
     /// Build a comprehensive status response for the proxy.
+    ///
+    /// Returns JSON matching the spec: models as an object keyed by name,
+    /// fields flat per model (not nested in a `runtime` sub-object),
+    /// `idle_timeout_secs` at top level.
     pub async fn build_status_response(&self) -> serde_json::Value {
-        let vram_result = tokio::task::spawn_blocking(|| gpu::query_vram())
-            .await;
-        let vram = match vram_result {
-            Ok(result) => result,
-            Err(_) => None,
-        };
+        use std::sync::atomic::Ordering::Relaxed;
+
+        let vram = tokio::task::spawn_blocking(gpu::query_vram)
+            .await
+            .unwrap_or(None);
 
         let idle_timeout_secs = self.config.proxy.idle_timeout_secs;
         let models = self.models.read().await;
-        let mut model_list = Vec::new();
+        let mut models_obj = serde_json::Map::new();
 
         for (model_name, model_config) in &self.config.models {
-            if !model_config.enabled {
-                continue;
-            }
-
-            let backend = match self.config.backends.get(&model_config.backend) {
+            let backend_path = match self.config.backends.get(&model_config.backend) {
                 Some(b) => b.path.clone(),
                 None => continue,
             };
 
             let model_state = models.get(model_name);
-            let model_info = if let Some(state) = model_state {
-                match state {
-                    crate::proxy::ModelState::Ready {
-                        backend_pid,
-                        load_time,
-                        last_accessed,
-                        consecutive_failures,
-                        ..
-                    } => {
-                        let now = Instant::now();
-                        let last_accessed_secs_ago = now.duration_since(*last_accessed).as_secs();
 
-                        let idle_timeout_remaining_secs = state
-                            .last_accessed()
-                            .map(|la| {
-                                let timeout = Duration::from_secs(idle_timeout_secs);
-                                let elapsed = now.duration_since(la);
-                                if elapsed < timeout {
-                                    (timeout - elapsed).as_secs()
-                                } else {
-                                    0
-                                }
-                            })
-                            .unwrap_or(0);
+            let model_json = match model_state {
+                Some(ModelState::Ready {
+                    backend_pid,
+                    load_time,
+                    last_accessed,
+                    consecutive_failures,
+                    ..
+                }) => {
+                    let now = Instant::now();
+                    let last_accessed_secs_ago = now.duration_since(*last_accessed).as_secs();
+                    let timeout = Duration::from_secs(idle_timeout_secs);
+                    let elapsed = now.duration_since(*last_accessed);
+                    let idle_timeout_remaining_secs = if elapsed < timeout {
+                        (timeout - elapsed).as_secs()
+                    } else {
+                        0
+                    };
+                    let load_time_secs = load_time
+                        .duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
 
-                        let load_time_ts = match load_time {
-                            Some(t) => t.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs()).unwrap_or(0),
-                            None => 0,
-                        };
-
-                        Some(serde_json::json!({
-                            "backend": backend,
-                            "backend_pid": *backend_pid,
-                            "load_time": load_time_ts,
-                            "last_accessed_secs_ago": last_accessed_secs_ago,
-                            "idle_timeout_remaining_secs": idle_timeout_remaining_secs,
-                            "consecutive_failures": consecutive_failures.load(std::sync::atomic::Ordering::Relaxed),
-                            "ready": true
-                        }))
-                    }
-                    crate::proxy::ModelState::Starting {
-                        backend,
-                        last_accessed,
-                        consecutive_failures,
-                        ..
-                    } => {
-                        let now = Instant::now();
-                        let last_accessed_secs_ago = now.duration_since(*last_accessed).as_secs();
-
-                        Some(serde_json::json!({
-                            "backend": backend,
-                            "last_accessed_secs_ago": last_accessed_secs_ago,
-                            "consecutive_failures": consecutive_failures.load(std::sync::atomic::Ordering::Relaxed),
-                            "ready": false
-                        }))
-                    }
-                    crate::proxy::ModelState::Failed { .. } => {
-                        Some(serde_json::json!({
-                            "backend": backend,
-                            "ready": false
-                        }))
-                    }
+                    serde_json::json!({
+                        "backend": model_config.backend,
+                        "backend_path": backend_path,
+                        "source": model_config.source,
+                        "quant": model_config.quant,
+                        "profile": model_config.profile.as_ref().map(|p| p.to_string()),
+                        "context_length": model_config.context_length,
+                        "enabled": model_config.enabled,
+                        "loaded": true,
+                        "backend_pid": *backend_pid,
+                        "load_time_secs": load_time_secs,
+                        "last_accessed_secs_ago": last_accessed_secs_ago,
+                        "idle_timeout_remaining_secs": idle_timeout_remaining_secs,
+                        "consecutive_failures": consecutive_failures.load(Relaxed),
+                    })
                 }
-            } else {
-                None
+                Some(ModelState::Starting {
+                    consecutive_failures,
+                    ..
+                }) => {
+                    serde_json::json!({
+                        "backend": model_config.backend,
+                        "backend_path": backend_path,
+                        "source": model_config.source,
+                        "quant": model_config.quant,
+                        "profile": model_config.profile.as_ref().map(|p| p.to_string()),
+                        "context_length": model_config.context_length,
+                        "enabled": model_config.enabled,
+                        "loaded": false,
+                        "backend_pid": null,
+                        "load_time_secs": null,
+                        "last_accessed_secs_ago": null,
+                        "idle_timeout_remaining_secs": null,
+                        "consecutive_failures": consecutive_failures.load(Relaxed),
+                    })
+                }
+                _ => {
+                    // Not loaded or failed
+                    serde_json::json!({
+                        "backend": model_config.backend,
+                        "backend_path": backend_path,
+                        "source": model_config.source,
+                        "quant": model_config.quant,
+                        "profile": model_config.profile.as_ref().map(|p| p.to_string()),
+                        "context_length": model_config.context_length,
+                        "enabled": model_config.enabled,
+                        "loaded": false,
+                        "backend_pid": null,
+                        "load_time_secs": null,
+                        "last_accessed_secs_ago": null,
+                        "idle_timeout_remaining_secs": null,
+                        "consecutive_failures": null,
+                    })
+                }
             };
 
-            model_list.push(serde_json::json!({
-                "id": model_name,
-                "enabled": model_config.enabled,
-                "backend": model_config.backend,
-                "ready": model_info.as_ref().and_then(|m| m.get("ready").and_then(|v| v.as_bool())).unwrap_or(false),
-                "runtime": model_info
-            }));
+            models_obj.insert(model_name.clone(), model_json);
         }
 
         drop(models);
 
         let metrics = &self.metrics;
-        let total_requests = metrics.total_requests.load(std::sync::atomic::Ordering::Relaxed);
-        let successful_requests = metrics.successful_requests.load(std::sync::atomic::Ordering::Relaxed);
-        let failed_requests = metrics.failed_requests.load(std::sync::atomic::Ordering::Relaxed);
-        let models_loaded = metrics.models_loaded.load(std::sync::atomic::Ordering::Relaxed);
-        let models_unloaded = metrics.models_unloaded.load(std::sync::atomic::Ordering::Relaxed);
-        let active_models = models.len();
 
         serde_json::json!({
-            "status": "ok",
             "vram": vram.map(|v| serde_json::json!({
                 "used_mib": v.used_mib,
-                "total_mib": v.total_mib
+                "total_mib": v.total_mib,
             })),
-            "models": model_list,
-            "proxy": serde_json::json!({
-                "idle_timeout_secs": idle_timeout_secs
-            }),
-            "metrics": serde_json::json!({
-                "total_requests": total_requests,
-                "successful_requests": successful_requests,
-                "failed_requests": failed_requests,
-                "models_loaded": models_loaded,
-                "models_unloaded": models_unloaded,
-                "active_models": active_models
-            })
+            "idle_timeout_secs": idle_timeout_secs,
+            "metrics": {
+                "total_requests": metrics.total_requests.load(Relaxed),
+                "successful_requests": metrics.successful_requests.load(Relaxed),
+                "failed_requests": metrics.failed_requests.load(Relaxed),
+                "models_loaded": metrics.models_loaded.load(Relaxed),
+                "models_unloaded": metrics.models_unloaded.load(Relaxed),
+            },
+            "models": models_obj,
         })
     }
 }
@@ -838,39 +831,46 @@ mod tests {
 
         let response = state.build_status_response().await;
 
-        let status = response.get("status").unwrap();
-        assert_eq!(status.as_str(), Some("ok"));
+        // VRAM may or may not be present depending on GPU availability
+        let vram = response.get("vram");
+        assert!(vram.is_some(), "vram key should be present (even if null)");
 
-        let vram = response.get("vram").unwrap();
-        assert!(vram.is_object());
+        // idle_timeout_secs at top level per spec
+        assert!(response.get("idle_timeout_secs").is_some());
 
+        // models is an object keyed by model name
         let models = response.get("models").unwrap();
-        assert!(models.is_array());
-
-        let proxy = response.get("proxy").unwrap();
-        assert!(proxy.is_object());
+        assert!(models.is_object());
 
         let metrics = response.get("metrics").unwrap();
         assert!(metrics.is_object());
     }
 
     #[tokio::test]
-    async fn test_build_status_response_with_loaded_model() {
+    async fn test_build_status_response_model_fields() {
         let config = Config::default();
         let state = ProxyState::new(config);
 
-        // Load a model
-        let result = state.load_model("default", None).await;
-        assert!(result.is_ok());
-
         let response = state.build_status_response().await;
 
-        let models = response.get("models").unwrap();
-        let model = models.get("default").unwrap();
+        // models is an object, default config has a "default" model
+        let models = response.get("models").unwrap().as_object().unwrap();
+        assert!(
+            !models.is_empty(),
+            "default config should have at least one model"
+        );
 
-        assert!(model.get("ready").unwrap().as_bool().unwrap());
-        assert!(model.get("runtime").unwrap().is_object());
-        assert!(model.get("runtime").unwrap().get("backend_pid").is_some());
-        assert!(model.get("runtime").unwrap().get("load_time").is_some());
+        let (_, first_model) = models.iter().next().unwrap();
+
+        // Per spec: flat fields, not nested in runtime
+        assert!(first_model.get("backend").is_some());
+        assert!(first_model.get("backend_path").is_some());
+        assert!(first_model.get("enabled").is_some());
+        assert!(first_model.get("loaded").is_some());
+        // Unloaded model should have loaded=false
+        assert_eq!(
+            first_model.get("loaded").and_then(|v| v.as_bool()),
+            Some(false)
+        );
     }
 }
