@@ -34,7 +34,6 @@ pub async fn run(config: &Config, command: ModelCommands) -> Result<()> {
     match command {
         ModelCommands::Pull { repo } => cmd_pull(config, &repo).await,
         ModelCommands::Ls => cmd_ls(config),
-        ModelCommands::Ps => cmd_ps(config).await,
         ModelCommands::Enable { name } => cmd_enable(config, &name),
         ModelCommands::Disable { name } => cmd_disable(config, &name),
         ModelCommands::Create {
@@ -334,64 +333,6 @@ fn cmd_ls(config: &Config) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_ps(config: &Config) -> Result<()> {
-    let http_client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
-        .build()
-        .unwrap_or_default();
-
-    for (name, srv) in &config.models {
-        let _backend = config.backends.get(&srv.backend);
-        let backend_path = _backend.map(|b| b.path.as_str()).unwrap_or("???");
-
-        // Check service status
-        let service_name = Config::service_name(name);
-        let service_status = {
-            #[cfg(target_os = "windows")]
-            {
-                use kronk_core::platform::windows;
-                windows::query_service(&service_name).unwrap_or_else(|_| "UNKNOWN".to_string())
-            }
-            #[cfg(target_os = "linux")]
-            {
-                use kronk_core::platform::linux;
-                linux::query_service(&service_name).unwrap_or_else(|_| "UNKNOWN".to_string())
-            }
-            #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-            {
-                let _ = &service_name;
-                "N/A".to_string()
-            }
-        };
-
-        // Check health endpoint using server's resolved health check config
-        let health_check = config.resolve_health_check(srv);
-        let health = if let Some(url) = health_check.url {
-            match http_client.get(url).send().await {
-                Ok(resp) if resp.status().is_success() => "HEALTHY".to_string(),
-                Ok(resp) => format!("HTTP {}", resp.status()),
-                Err(_) => "DOWN".to_string(),
-            }
-        } else {
-            "N/A".to_string()
-        };
-
-        println!();
-        println!("  Model:    {}", name);
-        println!("  Backend:  {} ({})", srv.backend, backend_path);
-        println!("  Health:   {}", health);
-    }
-
-    // GPU VRAM usage
-    if let Some(vram) = kronk_core::gpu::query_vram() {
-        println!();
-        println!("  VRAM:     {} / {} MiB", vram.used_mib, vram.total_mib);
-    }
-
-    println!();
-    Ok(())
-}
-
 async fn cmd_create(
     config: &Config,
     name: &str,
@@ -497,6 +438,8 @@ async fn cmd_create(
             port: None,
             health_check: None,
             enabled: true,
+            source: Some(model_id.to_string()),
+            context_length: None,
         },
     );
 

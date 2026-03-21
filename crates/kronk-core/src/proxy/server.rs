@@ -9,7 +9,6 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use serde_json;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::info;
@@ -713,9 +712,8 @@ mod tests {
         let body = response.text().await.unwrap();
         let json: serde_json::Value = serde_json::from_str(&body).unwrap();
 
-        assert_eq!(json.get("status").unwrap().as_str(), Some("ok"));
-        assert!(json.get("models").unwrap().is_array());
-        assert!(json.get("proxy").unwrap().is_object());
+        assert!(json.get("idle_timeout_secs").is_some());
+        assert!(json.get("models").unwrap().is_object());
         assert!(json.get("metrics").unwrap().is_object());
     }
 }

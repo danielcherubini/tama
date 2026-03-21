@@ -1293,6 +1293,7 @@ dependencies = [
  "inquire",
  "kronk-core",
  "reqwest",
+ "serde_json",
  "tokio",
  "toml",
  "tracing",
