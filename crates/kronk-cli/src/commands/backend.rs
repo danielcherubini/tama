@@ -88,50 +88,42 @@ fn parse_backend_type(s: &str) -> Result<BackendType> {
     }
 }
 
-fn parse_gpu_type(gpu_str: &str) -> Option<kronk_core::gpu::GpuType> {
+fn parse_gpu_type(gpu_str: &str) -> Result<kronk_core::gpu::GpuType> {
     let gpu_str = gpu_str.trim().to_lowercase();
 
-    if gpu_str == "cpu" {
-        return Some(kronk_core::gpu::GpuType::CpuOnly);
-    }
-
-    if gpu_str.starts_with("cuda:") {
-        if let Some(version) = gpu_str.strip_prefix("cuda:") {
-            return Some(kronk_core::gpu::GpuType::Cuda {
-                version: version.to_string(),
-            });
-        }
-    }
-
-    if gpu_str == "cuda" {
-        return Some(kronk_core::gpu::GpuType::Cuda {
+    match gpu_str.as_str() {
+        "cpu" => Ok(kronk_core::gpu::GpuType::CpuOnly),
+        "cuda" => Ok(kronk_core::gpu::GpuType::Cuda {
             version: "12.4".to_string(),
-        });
-    }
-
-    if gpu_str.starts_with("rocm:") {
-        if let Some(version) = gpu_str.strip_prefix("rocm:") {
-            return Some(kronk_core::gpu::GpuType::RocM {
-                version: version.to_string(),
-            });
-        }
-    }
-
-    if gpu_str == "rocm" {
-        return Some(kronk_core::gpu::GpuType::RocM {
+        }),
+        "rocm" => Ok(kronk_core::gpu::GpuType::RocM {
             version: "6.1".to_string(),
-        });
+        }),
+        "vulkan" => Ok(kronk_core::gpu::GpuType::Vulkan),
+        "metal" => Ok(kronk_core::gpu::GpuType::Metal),
+        s if s.starts_with("cuda:") => {
+            let version = s.strip_prefix("cuda:").unwrap();
+            if version.is_empty() {
+                anyhow::bail!("Invalid --gpu value: missing CUDA version after 'cuda:'");
+            }
+            Ok(kronk_core::gpu::GpuType::Cuda {
+                version: version.to_string(),
+            })
+        }
+        s if s.starts_with("rocm:") => {
+            let version = s.strip_prefix("rocm:").unwrap();
+            if version.is_empty() {
+                anyhow::bail!("Invalid --gpu value: missing ROCm version after 'rocm:'");
+            }
+            Ok(kronk_core::gpu::GpuType::RocM {
+                version: version.to_string(),
+            })
+        }
+        _ => anyhow::bail!(
+            "Unknown GPU type '{}'. Supported: cpu, cuda, cuda:<version>, rocm, rocm:<version>, vulkan, metal",
+            gpu_str
+        ),
     }
-
-    if gpu_str == "vulkan" {
-        return Some(kronk_core::gpu::GpuType::Vulkan);
-    }
-
-    if gpu_str == "metal" {
-        return Some(kronk_core::gpu::GpuType::Metal);
-    }
-
-    None
 }
 
 fn registry_path() -> Result<std::path::PathBuf> {
@@ -204,15 +196,9 @@ async fn cmd_install(
 
     // Parse GPU type from flag or use interactive selection
     let gpu_type = if let Some(gpu_str) = gpu_flag {
-        if let Some(gpu) = parse_gpu_type(&gpu_str) {
-            println!("[--gpu] Using: {:?}", gpu);
-            gpu
-        } else {
-            return Err(anyhow!(
-                "Invalid GPU type '{}'. Supported: cpu, cuda, cuda:12, cuda:13, rocm, rocm:6, vulkan, metal",
-                gpu_str
-            ));
-        }
+        let gpu = parse_gpu_type(&gpu_str)?;
+        println!("[--gpu] Using: {:?}", gpu);
+        gpu
     } else {
         // Interactive selection
         let gpu_choice = inquire::Select::new(

@@ -1517,22 +1517,22 @@ pub async fn cmd_server_add(
         None
     };
 
-    // Verify GGUF file exists if both model and quant are specified
+    // Verify GGUF file exists if both model card and quant are specified
     if let Some(ref quant_name) = quant_name {
-        let gguf_path = model_info
-            .as_ref()
-            .unwrap()
-            .card
-            .quants
-            .get(quant_name)
-            .map(|q| model_info.as_ref().unwrap().dir.join(&q.file));
+        if let Some(ref installed) = model_info {
+            let gguf_path = installed
+                .card
+                .quants
+                .get(quant_name)
+                .map(|q| installed.dir.join(&q.file));
 
-        if let Some(ref path) = gguf_path {
-            if !path.exists() {
-                anyhow::bail!(
-                    "GGUF file '{}' not found. Make sure the model is properly installed.",
-                    path.display()
-                );
+            if let Some(ref path) = gguf_path {
+                if !path.exists() {
+                    anyhow::bail!(
+                        "GGUF file '{}' not found. Make sure the model is properly installed.",
+                        path.display()
+                    );
+                }
             }
         }
     }

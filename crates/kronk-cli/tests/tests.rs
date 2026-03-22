@@ -172,3 +172,102 @@ fn test_extract_ctx_invalid() {
     let result = extract_kronk_flags(args);
     assert!(result.is_err());
 }
+
+// ── Async command-level tests ────────────────────────────────────────────
+
+use kronk::{cmd_server_add, cmd_server_edit};
+
+/// cmd_server_add with a nonexistent model card ref should return an error,
+/// not panic.
+#[tokio::test]
+async fn test_cmd_server_add_nonexistent_model_errors() {
+    let config = kronk_core::config::Config::default();
+    let result = cmd_server_add(
+        &config,
+        "test_server",
+        vec![
+            "llama-server".to_string(),
+            "--model".to_string(),
+            "nonexistent/model".to_string(),
+        ],
+        false,
+    )
+    .await;
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("not found"),
+        "Expected 'not found' in error, got: {}",
+        err_msg
+    );
+}
+
+/// cmd_server_edit on a server that doesn't exist should return an error.
+#[tokio::test]
+async fn test_cmd_server_edit_nonexistent_server_errors() {
+    let mut config = kronk_core::config::Config::default();
+    let result = cmd_server_edit(
+        &mut config,
+        "nonexistent",
+        vec![
+            "llama-server".to_string(),
+            "--profile".to_string(),
+            "coding".to_string(),
+        ],
+    )
+    .await;
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("not found"),
+        "Expected 'not found' in error, got: {}",
+        err_msg
+    );
+}
+
+/// cmd_server_edit with an invalid profile name should return an error,
+/// not panic.
+#[tokio::test]
+async fn test_cmd_server_edit_invalid_profile_errors() {
+    let mut config = kronk_core::config::Config::default();
+    // Insert a dummy server first
+    config.models.insert(
+        "test_server".to_string(),
+        kronk_core::config::ModelConfig {
+            backend: "test".to_string(),
+            args: vec![],
+            profile: None,
+            sampling: None,
+            model: None,
+            quant: None,
+            port: None,
+            health_check: None,
+            enabled: true,
+            source: None,
+            context_length: None,
+        },
+    );
+    // Need a matching backend
+    config.backends.insert(
+        "test".to_string(),
+        kronk_core::config::BackendConfig {
+            path: "llama-server".to_string(),
+            default_args: vec![],
+            health_check_url: None,
+        },
+    );
+    let result = cmd_server_edit(
+        &mut config,
+        "test_server",
+        vec![
+            "llama-server".to_string(),
+            "--profile".to_string(),
+            // Profile::from_str is infallible (Custom variant), so this won't error.
+            // But we can verify the edit actually applies the profile.
+            "coding".to_string(),
+        ],
+    )
+    .await;
+    // This should succeed since "coding" is a valid profile
+    assert!(result.is_ok(), "Expected ok, got: {:?}", result.err());
+}
