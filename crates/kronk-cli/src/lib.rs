@@ -1474,7 +1474,7 @@ pub async fn cmd_server_add(
         None
     };
 
-    // Resolve quantization
+    // Resolve quantization with interactive selection if needed
     let quant_name = if let Some(ref quant) = extracted.quant {
         // If model card exists, validate quant against available quants
         if let Some(ref installed) = model_info {
@@ -1491,8 +1491,28 @@ pub async fn cmd_server_add(
                         .join(", ")
                 );
             }
+            Some(quant.clone())
+        } else {
+            // No model card - quant is just stored as-is
+            Some(quant.clone())
         }
-        Some(quant.clone())
+    } else if let Some(ref installed) = model_info {
+        // Model ref provided but no --quant - offer interactive selection
+        let quant_names: Vec<String> = installed.card.quants.keys().cloned().collect();
+        if quant_names.is_empty() {
+            anyhow::bail!(
+                "No quants available for '{}'. Run `kronk model pull {}` first.",
+                installed.card.model.source,
+                installed.card.model.source
+            );
+        }
+        Some(if quant_names.len() == 1 {
+            quant_names.into_iter().next().unwrap()
+        } else {
+            inquire::Select::new("Select a quant:", quant_names)
+                .prompt()
+                .context("Quant selection cancelled")?
+        })
     } else {
         None
     };
@@ -1580,8 +1600,6 @@ pub async fn cmd_server_add(
 }
 
 pub async fn cmd_server_edit(config: &mut Config, name: &str, command: Vec<String>) -> Result<()> {
-    use kronk_core::profiles::Profile;
-
     if command.is_empty() {
         anyhow::bail!("No command provided");
     }
@@ -1591,58 +1609,63 @@ pub async fn cmd_server_edit(config: &mut Config, name: &str, command: Vec<Strin
 
     let (backend_key, exe_str) = resolve_backend(config, exe_path)?;
 
-    // Extract kronk flags
-    let extracted = extract_kronk_flags(args.clone())?;
-    tracing::debug!(
-        "extracted: {:?}, remaining: {:?}",
-        extracted,
-        extracted.remaining_args
-    );
+    // Extract kronk flags from args
+    let extracted = extract_kronk_flags(args)?;
 
-    // Update the existing server with extracted flags (work directly with mutable ref)
-    let srv = config
-        .models
-        .get_mut(name)
-        .ok_or_else(|| anyhow::anyhow!("Server '{}' not found", name))?;
+    let mut config = config.clone();
 
-    tracing::debug!("before edit: model={:?}, quant={:?}", srv.model, srv.quant);
-    srv.backend = backend_key.clone();
-    srv.args = extracted.remaining_args;
+    // Verify server exists
+    if !config.models.contains_key(name) {
+        anyhow::bail!("Server '{}' not found", name);
+    }
 
-    // Apply extracted flags to model config
-    if let Some(ref model) = extracted.model {
-        tracing::debug!("setting model to: {}", model);
-        srv.model = Some(model.clone());
-        srv.source = Some(model.clone());
-    }
-    if let Some(ref quant) = extracted.quant {
-        srv.quant = Some(quant.clone());
-    }
-    if let Some(ref profile) = extracted.profile {
-        let profile_enum = match profile.as_str() {
-            "coding" => Profile::Coding,
-            "chat" => Profile::Chat,
-            "analysis" => Profile::Analysis,
-            "creative" => Profile::Creative,
-            _ => Profile::Custom {
-                name: profile.clone(),
-            },
-        };
-        srv.profile = Some(profile_enum);
-    }
-    if let Some(port) = extracted.port {
-        srv.port = Some(port);
-    }
-    if let Some(ctx) = extracted.context_length {
-        srv.context_length = Some(ctx);
+    // Mutate via get_mut in a block so the borrow is dropped before save()
+    {
+        let srv = config.models.get_mut(name).unwrap();
+
+        // Selectively merge extracted flags into existing ModelConfig
+        if let Some(ref model) = extracted.model {
+            srv.model = Some(model.clone());
+            srv.source = Some(model.clone());
+        }
+        if let Some(ref quant) = extracted.quant {
+            srv.quant = Some(quant.clone());
+        }
+        if let Some(ref profile) = extracted.profile {
+            let p = profile.parse::<kronk_core::profiles::Profile>().unwrap();
+            srv.profile = Some(p);
+        }
+        if let Some(port) = extracted.port {
+            srv.port = Some(port);
+        }
+        if let Some(ctx) = extracted.context_length {
+            srv.context_length = Some(ctx);
+        }
+
+        srv.backend = backend_key.clone();
+        srv.args = extracted.remaining_args.clone();
     }
 
     config.save()?;
 
+    // Read back for output
+    let srv = config.models.get(name).unwrap();
+
     println!("Oh yeah, it's all coming together.");
     println!();
-    println!("  Model:    {}", name);
+    println!("  Name:     {}", name);
     println!("  Backend:  {} ({})", backend_key, exe_str);
+
+    if let Some(ref model) = srv.model {
+        let quant = srv.quant.as_deref().unwrap_or("?");
+        let source = srv.source.as_deref().unwrap_or(model);
+        println!("  Model:    {} ({})", source, quant);
+    }
+    if let Some(ref profile) = srv.profile {
+        println!("  Profile:  {}", profile);
+    }
+
+    println!();
 
     Ok(())
 }
