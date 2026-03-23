@@ -232,21 +232,18 @@ async fn test_cmd_server_edit_nonexistent_server_errors() {
 /// cmd_server_edit with a valid profile should succeed (not panic).
 #[tokio::test]
 async fn test_cmd_server_edit_valid_profile_succeeds() {
-    // Create a minimal config file in the temp directory
     let temp_dir = tempfile::tempdir().unwrap();
-    let config_path = temp_dir.path().join("config.json");
-    std::fs::write(
-        &config_path,
-        r#"{
-            "backends": {},
-            "models": {},
-            "proxy": {"host": "0.0.0.0", "port": 11411},
-            "supervisor": {"health_check_interval_ms": 5000}
-        }"#,
-    ).unwrap();
 
-    let mut config = kronk_core::config::Config::default();
-    config.loaded_from = Some(temp_dir.path().to_path_buf());
+    // Use Config::load_from() which creates the default config file
+    let mut config = match kronk_core::config::Config::load_from(temp_dir.path()) {
+        Ok(c) => c,
+        Err(_) => {
+            // If loading fails (e.g., profiles.d creation), create a minimal config
+            let mut config = kronk_core::config::Config::default();
+            config.loaded_from = Some(temp_dir.path().to_path_buf());
+            config
+        }
+    };
     // Insert a dummy server first
     config.models.insert(
         "test_server".to_string(),
