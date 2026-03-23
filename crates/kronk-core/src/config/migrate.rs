@@ -36,7 +36,13 @@ pub fn migrate_model_cards_to_configs_d(config: &crate::config::Config) -> anyho
                 }
                 std::fs::create_dir_all(&configs_dir)?;
                 std::fs::copy(&old_card, &new_path)?;
-                std::fs::remove_file(&old_card)?;
+                if let Err(e) = std::fs::remove_file(&old_card) {
+                    tracing::warn!(
+                        "Failed to remove old model card {}: {}",
+                        old_card.display(),
+                        e
+                    );
+                }
                 migrated = true;
             }
         }

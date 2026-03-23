@@ -127,7 +127,9 @@ pub fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
         .join("logs");
     let _ = std::fs::create_dir_all(&log_dir);
     let log_file = std::fs::File::create(log_dir.join(format!("{}.log", service_name)))
-        .unwrap_or_else(|_| std::fs::File::create("kronk-service.log").unwrap());
+        .or_else(|_| std::fs::File::create("kronk-service.log"))
+        .or_else(|_| std::fs::File::create(std::env::temp_dir().join("kronk-service.log")))
+        .expect("Failed to create log file in any location");
 
     // Set up tracing to write to the log file (services have no stderr)
     let subscriber = tracing_subscriber::fmt()
@@ -261,10 +263,10 @@ pub fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
                 args.extend(srv.args.clone());
                 args
             });
-            let log_dir = config
-                .logs_dir()
-                .ok()
-                .expect("Failed to get logs directory");
+            let log_dir = config.logs_dir().unwrap_or_else(|e| {
+                tracing::warn!("Failed to get logs directory: {}, using current dir", e);
+                std::path::PathBuf::from(".")
+            });
             let health_check = config.resolve_health_check(&srv);
             let supervisor = ProcessSupervisor::new(
                 backend.path.clone(),

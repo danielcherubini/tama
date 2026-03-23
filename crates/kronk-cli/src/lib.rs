@@ -43,55 +43,49 @@ pub async fn main() -> Result<()> {
     let args = Args::parse();
     let config = Config::load()?;
 
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
-        match args.command {
-            Commands::Run { name, ctx } => run::cmd_run(&config, &name, ctx).await,
-            Commands::Service { command } => service_cmd::cmd_service(&config, command),
-            Commands::ServiceRun { server, ctx, proxy } => {
-                if proxy {
-                    let host = config.proxy.host.clone();
-                    let port = config.proxy.port;
-                    let idle_timeout = config.proxy.idle_timeout_secs;
-                    serve::cmd_serve(&config, host, port, idle_timeout).await
-                } else {
-                    let server = server.ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "Either --server or --proxy must be provided for service-run"
-                        )
-                    })?;
-                    run::cmd_run(&config, &server, ctx).await
-                }
-            }
-            Commands::Add { name, command } => {
-                server::cmd_server_add(&config, &name, command, false).await
-            }
-            Commands::Update { name, command } => {
-                server::cmd_server_edit(&mut config.clone(), &name, command).await
-            }
-            Commands::Server { command } => server::cmd_server(&config, command).await,
-            Commands::Status => status::cmd_status(&config).await,
-            Commands::Profile { command } => profile::cmd_profile(&config, command),
-            Commands::Config { command } => config::cmd_config(&config, command),
-            Commands::Model { command } => commands::model::run(&config, command).await,
-            Commands::Backend { command } => {
-                commands::backend::run(&config, crate::commands::backend::BackendArgs { command })
-                    .await
-            }
-            Commands::Serve {
-                host,
-                port,
-                idle_timeout,
-            } => serve::cmd_serve(&config, host, port, idle_timeout).await,
-            Commands::Proxy { command } => serve::cmd_proxy(&config, command).await,
-            Commands::Logs {
-                name,
-                follow,
-                lines,
-            } => {
-                let name = name.unwrap_or_else(|| "kronk".to_string());
-                crate::handlers::logs::cmd_logs(&config, &name, follow, lines).await
+    match args.command {
+        Commands::Run { name, ctx } => run::cmd_run(&config, &name, ctx).await,
+        Commands::Service { command } => service_cmd::cmd_service(&config, command),
+        Commands::ServiceRun { server, ctx, proxy } => {
+            if proxy {
+                let host = config.proxy.host.clone();
+                let port = config.proxy.port;
+                let idle_timeout = config.proxy.idle_timeout_secs;
+                serve::cmd_serve(&config, host, port, idle_timeout).await
+            } else {
+                let server = server.ok_or_else(|| {
+                    anyhow::anyhow!("Either --server or --proxy must be provided for service-run")
+                })?;
+                run::cmd_run(&config, &server, ctx).await
             }
         }
-    })
+        Commands::Add { name, command } => {
+            server::cmd_server_add(&config, &name, command, false).await
+        }
+        Commands::Update { name, command } => {
+            server::cmd_server_edit(&mut config.clone(), &name, command).await
+        }
+        Commands::Server { command } => server::cmd_server(&config, command).await,
+        Commands::Status => status::cmd_status(&config).await,
+        Commands::Profile { command } => profile::cmd_profile(&config, command),
+        Commands::Config { command } => config::cmd_config(&config, command),
+        Commands::Model { command } => commands::model::run(&config, command).await,
+        Commands::Backend { command } => {
+            commands::backend::run(&config, crate::commands::backend::BackendArgs { command }).await
+        }
+        Commands::Serve {
+            host,
+            port,
+            idle_timeout,
+        } => serve::cmd_serve(&config, host, port, idle_timeout).await,
+        Commands::Proxy { command } => serve::cmd_proxy(&config, command).await,
+        Commands::Logs {
+            name,
+            follow,
+            lines,
+        } => {
+            let name = name.unwrap_or_else(|| "kronk".to_string());
+            crate::handlers::logs::cmd_logs(&config, &name, follow, lines).await
+        }
+    }
 }

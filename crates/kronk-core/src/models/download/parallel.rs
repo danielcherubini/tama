@@ -18,6 +18,9 @@ pub async fn download_parallel(
     auth_header: Option<&str>,
     pb: &ProgressBar,
 ) -> anyhow::Result<()> {
+    if num_connections == 0 {
+        anyhow::bail!("num_connections must be > 0");
+    }
     let chunk_size = total_size / num_connections as u64;
 
     // Build temp file paths
@@ -187,7 +190,7 @@ async fn download_chunk_with_retry(
         file.flush().await?;
 
         if stream_failed {
-            if attempt >= MAX_RETRIES {
+            if attempt > MAX_RETRIES {
                 anyhow::bail!(
                     "Chunk {} stream failed after {} retries",
                     chunk_index,

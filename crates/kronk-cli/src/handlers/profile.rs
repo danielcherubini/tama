@@ -12,8 +12,15 @@ pub fn cmd_profile(config: &Config, command: crate::cli::ProfileCommands) -> Res
         crate::cli::ProfileCommands::List => {
             // Load profiles from disk
             let profiles_dir = config.profiles_dir()?;
-            let disk_profiles =
-                kronk_core::profiles::load_profiles_d(&profiles_dir).unwrap_or_default();
+            let disk_profiles = kronk_core::profiles::load_profiles_d(&profiles_dir)
+                .unwrap_or_else(|e| {
+                    tracing::warn!(
+                        "Failed to load profiles from {}: {}",
+                        profiles_dir.display(),
+                        e
+                    );
+                    std::collections::HashMap::new()
+                });
 
             println!("Available profiles:");
             println!();
