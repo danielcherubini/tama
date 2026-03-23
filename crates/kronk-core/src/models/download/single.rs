@@ -118,8 +118,8 @@ pub async fn download_single(
                                 _e
                             );
                         });
-                        // Rollback progress before retry
-                        pb.set_position(downloaded.saturating_sub(downloaded));
+                        // Keep progress bar at current position for retry
+                        pb.set_position(downloaded);
                         stream_failed = true;
                         break;
                     }

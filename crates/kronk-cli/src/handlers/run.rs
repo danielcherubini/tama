@@ -2,7 +2,7 @@
 //!
 //! Handles `kronk run <server>` for running a single server in foreground.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use kronk_core::config::Config;
 use kronk_core::process::ProcessEvent;
 
@@ -29,7 +29,11 @@ pub async fn cmd_run(config: &Config, server_name: &str, ctx_override: Option<u3
         backend.path.clone(),
         args,
         health_check,
-        config.supervisor.max_restarts.try_into().unwrap(),
+        config
+            .supervisor
+            .max_restarts
+            .try_into()
+            .context("max_restarts value out of range")?,
         config.supervisor.restart_delay_ms,
     );
 

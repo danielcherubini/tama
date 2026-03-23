@@ -36,7 +36,7 @@ pub async fn download_chunked(
         headers.insert(
             reqwest::header::AUTHORIZATION,
             reqwest::header::HeaderValue::from_str(header)
-                .unwrap_or(reqwest::header::HeaderValue::from_static("Bearer ")),
+                .context("Invalid authorization header value")?,
         );
         Client::builder()
             .connect_timeout(Duration::from_secs(30))

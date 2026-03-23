@@ -229,7 +229,7 @@ fn resolve_backend(config: &mut Config, exe_path: &str) -> Result<(String, Strin
                 BackendConfig {
                     path: exe_str.clone(),
                     default_args: vec![],
-                    health_check_url: Some("http://localhost:8080/health".to_string()),
+                    health_check_url: None,
                 },
             );
             key

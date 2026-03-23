@@ -66,12 +66,11 @@ pub async fn download_parallel(
     }
 
     // Wait for all chunks — clean up on any failure
-    let mut chunk_paths = Vec::new();
     let mut first_error: Option<anyhow::Error> = None;
 
     for handle in handles {
         match handle.await {
-            Ok(Ok(path)) => chunk_paths.push(path),
+            Ok(Ok(_path)) => {}
             Ok(Err(e)) => {
                 if first_error.is_none() {
                     first_error = Some(e);
@@ -91,12 +90,13 @@ pub async fn download_parallel(
         return Err(err);
     }
 
-    // Reassemble chunks into final file by streaming (not loading into memory)
+    // Reassemble chunks into final file in index order (using tmp_paths which
+    // are ordered by chunk index, not completion order)
     let mut dest_file = tokio::fs::File::create(dest).await?;
-    for chunk_path in &chunk_paths {
-        let mut chunk_file = tokio::fs::File::open(chunk_path).await?;
+    for tmp_path in &tmp_paths {
+        let mut chunk_file = tokio::fs::File::open(tmp_path).await?;
         tokio::io::copy(&mut chunk_file, &mut dest_file).await?;
-        tokio::fs::remove_file(chunk_path).await.ok();
+        tokio::fs::remove_file(tmp_path).await.ok();
     }
     dest_file.flush().await?;
 
@@ -187,6 +187,14 @@ async fn download_chunk_with_retry(
         file.flush().await?;
 
         if stream_failed {
+            if attempt >= MAX_RETRIES {
+                anyhow::bail!(
+                    "Chunk {} stream failed after {} retries",
+                    chunk_index,
+                    MAX_RETRIES
+                );
+            }
+            pb.dec(chunk_downloaded);
             tokio::time::sleep(Duration::from_secs(2u64.pow(attempt - 1))).await;
             continue;
         }

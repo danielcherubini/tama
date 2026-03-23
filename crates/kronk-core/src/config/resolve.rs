@@ -13,7 +13,7 @@ impl Config {
                 // Fallback: search for a server where the 'model' field matches the requested name
                 self.models
                     .values()
-                    .find(|s| s.model.as_deref() == Some(name) && s.enabled)
+                    .find(|s| s.model.as_deref() == Some(name))
             })
             .with_context(|| format!("Model '{}' not found in config", name))?;
 
