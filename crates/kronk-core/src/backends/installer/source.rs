@@ -279,7 +279,7 @@ async fn install_binary(build_output: &Path, options: &InstallOptions) -> Result
                     let entry_path = entry.path();
                     if entry_path.is_file() {
                         if let Some(name) = entry_path.file_name().and_then(|n| n.to_str()) {
-                            if name.ends_with(".so") || name.ends_with(".dylib") {
+                            if name.contains(".so") || name.ends_with(".dylib") {
                                 let dest_path = dest.join(name);
                                 if !dest_path.exists() {
                                     if let Err(e) = std::fs::copy(&entry_path, &dest_path) {

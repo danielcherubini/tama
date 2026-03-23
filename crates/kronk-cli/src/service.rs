@@ -347,50 +347,9 @@ fn build_full_args(
     config.build_full_args(server, backend, ctx_override)
 }
 
-/// Process supervisor for running backends
+// On Windows, use the real ProcessSupervisor from kronk_core
 #[cfg(target_os = "windows")]
-struct ProcessSupervisor {
-    path: String,
-    args: Vec<String>,
-    health_check: kronk_core::config::HealthCheck,
-    max_restarts: usize,
-    restart_delay_ms: u64,
-    log_dir: std::path::PathBuf,
-}
-
-#[cfg(target_os = "windows")]
-impl ProcessSupervisor {
-    fn new(
-        path: String,
-        args: Vec<String>,
-        health_check: kronk_core::config::HealthCheck,
-        max_restarts: usize,
-        restart_delay_ms: u64,
-    ) -> Self {
-        Self {
-            path,
-            args,
-            health_check,
-            max_restarts,
-            restart_delay_ms,
-            log_dir: std::path::PathBuf::new(),
-        }
-    }
-
-    fn with_log_dir(mut self, log_dir: std::path::PathBuf) -> Self {
-        self.log_dir = log_dir;
-        self
-    }
-
-    async fn run(
-        self,
-        _tx: tokio::sync::mpsc::UnboundedSender<kronk_core::process::ProcessEvent>,
-        shutdown_rx: Option<tokio::sync::mpsc::Receiver<()>>,
-    ) -> anyhow::Result<()> {
-        // Supervisor implementation would go here
-        anyhow::bail!("Supervisor run not implemented in this module");
-    }
-}
+use kronk_core::process::ProcessSupervisor;
 
 #[cfg(not(target_os = "windows"))]
 pub fn service_dispatch() -> anyhow::Result<()> {

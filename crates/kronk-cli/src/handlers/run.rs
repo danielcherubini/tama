@@ -2,9 +2,9 @@
 //!
 //! Handles `kronk run <server>` for running a single server in foreground.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use kronk_core::config::Config;
-use kronk_core::process::ProcessEvent;
+use kronk_core::process::{ProcessEvent, ProcessSupervisor};
 
 /// Run a single server in the foreground (for debugging)
 pub async fn cmd_run(config: &Config, server_name: &str, ctx_override: Option<u32>) -> Result<()> {
@@ -29,11 +29,7 @@ pub async fn cmd_run(config: &Config, server_name: &str, ctx_override: Option<u3
         backend.path.clone(),
         args,
         health_check,
-        config
-            .supervisor
-            .max_restarts
-            .try_into()
-            .context("max_restarts value out of range")?,
+        config.supervisor.max_restarts,
         config.supervisor.restart_delay_ms,
     );
 
@@ -67,7 +63,7 @@ pub async fn cmd_run(config: &Config, server_name: &str, ctx_override: Option<u3
         }
     });
 
-    supervisor.run(tx).await?;
+    supervisor.run(tx, None).await?;
     printer.abort();
     Ok(())
 }
@@ -80,37 +76,4 @@ fn build_full_args(
     ctx_override: Option<u32>,
 ) -> Result<Vec<String>> {
     config.build_full_args(server, backend, ctx_override)
-}
-
-/// Process supervisor for running backends
-#[allow(dead_code)]
-struct ProcessSupervisor {
-    path: String,
-    args: Vec<String>,
-    health_check: kronk_core::config::HealthCheck,
-    max_restarts: usize,
-    restart_delay_ms: u64,
-}
-
-impl ProcessSupervisor {
-    fn new(
-        path: String,
-        args: Vec<String>,
-        health_check: kronk_core::config::HealthCheck,
-        max_restarts: usize,
-        restart_delay_ms: u64,
-    ) -> Self {
-        Self {
-            path,
-            args,
-            health_check,
-            max_restarts,
-            restart_delay_ms,
-        }
-    }
-
-    async fn run(self, _tx: tokio::sync::mpsc::UnboundedSender<ProcessEvent>) -> Result<()> {
-        // Supervisor implementation
-        anyhow::bail!("Supervisor run not implemented in this module");
-    }
 }
