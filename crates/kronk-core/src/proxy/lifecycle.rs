@@ -138,6 +138,9 @@ impl ProxyState {
         }
 
         if !health_ok {
+            // Clean up the Starting entry so future load_model calls don't short-circuit
+            let mut models = self.models.write().await;
+            models.remove(&server_name);
             return Err(anyhow::anyhow!(
                 "Backend '{}' failed to start for server '{}' (timeout after {}s)",
                 server_config.backend,

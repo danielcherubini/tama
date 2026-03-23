@@ -85,8 +85,6 @@ async fn clone_repository(version: &str, git_url: &str, source_dir: &Path) -> Re
         return Ok(());
     }
 
-    let cloned_from_tag = false;
-
     // Only allow fallback to HEAD for "main" or "latest" (tags may not exist)
     if version != "main" && version != "latest" {
         return Err(anyhow!(
@@ -94,11 +92,6 @@ async fn clone_repository(version: &str, git_url: &str, source_dir: &Path) -> Re
              Use an explicit version tag (e.g., 'b8407') or specify --build to build from source.",
             version
         ));
-    }
-
-    // Skip fallback if we successfully cloned from a tag
-    if cloned_from_tag {
-        return Ok(());
     }
 
     // Fallback: clone without branch tag

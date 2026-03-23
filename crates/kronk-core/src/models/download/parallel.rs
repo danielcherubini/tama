@@ -21,6 +21,13 @@ pub async fn download_parallel(
     if num_connections == 0 {
         anyhow::bail!("num_connections must be > 0");
     }
+    if total_size < num_connections as u64 {
+        anyhow::bail!(
+            "total_size ({}) must be >= num_connections ({})",
+            total_size,
+            num_connections
+        );
+    }
     let chunk_size = total_size / num_connections as u64;
 
     // Build temp file paths
