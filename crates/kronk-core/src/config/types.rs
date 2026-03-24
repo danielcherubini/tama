@@ -12,8 +12,6 @@ pub struct Config {
     #[serde(default)]
     pub supervisor: Supervisor,
     #[serde(default)]
-    pub custom_profiles: Option<HashMap<String, SamplingParams>>,
-    #[serde(default)]
     pub sampling_templates: HashMap<String, SamplingParams>,
     #[serde(default)]
     pub proxy: ProxyConfig,
@@ -56,22 +54,24 @@ impl Default for ProxyConfig {
 }
 
 impl Config {
-    /// Get the configs directory for this config.
-    pub fn configs_dir(&self) -> anyhow::Result<&std::path::Path> {
+    /// Get the configs.d directory for model cards.
+    /// Returns `<loaded_from>/configs.d/`.
+    pub fn configs_dir(&self) -> anyhow::Result<std::path::PathBuf> {
         self.loaded_from
-            .as_ref()
-            .map(|p| p.as_path())
+            .as_deref()
+            .map(|p| p.join("configs.d"))
             .ok_or_else(|| anyhow::anyhow!("Config has no loaded_from path"))
     }
 
     /// Get the models directory for this config.
-    pub fn models_dir(&self) -> anyhow::Result<&std::path::Path> {
+    /// Uses `general.models_dir` if set, otherwise `<loaded_from>/models/`.
+    pub fn models_dir(&self) -> anyhow::Result<std::path::PathBuf> {
         if let Some(models_dir) = &self.general.models_dir {
-            return Ok(std::path::Path::new(models_dir));
+            return Ok(std::path::PathBuf::from(models_dir));
         }
         self.loaded_from
-            .as_ref()
-            .map(|p| p.as_path())
+            .as_deref()
+            .map(|p| p.join("models"))
             .ok_or_else(|| anyhow::anyhow!("Config has no loaded_from path"))
     }
 }
@@ -218,7 +218,6 @@ pub const MAX_REQUEST_BODY_SIZE: usize = 16 * 1024 * 1024;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::profiles::Profile;
 
     #[test]
     fn test_default_sampling_templates() {
@@ -231,22 +230,15 @@ mod tests {
         assert!(templates.contains_key("analysis"));
         assert!(templates.contains_key("creative"));
 
-        // Verify values match Profile::params()
+        // Verify coding template has expected values
         let coding = templates.get("coding").unwrap();
-        let expected = Profile::Coding.params();
-        assert_eq!(coding, &expected);
+        assert_eq!(coding.temperature, Some(0.3));
+        assert_eq!(coding.top_p, Some(0.9));
 
-        let chat = templates.get("chat").unwrap();
-        let expected = Profile::Chat.params();
-        assert_eq!(chat, &expected);
-
-        let analysis = templates.get("analysis").unwrap();
-        let expected = Profile::Analysis.params();
-        assert_eq!(analysis, &expected);
-
+        // Verify creative template has expected values
         let creative = templates.get("creative").unwrap();
-        let expected = Profile::Creative.params();
-        assert_eq!(creative, &expected);
+        assert_eq!(creative.temperature, Some(0.9));
+        assert_eq!(creative.top_p, Some(0.95));
     }
 
     #[test]

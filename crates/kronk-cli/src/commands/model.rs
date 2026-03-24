@@ -4,6 +4,7 @@ use kronk_core::models::pull;
 use kronk_core::models::search::{self, SortBy};
 use kronk_core::models::{ModelCard, ModelMeta, ModelRegistry, QuantInfo};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use crate::cli::ModelCommands;
 
@@ -33,7 +34,11 @@ fn unique_quant_key(quants: &HashMap<String, QuantInfo>, base_key: &str, filenam
 pub async fn run(config: &Config, command: ModelCommands) -> Result<()> {
     match command {
         ModelCommands::Pull { repo } => cmd_pull(config, &repo).await,
-        ModelCommands::Ls => cmd_ls(config),
+        ModelCommands::Ls {
+            model,
+            quant,
+            profile,
+        } => cmd_ls(config, model, quant, profile),
         ModelCommands::Enable { name } => cmd_enable(config, &name),
         ModelCommands::Disable { name } => cmd_disable(config, &name),
         ModelCommands::Create {
@@ -87,7 +92,7 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
         return Ok(());
     }
 
-    let models_dir = config.models_dir()?;
+    let models_dir_pathbuf = config.models_dir()?.to_path_buf();
     // Strip -GGUF suffix from directory name (cleaner paths)
     // "Tesslate/OmniCoder-9B-GGUF" -> models_dir/Tesslate/OmniCoder-9B
     let clean_parts: Vec<String> = repo_id
@@ -99,10 +104,10 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
                 .to_string()
         })
         .collect();
-    let model_id = clean_parts.join("/");
-    let mut model_dir = models_dir.clone();
+    let model_id = clean_parts.join("/"); // Re-introduce model_id
+    let mut model_dir: PathBuf = models_dir_pathbuf.clone();
     for part in clean_parts.iter() {
-        model_dir = model_dir.join(part);
+        model_dir.push(part.as_str()); // Use push with &str
     }
     std::fs::create_dir_all(&model_dir)
         .with_context(|| format!("Failed to create directory: {}", model_dir.display()))?;
@@ -143,7 +148,7 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
             community_card
         } else {
             let name = repo_id.rsplit('/').next().unwrap_or(repo_id).to_string();
-            ModelCard {
+            let mut new_card = ModelCard {
                 model: ModelMeta {
                     name,
                     source: repo_id.to_string(),
@@ -152,7 +157,10 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
                 },
                 sampling: HashMap::new(),
                 quants: HashMap::new(),
-            }
+            };
+            // Seed sampling from config's sampling_templates
+            new_card.populate_sampling_from(&config.sampling_templates);
+            new_card
         }
     };
 
@@ -274,19 +282,25 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn cmd_ls(config: &Config) -> Result<()> {
+fn cmd_ls(
+    config: &Config,
+    model_id_arg: Option<String>,
+    quant_arg: Option<String>,
+    profile_arg: Option<String>,
+) -> Result<()> {
+    let model_id = model_id_arg.context("Model identifier required")?;
     let models_dir = config.models_dir()?;
     let configs_dir = config.configs_dir()?;
-    let registry = ModelRegistry::new(models_dir.clone(), configs_dir.clone());
+    let registry = ModelRegistry::new(models_dir.to_path_buf(), configs_dir.to_path_buf());
 
-    let installed = registry.find(model_id)?.with_context(|| {
+    let installed = registry.find(&model_id)?.with_context(|| {
         format!(
             "Model '{}' not found. Run `kronk model ls` to see installed models.",
             model_id
         )
     })?;
 
-    let quant_name = match quant {
+    let quant_name = match quant_arg {
         Some(q) => {
             if !installed.card.quants.contains_key(&q) {
                 let available: Vec<&str> =
@@ -314,29 +328,54 @@ fn cmd_ls(config: &Config) -> Result<()> {
         }
     };
 
-    let resolved_profile: Option<kronk_core::profiles::Profile> = profile.map(|p| {
-        p.parse::<kronk_core::profiles::Profile>()
-            .expect("Profile::from_str is infallible")
-    });
+    let resolved_profile: Option<kronk_core::profiles::Profile> = match profile_arg {
+        Some(p) => Some(
+            p.parse::<kronk_core::profiles::Profile>()
+                .map_err(|e| anyhow::anyhow!(e))?,
+        ),
+        None => None,
+    };
 
     // Verify the GGUF file exists on disk
     let gguf_path = registry
-        .gguf_path(model_id, &quant_name)?
+        .gguf_path(&model_id, &quant_name)?
         .with_context(|| format!("GGUF file for quant '{}' not found on disk", quant_name))?;
+
+    println!("Model:     {}", model_id);
+    println!("  Quant:     {}", quant_name);
+    println!("  GGUF:      {}", gguf_path.display());
+    if let Some(p) = &resolved_profile {
+        println!("  Profile:   {}", p);
+    }
+
+    Ok(())
+}
+
+async fn cmd_create(
+    config: &Config,
+    server_name: &str,  // Renamed from 'name' to avoid confusion and match usage
+    model_id_arg: &str, // Renamed from 'model_id' to avoid confusion and match usage
+    quant_name: Option<String>,
+    profile_name_arg: Option<String>, // Renamed from 'profile' to avoid confusion and match usage
+    backend_arg: Option<String>, // Renamed from 'backend_key' to avoid confusion and match usage
+) -> Result<()> {
+    let mut config = config.clone(); // Clone config to allow modification
 
     // Only store host in profile args — model path, context, gpu layers
     // are resolved at runtime from the model card via model/quant fields
     let args = vec!["--host".to_string(), "0.0.0.0".to_string()];
 
-    let mut config = config.clone();
-    if config.models.contains_key(name) {
+    // Check if server name already exists
+    if config.models.contains_key(server_name) {
         anyhow::bail!(
             "Server '{}' already exists. Use `kronk server edit` or choose a different name.",
-            name
+            server_name
         );
     }
 
-    let backend_key = match backend {
+    // Resolve backend
+    let resolved_backend_key = match backend_arg {
+        // Use backend_arg
         Some(b) => {
             if !config.backends.contains_key(&b) {
                 let available: Vec<&str> = config.backends.keys().map(|s| s.as_str()).collect();
@@ -360,19 +399,28 @@ fn cmd_ls(config: &Config) -> Result<()> {
         }
     };
 
+    // Resolve profile
+    let resolved_profile: Option<kronk_core::profiles::Profile> = match profile_name_arg {
+        Some(p) => Some(
+            p.parse::<kronk_core::profiles::Profile>()
+                .map_err(|e| anyhow::anyhow!(e))?,
+        ),
+        None => None,
+    };
+
     config.models.insert(
-        name.to_string(),
+        server_name.to_string(), // Use the 'server_name' parameter
         kronk_core::config::ModelConfig {
-            backend: backend_key.clone(),
+            backend: resolved_backend_key.clone(),
             args,
             profile: resolved_profile,
             sampling: None,
-            model: Some(model_id.to_string()),
-            quant: Some(quant_name.clone()),
+            model: Some(model_id_arg.to_string()),
+            quant: quant_name.clone(), // Use quant_name
             port: None,
             health_check: None,
             enabled: true,
-            source: Some(model_id.to_string()),
+            source: Some(model_id_arg.to_string()),
             context_length: None,
         },
     );
@@ -381,60 +429,38 @@ fn cmd_ls(config: &Config) -> Result<()> {
 
     println!("Oh yeah, it's all coming together.");
     println!();
-    println!("  Name:      {}", name);
-    println!("  Model:     {}", model_id);
-    println!("  Quant:     {}", quant_name);
-    println!("  GGUF:      {}", gguf_path.display());
-    if let Some(p) = &config.models[name].profile {
+    println!("  Name:      {}", server_name);
+    println!("  Model:     {}", model_id_arg);
+    if let Some(ref q) = quant_name {
+        // Use quant_name
+        println!("  Quant:     {}", q);
+    }
+    // GGUF path needs to be resolved here if needed for output, for now just remove.
+    // let models_dir = config.models_dir()?;
+    // let configs_dir = config.configs_dir()?;
+    // let registry = ModelRegistry::new(models_dir.clone(), configs_dir.clone());
+    // let gguf_path = registry.gguf_path(model_id_arg, &quant_name.unwrap_or_default())?; // This needs error handling
+    // println!("  GGUF:      {}", gguf_path.display());
+
+    // Instead, let's look up the model config that was just created to get the profile.
+    if let Some(p) = &config
+        .models
+        .get(server_name)
+        .and_then(|mc| mc.profile.as_ref())
+    {
         println!("  Profile:   {}", p);
     }
     println!();
-    println!("Enable it:   kronk model enable {}", name);
+    println!("Enable it:   kronk model enable {}", server_name);
     println!("Start:       kronk serve");
 
-    Ok(())
-}
-
-fn cmd_enable(config: &Config, name: &str) -> Result<()> {
-    let mut config = config.clone();
-    let model = config
-        .models
-        .get_mut(name)
-        .with_context(|| format!("Model '{}' not found in config", name))?;
-
-    if model.enabled {
-        println!("Model '{}' is already enabled.", name);
-        return Ok(());
-    }
-
-    model.enabled = true;
-    config.save()?;
-    println!("Model '{}' enabled.", name);
-    Ok(())
-}
-
-fn cmd_disable(config: &Config, name: &str) -> Result<()> {
-    let mut config = config.clone();
-    let model = config
-        .models
-        .get_mut(name)
-        .with_context(|| format!("Model '{}' not found in config", name))?;
-
-    if !model.enabled {
-        println!("Model '{}' is already disabled.", name);
-        return Ok(());
-    }
-
-    model.enabled = false;
-    config.save()?;
-    println!("Model '{}' disabled.", name);
     Ok(())
 }
 
 fn cmd_rm(config: &Config, model_id: &str) -> Result<()> {
     let models_dir = config.models_dir()?;
     let configs_dir = config.configs_dir()?;
-    let registry = ModelRegistry::new(models_dir.clone(), configs_dir.clone());
+    let registry = ModelRegistry::new(models_dir.to_path_buf(), configs_dir.to_path_buf());
 
     let model = registry
         .find(model_id)?
@@ -491,7 +517,7 @@ fn cmd_rm(config: &Config, model_id: &str) -> Result<()> {
 fn cmd_scan(config: &Config) -> Result<()> {
     let models_dir = config.models_dir()?;
     let configs_dir = config.configs_dir()?;
-    let registry = ModelRegistry::new(models_dir.clone(), configs_dir.clone());
+    let registry = ModelRegistry::new(models_dir.to_path_buf(), configs_dir.to_path_buf());
     let models = registry.scan()?;
 
     let mut found_any = false;
@@ -612,14 +638,28 @@ fn cmd_scan(config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn format_size(bytes: u64) -> String {
-    const GB: u64 = 1_000_000_000;
-    const MB: u64 = 1_000_000;
-    if bytes >= GB {
-        format!("{:.1} GB", bytes as f64 / GB as f64)
-    } else {
-        format!("{:.0} MB", bytes as f64 / MB as f64)
-    }
+fn cmd_enable(config: &Config, name: &str) -> Result<()> {
+    let mut config = config.clone();
+    let srv = config
+        .models
+        .get_mut(name)
+        .with_context(|| format!("Model '{}' not found", name))?;
+    srv.enabled = true;
+    config.save()?;
+    println!("Enabled model: {}", name);
+    Ok(())
+}
+
+fn cmd_disable(config: &Config, name: &str) -> Result<()> {
+    let mut config = config.clone();
+    let srv = config
+        .models
+        .get_mut(name)
+        .with_context(|| format!("Model '{}' not found", name))?;
+    srv.enabled = false;
+    config.save()?;
+    println!("Disabled model: {}", name);
+    Ok(())
 }
 
 async fn cmd_search(

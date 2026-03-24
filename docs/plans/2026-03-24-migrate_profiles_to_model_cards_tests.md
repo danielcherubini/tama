@@ -44,14 +44,14 @@
 
 ---
 
-### Task 3: Test (profiles.d, unmodified): `coding.toml` matches `Profile::Coding.params()` — migration skips entirely
+### Task 3: Test (profiles.d, already present): `coding.toml` exists but card already has `[sampling.coding]` — migration skips entirely
 
-**Files:**
+**Files**:
 - Modify: `crates/kronk-core/src/config/migrate.rs`
 
-**Steps:**
-- [ ] Write test that creates `profiles.d/coding.toml` matching `Profile::Coding.params()`
-- [ ] Create model card in `configs.d/` without `[sampling.coding]`
+**Steps**:
+- [ ] Write test that creates `profiles.d/coding.toml` with explicit content
+- [ ] Create model card in `configs.d/` with existing `[sampling.coding]`
 - [ ] Call `migrate_profiles_to_model_cards`
 - [ ] Verify migration was skipped (no changes to card)
 - [ ] Run test, verify it fails
