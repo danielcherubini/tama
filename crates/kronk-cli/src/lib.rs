@@ -15,6 +15,10 @@ pub mod flags;
 pub mod handlers;
 pub mod service;
 
+// Re-exports for integration tests
+pub use flags::extract_kronk_flags;
+pub use handlers::server::{cmd_server_add, cmd_server_edit};
+
 use anyhow::Result;
 use clap::Parser;
 use cli::{Args, Commands};

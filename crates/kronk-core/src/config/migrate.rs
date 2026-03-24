@@ -66,11 +66,6 @@ pub fn migrate_profiles_to_model_cards(config: &mut Config) -> anyhow::Result<()
         .loaded_from
         .as_ref()
         .map(|p: &std::path::PathBuf| p.join("profiles.d"));
-    let models_dir = &config
-        .general
-        .models_dir
-        .clone()
-        .unwrap_or_else(|| "models.d".to_string());
 
     // Collect profiles from profiles.d/
     let mut profiles = Vec::new();
@@ -84,48 +79,63 @@ pub fn migrate_profiles_to_model_cards(config: &mut Config) -> anyhow::Result<()
                 if ext != Some("toml") {
                     continue;
                 }
-                let name = path.file_stem().unwrap().to_string_lossy().to_string();
+                let name = match path.file_stem() {
+                    Some(stem) => stem.to_string_lossy().to_string(),
+                    None => continue,
+                };
 
-                // Parse as ProfileDef - collect all profiles (no built-in skipping)
+                // Parse as a temporary struct to extract sampling params
+                #[derive(serde::Deserialize)]
+                struct TempProfileDef {
+                    sampling: crate::profiles::SamplingParams,
+                }
+
                 if let Ok(profile_def) =
-                    toml::from_str::<crate::profiles::ProfileDef>(&std::fs::read_to_string(&path)?)
+                    toml::from_str::<TempProfileDef>(&std::fs::read_to_string(&path)?)
                 {
                     profiles.push((name.clone(), profile_def.sampling));
+                } else {
+                    // Skip malformed profile files
                 }
             }
         }
     }
 
-    // Collect profiles from config.custom_profiles (always custom)
-    if let Some(custom_profiles) = &config.custom_profiles {
-        for (name, sampling) in custom_profiles {
-            profiles.push((name.clone(), sampling.clone()));
-        }
+    // Load all model cards from configs.d/
+    // Ensure configs_dir exists before attempting to read
+    if !configs_dir.exists() {
+        std::fs::create_dir_all(&configs_dir)?;
     }
 
-    // Load all model cards from configs.d/
     let model_cards = std::fs::read_dir(&configs_dir)?;
-    let mut processed_cards = 0;
+    let mut _processed_cards = 0; // Marked as unused, will be removed if no longer needed
 
     for card_entry in model_cards {
         let card_entry = card_entry?;
         let card_path = card_entry.path();
+
+        // Ensure it's a file with .toml extension
+        if !card_path.is_file() || card_path.extension().and_then(|e| e.to_str()) != Some("toml") {
+            continue;
+        }
 
         // Load existing card
         let mut card = crate::models::card::ModelCard::load(&card_path)?;
 
         // For each collected profile, insert if key doesn't exist
         for (profile_name, profile) in &profiles {
-            let key = format!("sampling.{}", profile_name);
+            // Check if profile_name already exists in card.sampling
             if !card.sampling.contains_key(profile_name) {
                 card.sampling.insert(profile_name.clone(), profile.clone());
             }
         }
 
         // Save each modified card
-        if card != crate::models::card::ModelCard::load(&card_path)? {
+        // Check if card was actually modified before saving
+        let original_card = crate::models::card::ModelCard::load(&card_path)?;
+        if card != original_card {
             crate::models::card::save(&card, &card_path)?;
-            processed_cards += 1;
+            _processed_cards += 1;
         }
     }
 
@@ -139,17 +149,28 @@ pub fn migrate_profiles_to_model_cards(config: &mut Config) -> anyhow::Result<()
                 let path = entry.path();
                 let ext = path.extension().and_then(|e| e.to_str());
                 if ext == Some("toml") {
-                    remaining += 1;
+                    // Only count actual TOML files that were part of the old profiles
+                    // Ensure these files are indeed empty before removal
+                    let name = path.file_stem().unwrap().to_string_lossy().to_string();
+                    if profiles.iter().any(|(p_name, _)| p_name == &name) {
+                        // Check if this profile was migrated. If so, remove the file.
+                        std::fs::remove_file(&path)?;
+                    } else {
+                        remaining += 1; // Keep if not migrated, or is some other TOML
+                    }
                 }
             }
+            // Only remove the directory if it's completely empty of TOML files
             if remaining == 0 {
-                std::fs::remove_dir_all(profiles_dir)?;
+                if let Ok(entries) = std::fs::read_dir(profiles_dir) {
+                    if entries.count() == 0 {
+                        std::fs::remove_dir_all(profiles_dir)?;
+                    }
+                }
             }
         }
     }
 
-    // Set custom_profiles = None and save config
-    config.custom_profiles = None;
     config.save()?;
 
     Ok(())

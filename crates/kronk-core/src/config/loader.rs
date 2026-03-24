@@ -1,4 +1,4 @@
-use super::migrate::{migrate_model_cards_to_configs_d, migrate_profiles_to_model_cards};
+use super::migrate::migrate_profiles_to_model_cards;
 use super::types::{BackendConfig, Config, General, ModelConfig, ProxyConfig, Supervisor};
 use crate::profiles::Profile;
 use anyhow::{Context, Result};
@@ -90,14 +90,6 @@ impl Config {
         Ok(())
     }
 
-    /// Resolve the profiles.d directory for sampling presets.
-    /// `<base_dir>/profiles.d/`
-    /// Resolve the configs.d directory for model cards.
-    /// Resolve the models directory path.
-    /// Uses `general.models_dir` if set, otherwise defaults to `<base_dir>/models/`.
-    /// On Windows: `%APPDATA%\kronk\models\`
-    /// On Linux: `~/.config/kronk/models/`
-
     /// Resolve the logs directory path.
     /// Uses `general.logs_dir` if set, otherwise defaults to `<base_dir>/logs/`.
     /// On Windows this is `%APPDATA%\kronk\logs\`, on Linux `~/.config/kronk/logs/`.
@@ -175,7 +167,45 @@ impl Default for Config {
         // Built-in sampling templates for all profiles
         let mut sampling_templates = HashMap::new();
         for (_, _, profile) in Profile::all() {
-            sampling_templates.insert(profile.to_string(), profile.params());
+            let params = match profile {
+                Profile::Coding => crate::profiles::SamplingParams {
+                    temperature: Some(0.3),
+                    top_p: Some(0.9),
+                    top_k: Some(50),
+                    min_p: Some(0.05),
+                    presence_penalty: Some(0.1),
+                    frequency_penalty: None,
+                    repeat_penalty: None,
+                },
+                Profile::Chat => crate::profiles::SamplingParams {
+                    temperature: Some(0.7),
+                    top_p: Some(0.95),
+                    top_k: Some(40),
+                    min_p: Some(0.05),
+                    presence_penalty: Some(0.0),
+                    frequency_penalty: None,
+                    repeat_penalty: None,
+                },
+                Profile::Analysis => crate::profiles::SamplingParams {
+                    temperature: Some(0.3),
+                    top_p: Some(0.9),
+                    top_k: Some(20),
+                    min_p: Some(0.05),
+                    presence_penalty: Some(0.0),
+                    frequency_penalty: None,
+                    repeat_penalty: None,
+                },
+                Profile::Creative => crate::profiles::SamplingParams {
+                    temperature: Some(0.9),
+                    top_p: Some(0.95),
+                    top_k: Some(50),
+                    min_p: Some(0.02),
+                    presence_penalty: Some(0.0),
+                    frequency_penalty: None,
+                    repeat_penalty: None,
+                },
+            };
+            sampling_templates.insert(profile.to_string(), params);
         }
 
         Config {
@@ -187,7 +217,6 @@ impl Default for Config {
             backends,
             models,
             supervisor: Supervisor::default(),
-            custom_profiles: None,
             proxy: ProxyConfig::default(),
             sampling_templates,
             loaded_from: None,
