@@ -484,8 +484,16 @@ async fn cmd_remove(_config: &Config, name: &str) -> Result<()> {
 
         if remove_files {
             if let Some(parent) = backend.path.parent() {
-                // Safety: only remove if it's under our managed backends dir
-                // Canonicalize both paths to prevent symlink/.. bypass attacks
+                // SECURITY: Prevent directory traversal attacks during file removal
+                // - Canonicalize both paths: resolves symlinks and normalizes "."/".." sequences
+                // - This prevents attacks where a symlink or ".." traversal could escape
+                //   the intended removal directory and delete arbitrary files
+                // - The "starts_with" check ensures we only remove files within our
+                //   managed "backends/" directory, preventing accidental deletion of
+                //   system or user files outside our control
+                // - If canonicalization fails (permissions, etc.), deletion is skipped
+                //   by default — a safe conservative behavior that prevents unintended
+                //   side effects from transient file system issues
                 let canonical_parent_opt = std::fs::canonicalize(parent).ok();
                 let managed_opt = std::fs::canonicalize(backends_dir()?).ok();
 
