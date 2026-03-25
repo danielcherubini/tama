@@ -275,7 +275,7 @@ pub fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
                 }
             };
 
-            let args = build_full_args(&config, srv, backend, ctx).unwrap_or_else(|e| {
+            let args = config.build_full_args(srv, backend, ctx).unwrap_or_else(|e| {
                 tracing::warn!("Failed to build model args: {}", e);
                 let mut args = backend.default_args.clone();
                 args.extend(srv.args.clone());
@@ -351,19 +351,6 @@ pub fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
     });
 
     tracing::info!("Service stopped");
-}
-
-/// Build the full argument list for a server, resolving model card args at runtime.
-/// Merges: backend.default_args + server.args + model card (-m, -c, -ngl) + sampling
-#[cfg(target_os = "windows")]
-fn build_full_args(
-    config: &Config,
-    server: &kronk_core::config::ModelConfig,
-    backend: &kronk_core::config::BackendConfig,
-    ctx_override: Option<u32>,
-) -> anyhow::Result<Vec<String>> {
-    config.build_full_args(server, backend, ctx_override)
-}
 
 // On Windows, use the real ProcessSupervisor from kronk_core
 #[cfg(target_os = "windows")]
@@ -377,4 +364,5 @@ pub fn service_dispatch() -> anyhow::Result<()> {
 #[cfg(not(target_os = "windows"))]
 pub fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
     // No-op on non-Windows
+}
 }
