@@ -353,18 +353,18 @@ pub fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
     });
 
     tracing::info!("Service stopped");
+}
 
-    // On Windows, use the real ProcessSupervisor from kronk_core
-    #[cfg(target_os = "windows")]
-    use kronk_core::process::{ProcessEvent, ProcessSupervisor};
+// On Windows, use the real ProcessSupervisor from kronk_core
+#[cfg(target_os = "windows")]
+use kronk_core::process::{ProcessEvent, ProcessSupervisor};
 
-    #[cfg(not(target_os = "windows"))]
-    pub fn service_dispatch() -> anyhow::Result<()> {
-        anyhow::bail!("Service dispatch is only available on Windows");
-    }
+#[cfg(not(target_os = "windows"))]
+pub fn service_dispatch() -> anyhow::Result<()> {
+    anyhow::bail!("Service dispatch is only available on Windows");
+}
 
-    #[cfg(not(target_os = "windows"))]
-    pub fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
-        // No-op on non-Windows
-    }
+#[cfg(not(target_os = "windows"))]
+pub fn win_service_main(_arguments: Vec<std::ffi::OsString>) {
+    // No-op on non-Windows
 }
