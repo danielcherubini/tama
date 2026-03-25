@@ -511,7 +511,7 @@ async fn cmd_remove(_config: &Config, name: &str) -> Result<()> {
                                     ));
                                 }
                                 Err(e) => {
-                                    println!("Skipping file removal: {}", e);
+                                    eprintln!("Skipping file removal: {}", e);
                                     return Err(anyhow!(
                                         "Failed to remove backend directory: {}",
                                         e
@@ -527,7 +527,7 @@ async fn cmd_remove(_config: &Config, name: &str) -> Result<()> {
                                     println!("Files removed.");
                                 }
                                 Err(e) => {
-                                    println!("Skipping file removal: {}", e);
+                                    eprintln!("Skipping file removal: {}", e);
                                     return Err(anyhow!(
                                         "Failed to remove backend directory: {}",
                                         e
@@ -536,10 +536,10 @@ async fn cmd_remove(_config: &Config, name: &str) -> Result<()> {
                             }
                         }
                     } else {
-                        println!("Skipping file removal: path is outside managed directory.");
+                        eprintln!("Skipping file removal: path is outside managed directory.");
                     }
                 } else {
-                    println!("Skipping file removal: directory does not exist.");
+                    eprintln!("Skipping file removal: directory does not exist.");
                 }
             }
         }
@@ -575,7 +575,7 @@ async fn cmd_check_updates(_config: &Config) -> Result<()> {
                 }
             }
             Err(e) => {
-                println!("error: {}", e);
+                eprintln!("error: {}", e);
             }
         }
     }
