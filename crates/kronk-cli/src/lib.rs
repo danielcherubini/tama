@@ -5,7 +5,7 @@
 //! ## Model Card-Based Configuration
 //!
 //! Kronk uses model cards to store quantization info, context settings, and sampling presets
-//! for each model. Model cards are stored in `~/.config/kronk/configs.d/<company>--<model>.toml`
+//! for each model. Model cards are stored in `~/.config/kronk/configs/<company>--<model>.toml`
 //! and are automatically discovered when models are installed.
 
 pub mod cli;

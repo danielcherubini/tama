@@ -33,7 +33,7 @@ pub fn cmd_profile(config: &Config, command: crate::cli::ProfileCommands) -> Res
 
             println!("These are seed defaults for new model cards.");
             println!(
-                "Per-model overrides live in configs.d/<model>.toml under [sampling.<profile>]."
+                "Per-model overrides live in configs/<model>.toml under [sampling.<profile>]."
             );
             println!();
 

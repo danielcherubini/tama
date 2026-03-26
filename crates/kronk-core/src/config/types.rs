@@ -54,12 +54,12 @@ impl Default for ProxyConfig {
 }
 
 impl Config {
-    /// Get the configs.d directory for model cards.
-    /// Returns `<loaded_from>/configs.d/`.
+    /// Get the configs directory for model cards.
+    /// Returns `<loaded_from>/configs/`.
     pub fn configs_dir(&self) -> anyhow::Result<std::path::PathBuf> {
         self.loaded_from
             .as_deref()
-            .map(|p| p.join("configs.d"))
+            .map(|p| p.join("configs"))
             .ok_or_else(|| anyhow::anyhow!("Config has no loaded_from path"))
     }
 
@@ -71,7 +71,7 @@ impl Config {
         }
         self.loaded_from
             .as_deref()
-            .map(|p| p.join("models.d"))
+            .map(|p| p.join("models"))
             .ok_or_else(|| anyhow::anyhow!("Config has no loaded_from path"))
     }
 }

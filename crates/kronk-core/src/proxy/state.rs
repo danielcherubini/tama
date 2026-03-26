@@ -127,7 +127,7 @@ impl ProxyState {
         let configs_dir = self.config.configs_dir().ok()?;
 
         // Try to find the model card file
-        // Format: configs.d/<company>--<model>.toml
+        // Format: configs/<company>--<model>.toml
         let (org, name) = model_name.split_once('/').unwrap_or(("", model_name));
         let card_filename = if org.is_empty() {
             format!("{}.toml", name)

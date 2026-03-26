@@ -505,7 +505,7 @@ fn cmd_rm(config: &Config, model_id: &str) -> Result<()> {
         }
     }
 
-    // Also remove the config card from configs.d/
+    // Also remove the config card from configs/
     if model.card_path.exists() {
         std::fs::remove_file(&model.card_path)?;
     }
@@ -552,7 +552,7 @@ fn cmd_scan(config: &Config) -> Result<()> {
         }
     }
 
-    // Scan for directories with GGUFs but no model card in configs.d/
+    // Scan for directories with GGUFs but no model card in configs/
     let known_ids: std::collections::HashSet<String> =
         models.iter().map(|m| m.id.clone()).collect();
 
@@ -574,7 +574,7 @@ fn cmd_scan(config: &Config) -> Result<()> {
                 let model_name = model_entry.file_name().to_string_lossy().to_string();
                 let model_id = format!("{}/{}", company, model_name);
 
-                // Skip if already tracked in configs.d/
+                // Skip if already tracked in configs/
                 if known_ids.contains(&model_id) {
                     continue;
                 }

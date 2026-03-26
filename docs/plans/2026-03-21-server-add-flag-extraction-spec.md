@@ -91,7 +91,7 @@ When `--quant` is explicitly provided, validate it exists in the model card.
 ### Model Card Validation
 
 When `--model` is extracted:
-- Verify the model card exists in `configs.d/`
+- Verify the model card exists in `configs/`
 - Verify the selected quant's GGUF file exists on disk
 - Error with helpful messages if either is missing (e.g. "Run `kronk model pull ...` first")
 

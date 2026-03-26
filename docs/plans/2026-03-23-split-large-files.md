@@ -55,7 +55,7 @@ Convert `config.rs` into a `config/` directory module.
 - Create: `crates/kronk-core/src/config/defaults.rs` (~90 lines — all `default_*()` serde helper functions, Default impl for ProxyConfig)
 - Create: `crates/kronk-core/src/config/loader.rs` (~280 lines — Config impl: load, save, save_to, load_from, path helpers: base_dir, config_dir, config_path, profiles_dir, configs_dir, models_dir, logs_dir, with_models_dir)
 - Create: `crates/kronk-core/src/config/resolve.rs` (~220 lines — Config impl: resolve_server, resolve_servers_for_model, resolve_health_url, resolve_backend_url, resolve_health_check, resolve_profile_params, build_args, build_full_args, effective_sampling, effective_sampling_with_card, proxy_url, service_name)
-- Create: `crates/kronk-core/src/config/migrate.rs` (~50 lines — migrate_model_cards_to_configs_d)
+- Create: `crates/kronk-core/src/config/migrate.rs` (~50 lines — migrate_model_cards_to_configs)
 - Test: existing tests remain in `config/mod.rs` or a `config/tests.rs` submodule
 
 **Steps:**
@@ -65,7 +65,7 @@ Convert `config.rs` into a `config/` directory module.
 - [ ] Create `config/defaults.rs` — move all `default_*()` functions and `impl Default for ProxyConfig`
 - [ ] Create `config/loader.rs` — move Config load/save/path methods and `impl Default for Config`
 - [ ] Create `config/resolve.rs` — move Config resolve_*/build_args/effective_sampling methods
-- [ ] Create `config/migrate.rs` — move `migrate_model_cards_to_configs_d()`
+- [ ] Create `config/migrate.rs` — move `migrate_model_cards_to_configs()`
 - [ ] Create `config/mod.rs` — declare submodules, `pub use` all public items to preserve API
 - [ ] Delete old `config.rs`
 - [ ] Run `cargo test --package kronk-core` — verify all tests pass
