@@ -1,30 +1,30 @@
-# Migration from `profiles.d` to Model Cards
+# Migration from `profiles` to Model Cards
 
 ## Overview
 
-Kronk is transitioning from the `profiles.d/` directory-based sampling configuration to a model-card-centric approach. This document explains the migration and provides usage examples.
+Kronk is transitioning from the `profiles/` directory-based sampling configuration to a model-card-centric approach. This document explains the migration and provides usage examples.
 
 ## Key Changes
 
-### Before: `profiles.d/` Directory
+### Before: `profiles/` Directory
 
-Previously, sampling presets were stored in `profiles.d/` as separate TOML files:
+Previously, sampling presets were stored in `profiles/` as separate TOML files:
 
 ```text
 ~/.config/kronk/
-├── profiles.d/
+├── profiles/
 │   ├── coding.toml
 │   ├── chat.toml
 │   ├── analysis.toml
 │   └── creative.toml
-└── configs.d/
+└── configs/
     └── bartowski--OmniCoder-8B.toml
 ```
 
 Each profile file contained sampling parameters that were hardcoded to default values:
 
 ```toml
-# ~/.config/kronk/profiles.d/coding.toml
+# ~/.config/kronk/profiles/coding.toml
 [profile.coding]
 temperature = 0.7
 top_p = 0.95
@@ -35,10 +35,10 @@ context_size = 8192
 
 ### After: Model Card Sampling
 
-Now, sampling parameters are stored directly in model cards within `configs.d/`. The `profiles.d/` directory is no longer used and will be automatically cleaned up.
+Now, sampling parameters are stored directly in model cards within `configs/`. The `profiles/` directory is no longer used and will be automatically cleaned up.
 
 ```toml
-# ~/.config/kronk/configs.d/bartowski--OmniCoder-8B.toml
+# ~/.config/kronk/configs/bartowski--OmniCoder-8B.toml
 [metadata]
 name = "bartowski/OmniCoder-8B"
 version = "1.0"
@@ -161,9 +161,9 @@ kronk profile clear my-server
 
 When you start using Kronk, the migration happens automatically:
 
-1. **Detection**: Kronk detects existing `profiles.d/` and `custom_profiles` entries
-2. **Migration**: Profiles are copied into model cards in `configs.d/`
-3. **Cleanup**: Empty `profiles.d/` directory is removed
+1. **Detection**: Kronk detects existing `profiles/` and `custom_profiles` entries
+2. **Migration**: Profiles are copied into model cards in `configs/`
+3. **Cleanup**: Empty `profiles/` directory is removed
 4. **Update**: Configuration references are updated
 
 ## Configuration Changes
@@ -209,23 +209,23 @@ max_tokens = 4096
 
 ## Migration Notes
 
-- Existing `profiles.d/` files will be automatically migrated
-- Empty `profiles.d/` directories will be cleaned up
+- Existing `profiles/` files will be automatically migrated
+- Empty `profiles/` directories will be cleaned up
 - Custom profiles from `config.custom_profiles` are migrated
-- Model cards are stored in `~/.config/kronk/configs.d/<company>--<model>.toml`
-- The `profiles.d/` directory is no longer used and will be removed
+- Model cards are stored in `~/.config/kronk/configs/<company>--<model>.toml`
+- The `profiles/` directory is no longer used and will be removed
 
 ## Troubleshooting
 
 If you encounter issues during migration:
 
-1. Check that model cards exist in `configs.d/`
+1. Check that model cards exist in `configs/`
 2. Verify `config.toml` has `[sampling_templates]` section
-3. Ensure no `profiles.d/` files conflict with model cards
+3. Ensure no `profiles/` files conflict with model cards
 4. Run `kronk config show` to verify configuration state
 
 ## Future Plans
 
-The `profiles.d/` directory will be completely removed in future releases. All sampling parameters should be defined in model cards or the `[sampling_templates]` section.
+The `profiles/` directory will be completely removed in future releases. All sampling parameters should be defined in model cards or the `[sampling_templates]` section.
 
 For questions or issues, refer to the Kronk documentation or open an issue on GitHub.

@@ -4,7 +4,7 @@
 
 **Architecture:** 
 - Remove redundant public exports that expose internal implementation details
-- Update model card documentation to clarify the new configs.d/ storage location
+- Update model card documentation to clarify the new configs/ storage location
 - Ensure consistency between code exports and documented functionality
 
 **Tech Stack:**
@@ -33,7 +33,7 @@
 
 **Steps:**
 - [ ] Add module-level documentation explaining model card-based approach
-- [ ] Document that model cards are stored in `~/.config/kronk/configs.d/<company>--<model>.toml`
+- [ ] Document that model cards are stored in `~/.config/kronk/configs/<company>--<model>.toml`
 - [ ] Explain that model cards contain quant info, context settings, and sampling presets
 - [ ] Document auto-discovery of model cards from installed models
 
@@ -47,7 +47,7 @@
 **Steps:**
 - [ ] Update the module-level documentation to mention model cards
 - [ ] Clarify how models are discovered and configured
-- [ ] Ensure documentation matches the new configs.d/ approach
+- [ ] Ensure documentation matches the new configs/ approach
 
 ---
 

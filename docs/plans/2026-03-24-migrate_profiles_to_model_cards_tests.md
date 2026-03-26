@@ -3,7 +3,7 @@
 **Goal:** Write failing tests for `migrate_profiles_to_model_cards` function
 
 **Architecture:** 
-- Create a `Config` struct that wraps `profiles.d/` and `configs.d/` directories
+- Create a `Config` struct that wraps `profiles/` and `configs/` directories
 - Create a `ModelCard` struct that wraps a model card file
 - Implement `migrate_profiles_to_model_cards` to handle profile migration logic
 - Write 8 test cases as specified in the task
@@ -15,73 +15,73 @@
 
 ---
 
-### Task 1: Test (profiles.d, modified): given `profiles.d/coding.toml` with modified values and a model card in `configs.d/` with no `[sampling.coding]`, migration inserts the profile into the card
+### Task 1: Test (profiles, modified): given `profiles/coding.toml` with modified values and a model card in `configs/` with no `[sampling.coding]`, migration inserts the profile into the card
 
 **Files:**
 - Create: `crates/kronk-core/src/config/migrate.rs` (test code)
 
 **Steps:**
 - [ ] Create test helper function to setup test environment
-- [ ] Write test that creates `profiles.d/coding.toml` with modified values
-- [ ] Create model card in `configs.d/` without `[sampling.coding]`
+- [ ] Write test that creates `profiles/coding.toml` with modified values
+- [ ] Create model card in `configs/` without `[sampling.coding]`
 - [ ] Call `migrate_profiles_to_model_cards`
 - [ ] Verify profile was inserted into card
 - [ ] Run test, verify it fails
 
 ---
 
-### Task 2: Test (profiles.d, card has it): same scenario but model card already has `[sampling.coding]` — migration skips (card wins)
+### Task 2: Test (profiles, card has it): same scenario but model card already has `[sampling.coding]` — migration skips (card wins)
 
 **Files:**
 - Modify: `crates/kronk-core/src/config/migrate.rs`
 
 **Steps:**
-- [ ] Write test that creates `profiles.d/coding.toml` with modified values
-- [ ] Create model card in `configs.d/` with existing `[sampling.coding]`
+- [ ] Write test that creates `profiles/coding.toml` with modified values
+- [ ] Create model card in `configs/` with existing `[sampling.coding]`
 - [ ] Call `migrate_profiles_to_model_cards`
 - [ ] Verify migration was skipped (no changes to card)
 - [ ] Run test, verify it fails
 
 ---
 
-### Task 3: Test (profiles.d, already present): `coding.toml` exists but card already has `[sampling.coding]` — migration skips entirely
+### Task 3: Test (profiles, already present): `coding.toml` exists but card already has `[sampling.coding]` — migration skips entirely
 
 **Files**:
 - Modify: `crates/kronk-core/src/config/migrate.rs`
 
 **Steps**:
-- [ ] Write test that creates `profiles.d/coding.toml` with explicit content
-- [ ] Create model card in `configs.d/` with existing `[sampling.coding]`
+- [ ] Write test that creates `profiles/coding.toml` with explicit content
+- [ ] Create model card in `configs/` with existing `[sampling.coding]`
 - [ ] Call `migrate_profiles_to_model_cards`
 - [ ] Verify migration was skipped (no changes to card)
 - [ ] Run test, verify it fails
 
 ---
 
-### Task 4: Test (profiles.d, non-built-in): `mypreset.toml` gets inserted into each card under `"mypreset"` unless already present
+### Task 4: Test (profiles, non-built-in): `mypreset.toml` gets inserted into each card under `"mypreset"` unless already present
 
 **Files:**
 - Modify: `crates/kronk-core/src/config/migrate.rs`
 
 **Steps:**
-- [ ] Write test that creates `profiles.d/mypreset.toml` with custom values
-- [ ] Create model card in `configs.d/` without `[sampling.mypreset]`
+- [ ] Write test that creates `profiles/mypreset.toml` with custom values
+- [ ] Create model card in `configs/` without `[sampling.mypreset]`
 - [ ] Call `migrate_profiles_to_model_cards`
 - [ ] Verify `mypreset` profile was inserted into card
 - [ ] Run test, verify it fails
 
 ---
 
-### Task 5: Test (profiles.d cleanup): after migration, `profiles.d/` directory is deleted
+### Task 5: Test (profiles cleanup): after migration, `profiles/` directory is deleted
 
 **Files:**
 - Modify: `crates/kronk-core/src/config/migrate.rs`
 
 **Steps:**
-- [ ] Write test that creates `profiles.d/coding.toml` with modified values
-- [ ] Create model card in `configs.d/` without `[sampling.coding]`
+- [ ] Write test that creates `profiles/coding.toml` with modified values
+- [ ] Create model card in `configs/` without `[sampling.coding]`
 - [ ] Call `migrate_profiles_to_model_cards`
-- [ ] Verify `profiles.d/` directory was deleted after migration
+- [ ] Verify `profiles/` directory was deleted after migration
 - [ ] Run test, verify it fails
 
 ---
@@ -93,7 +93,7 @@
 
 **Steps:**
 - [ ] Write test that creates `config.custom_profiles` with `"fast"` entry
-- [ ] Create model card in `configs.d/` without `[sampling.fast]`
+- [ ] Create model card in `configs/` without `[sampling.fast]`
 - [ ] Call `migrate_profiles_to_model_cards`
 - [ ] Verify `fast` profile was inserted into card
 - [ ] Verify `custom_profiles` was set to None
@@ -108,7 +108,7 @@
 
 **Steps:**
 - [ ] Write test that creates `config.custom_profiles` with `"fast"` entry
-- [ ] Create model card in `configs.d/` with existing `[sampling.fast]`
+- [ ] Create model card in `configs/` with existing `[sampling.fast]`
 - [ ] Call `migrate_profiles_to_model_cards`
 - [ ] Verify migration was skipped (no changes to card)
 - [ ] Run test, verify it fails

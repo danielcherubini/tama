@@ -181,19 +181,19 @@ health_check_interval_ms = 5000
 
 The `[models.*]` key (e.g. `my-model`) is the alias used by clients in `"model": "my-model"`. You can define multiple models. When `kronk serve` is running, request any enabled model and its backend will start automatically. Backend ports are auto-assigned — you don't need to configure them.
 
-Model cards are stored in `~/.config/kronk/configs.d/<company>--<model>.toml` and contain quant info, context settings, and sampling presets.
+Model cards are stored in `~/.config/kronk/configs/<company>--<model>.toml` and contain quant info, context settings, and sampling presets.
 
 ### Directory Layout
 
 ```text
 ~/.config/kronk/
 ├── config.toml              Main configuration
-├── profiles.d/              Sampling presets (editable)
+├── profiles/              Sampling presets (editable)
 │   ├── coding.toml
 │   ├── chat.toml
 │   ├── analysis.toml
 │   └── creative.toml
-├── configs.d/               Model cards
+├── configs/               Model cards
 │   └── bartowski--OmniCoder-8B.toml
 ├── models/                  GGUF model files
 │   └── bartowski/OmniCoder-8B/*.gguf

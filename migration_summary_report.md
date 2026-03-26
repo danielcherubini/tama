@@ -1,13 +1,13 @@
-# Migration Summary Report: profiles.d to Model Cards
+# Migration Summary Report: profiles to Model Cards
 
 ## Overview
 
-This report documents the migration from `profiles.d/` directory structure to inline model cards in `configs.d/`.
+This report documents the migration from `profiles/` directory structure to inline model cards in `configs/`.
 
 ## Timeline
 
 **Commit**: `9154b57` (Tue Mar 24 21:06:26 2026 +0100)
-**Title**: "feat: implement profiles.d migration to model cards"
+**Title**: "feat: implement profiles migration to model cards"
 
 ## Key Changes
 
@@ -19,18 +19,18 @@ This report documents the migration from `profiles.d/` directory structure to in
 The new function performs the following operations:
 
 1. **Profile Collection**: 
-   - Collects profiles from `profiles.d/` directory
+   - Collects profiles from `profiles/` directory
    - Collects profiles from `config.custom_profiles` (always custom)
    - Builds a unified list of all profiles to migrate
 
 2. **Model Card Enhancement**:
-   - Loads all model cards from `configs.d/`
+   - Loads all model cards from `configs/`
    - For each profile, inserts sampling configuration into model cards
    - Only inserts if key doesn't already exist (card takes precedence)
 
 3. **Cleanup**:
-   - Removes processed `.toml` files from `profiles.d/`
-   - Removes empty `profiles.d/` directory if no remaining files
+   - Removes processed `.toml` files from `profiles/`
+   - Removes empty `profiles/` directory if no remaining files
    - Sets `custom_profiles = None` and saves config
 
 ### 2. Sampling Templates Built-in
@@ -95,7 +95,7 @@ Comprehensive test plan created with 8 test cases covering:
    - `custom_profiles` set to `None` after migration
 
 3. **Cleanup**:
-   - `profiles.d/` directory deleted after migration
+   - `profiles/` directory deleted after migration
    - Empty directories removed
 
 ## Impact
@@ -108,14 +108,14 @@ Comprehensive test plan created with 8 test cases covering:
 ### New Functionality
 - `migrate_profiles_to_model_cards()` function available for programmatic migration
 - Built-in sampling templates for all profiles
-- Automatic cleanup of `profiles.d/` directory
+- Automatic cleanup of `profiles/` directory
 
 ## Migration Verification
 
 The migration can be verified by:
 
 1. Running existing tests to ensure no regressions
-2. Checking that `profiles.d/` directory is removed after migration
+2. Checking that `profiles/` directory is removed after migration
 3. Verifying model cards contain sampling configurations
 4. Confirming `custom_profiles` is set to `None` after migration
 

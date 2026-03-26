@@ -1,14 +1,14 @@
 use crate::config::Config;
 use std::path::PathBuf;
 
-pub fn migrate_model_cards_to_configs_d(config: &crate::config::Config) -> anyhow::Result<()> {
+pub fn migrate_model_cards_to_configs(config: &crate::config::Config) -> anyhow::Result<()> {
     let configs_dir = config.configs_dir()?;
     let models_dir = config
         .general
         .models_dir
         .clone()
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("models.d"));
+        .unwrap_or_else(|| PathBuf::from("models"));
     if !models_dir.exists() {
         return Ok(());
     }
@@ -65,9 +65,9 @@ pub fn migrate_profiles_to_model_cards(config: &mut Config) -> anyhow::Result<()
     let profiles_dir = config
         .loaded_from
         .as_ref()
-        .map(|p: &std::path::PathBuf| p.join("profiles.d"));
+        .map(|p: &std::path::PathBuf| p.join("profiles"));
 
-    // Collect profiles from profiles.d/
+    // Collect profiles from profiles/
     let mut profiles = Vec::new();
     if let Some(dir) = &profiles_dir {
         let profiles_dir: &std::path::Path = dir.as_ref();
@@ -111,7 +111,7 @@ pub fn migrate_profiles_to_model_cards(config: &mut Config) -> anyhow::Result<()
         }
     }
 
-    // Load all model cards from configs.d/
+    // Load all model cards from configs/
     // Ensure configs_dir exists before attempting to read
     if !configs_dir.exists() {
         std::fs::create_dir_all(&configs_dir)?;
@@ -149,7 +149,7 @@ pub fn migrate_profiles_to_model_cards(config: &mut Config) -> anyhow::Result<()
         }
     }
 
-    // Remove processed .toml files from profiles.d/ and rmdir if empty
+    // Remove processed .toml files from profiles/ and rmdir if empty
     if let Some(dir) = profiles_dir {
         let profiles_dir: &std::path::Path = dir.as_ref();
         if profiles_dir.exists() {
@@ -184,6 +184,31 @@ pub fn migrate_profiles_to_model_cards(config: &mut Config) -> anyhow::Result<()
     }
 
     config.save()?;
+
+    Ok(())
+}
+
+/// Renames legacy directory names if they exist and the new name doesn't.
+/// e.g., models.d -> models, configs.d -> configs, profiles.d -> profiles
+pub fn rename_legacy_directories(config_dir: &std::path::Path) -> anyhow::Result<()> {
+    // List of directories to rename: (old, new)
+    let legacy_map = [
+        ("models.d", "models"),
+        ("configs.d", "configs"),
+        ("profiles.d", "profiles"),
+    ];
+
+    for (old, new) in legacy_map {
+        let old_path = config_dir.join(old);
+        let new_path = config_dir.join(new);
+
+        if old_path.exists() && !new_path.exists() {
+            tracing::info!("Renaming legacy directory '{}' to '{}'", old, new);
+            if let Err(e) = std::fs::rename(&old_path, &new_path) {
+                tracing::warn!("Failed to rename {} to {}: {}", old, new, e);
+            }
+        }
+    }
 
     Ok(())
 }

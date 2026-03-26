@@ -11,7 +11,7 @@ pub struct InstalledModel {
     pub card: ModelCard,
     /// Identifier in "company/modelname" format, derived from config filename
     pub id: String,
-    /// Path to the model card TOML file in configs.d/
+    /// Path to the model card TOML file in configs/
     pub card_path: PathBuf,
 }
 
@@ -34,13 +34,13 @@ impl ModelRegistry {
         &self.models_dir
     }
 
-    /// Get the configs.d directory path.
+    /// Get the configs directory path.
     pub fn configs_dir(&self) -> &Path {
         &self.configs_dir
     }
 
-    /// Scan the configs.d directory and return all installed models.
-    /// Reads `configs.d/<company>-<model>.toml` files.
+    /// Scan the configs directory and return all installed models.
+    /// Reads `configs/<company>-<model>.toml` files.
     pub fn scan(&self) -> Result<Vec<InstalledModel>> {
         let mut models = Vec::new();
 
@@ -132,7 +132,7 @@ mod tests {
     fn setup_test_dir() -> (tempfile::TempDir, ModelRegistry) {
         let tmp = tempfile::tempdir().unwrap();
         let models = tmp.path().join("models");
-        let configs = tmp.path().join("configs.d");
+        let configs = tmp.path().join("configs");
         std::fs::create_dir_all(&models).unwrap();
         std::fs::create_dir_all(&configs).unwrap();
         let registry = ModelRegistry::new(models, configs);
@@ -141,7 +141,7 @@ mod tests {
 
     fn create_test_model(base: &Path, company: &str, model: &str) -> ModelCard {
         let model_dir = base.join("models").join(company).join(model);
-        let configs_dir = base.join("configs.d");
+        let configs_dir = base.join("configs");
         std::fs::create_dir_all(&model_dir).unwrap();
         std::fs::create_dir_all(&configs_dir).unwrap();
 
@@ -184,7 +184,7 @@ mod tests {
     fn test_scan_nonexistent_dir() {
         let registry = ModelRegistry::new(
             PathBuf::from("/tmp/kronk_nonexistent_test_dir/models"),
-            PathBuf::from("/tmp/kronk_nonexistent_test_dir/configs.d"),
+            PathBuf::from("/tmp/kronk_nonexistent_test_dir/configs"),
         );
         let models = registry.scan().unwrap();
         assert!(models.is_empty());

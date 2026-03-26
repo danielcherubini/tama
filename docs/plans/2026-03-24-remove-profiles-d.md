@@ -1,6 +1,6 @@
-# Remove profiles.d — Model Cards Are the Single Source of Sampling Truth
+# Remove profiles — Model Cards Are the Single Source of Sampling Truth
 
-**Goal:** Eliminate `profiles.d/`, `custom_profiles`, `Profile::Custom`, and
+**Goal:** Eliminate `profiles/`, `custom_profiles`, `Profile::Custom`, and
 hardcoded built-in profile defaults. Model cards become the sole source of
 sampling parameters. A new `[sampling_templates]` section in `config.toml`
 provides seed values for new model cards created during `kronk model pull`.
@@ -11,7 +11,7 @@ section. It no longer carries hardcoded default params. The resolution
 chain simplifies to: `modelcard [sampling.<profile>] -> server-level overrides`.
 When `kronk model pull` creates a new card without a community card, it
 copies the `[sampling_templates.*]` from config.toml into the card. A
-one-time migration moves any user-customised profiles.d and custom_profiles
+one-time migration moves any user-customised profiles and custom_profiles
 entries into existing model cards before cleaning up.
 
 **Tech Stack:** Rust, TOML (serde), existing `kronk-core` / `kronk-cli` crates
@@ -40,23 +40,23 @@ entries into existing model cards before cleaning up.
 
 ---
 
-## Task 2: Auto-migrate profiles.d and custom_profiles into model cards
+## Task 2: Auto-migrate profiles and custom_profiles into model cards
 
 **Files:**
 - Modify: `crates/kronk-core/src/config/migrate.rs`
 - Test: `crates/kronk-core/src/config/migrate.rs` (inline tests)
 
 **Steps:**
-- [ ] Write test (profiles.d, modified): given `profiles.d/coding.toml` with
-  modified values and a model card in `configs.d/` with no
+- [ ] Write test (profiles, modified): given `profiles/coding.toml` with
+  modified values and a model card in `configs/` with no
   `[sampling.coding]`, migration inserts the profile into the card
-- [ ] Write test (profiles.d, card has it): same scenario but model card
+- [ ] Write test (profiles, card has it): same scenario but model card
   already has `[sampling.coding]` — migration skips (card wins)
-- [ ] Write test (profiles.d, unmodified): `coding.toml` matches
+- [ ] Write test (profiles, unmodified): `coding.toml` matches
   `Profile::Coding.params()` — migration skips entirely
-- [ ] Write test (profiles.d, non-built-in): `mypreset.toml` gets inserted
+- [ ] Write test (profiles, non-built-in): `mypreset.toml` gets inserted
   into each card under `"mypreset"` unless already present
-- [ ] Write test (profiles.d cleanup): after migration, `profiles.d/`
+- [ ] Write test (profiles cleanup): after migration, `profiles/`
   directory is deleted
 - [ ] Write test (custom_profiles): given `config.custom_profiles` with
   `"fast"` entry, migration inserts it into each card's sampling under
@@ -66,20 +66,20 @@ entries into existing model cards before cleaning up.
 - [ ] Run tests, verify they fail
 - [ ] Implement `migrate_profiles_to_model_cards(config: &mut Config)`:
   - Collect profiles from two sources:
-    a) `profiles.d/` — parse each `.toml` as `ProfileDef`; skip if name
+    a) `profiles/` — parse each `.toml` as `ProfileDef`; skip if name
        matches a built-in AND params equal `Profile::params()`
     b) `config.custom_profiles` — all entries (these are always custom)
-  - Load all model cards from `configs.d/`
+  - Load all model cards from `configs/`
   - For each card × each collected profile: skip if key exists; else insert
   - Save each modified card
-  - Remove processed `.toml` files from `profiles.d/`; rmdir if empty
+  - Remove processed `.toml` files from `profiles/`; rmdir if empty
   - Set `config.custom_profiles = None`; save config (strips the field)
 - [ ] Run tests, verify they pass
 - [ ] Commit
 
 ---
 
-## Task 3: Wire migration into Config::load_from, remove profiles.d generation
+## Task 3: Wire migration into Config::load_from, remove profiles generation
 
 **Files:**
 - Modify: `crates/kronk-core/src/config/loader.rs`
@@ -87,11 +87,11 @@ entries into existing model cards before cleaning up.
 
 **Steps:**
 - [ ] Write test: `Config::load_from` on a fresh directory does NOT create
-  `profiles.d/`
-- [ ] Write test: `Config::load_from` with existing `profiles.d/` and a
-  model card in `configs.d/` — after load, profile is in the card
+  `profiles/`
+- [ ] Write test: `Config::load_from` with existing `profiles/` and a
+  model card in `configs/` — after load, profile is in the card
 - [ ] Run tests, verify they fail
-- [ ] Replace the `profiles.d` creation block (lines 67-74) with a call to
+- [ ] Replace the `profiles` creation block (lines 67-74) with a call to
   `migrate_profiles_to_model_cards(&mut config)`
 - [ ] Remove the `profiles_dir()` method (lines 102-110)
 - [ ] Run tests, verify they pass
@@ -228,7 +228,7 @@ entries into existing model cards before cleaning up.
 - [ ] Remove `pub use defaults::resolve_profile_params` from `config/mod.rs`
   if deleted or no longer public
 - [ ] Remove any dangling `use` statements for deleted functions
-- [ ] Update `README.md`: remove `profiles.d/` from directory tree, update
+- [ ] Update `README.md`: remove `profiles/` from directory tree, update
   prose about profiles/sampling to reflect the model-card-centric approach
 - [ ] Run `cargo check --workspace && cargo clippy --workspace -- -D warnings && cargo test --workspace`
 - [ ] Commit

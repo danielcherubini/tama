@@ -194,11 +194,11 @@ impl Config {
         if let (Some(ref model_id), Some(ref quant_name)) = (&server.model, &server.quant) {
             let models_dir = self
                 .models_dir()
-                .unwrap_or_else(|_| std::path::PathBuf::from("models.d"));
+                .unwrap_or_else(|_| std::path::PathBuf::from("models"));
             let configs_dir = self.configs_dir().unwrap_or_else(|_| {
                 // Fallback: derive from models_dir if configs_dir is not available
                 self.models_dir()
-                    .unwrap_or_else(|_| std::path::PathBuf::from("configs.d"))
+                    .unwrap_or_else(|_| std::path::PathBuf::from("configs"))
             });
             let registry = crate::models::ModelRegistry::new(models_dir.clone(), configs_dir.clone());
             if let Some(installed) = registry.find(model_id)? {

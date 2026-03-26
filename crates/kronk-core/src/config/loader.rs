@@ -1,4 +1,4 @@
-use super::migrate::migrate_profiles_to_model_cards;
+use super::migrate::{migrate_profiles_to_model_cards, rename_legacy_directories};
 use super::types::{BackendConfig, Config, General, ModelConfig, ProxyConfig, Supervisor};
 use crate::profiles::Profile;
 use anyhow::{Context, Result};
@@ -47,6 +47,9 @@ impl Config {
     /// the installing user's config directory.
     pub fn load_from(config_dir: &std::path::Path) -> Result<Self> {
         fs::create_dir_all(config_dir).context("Failed to create config directory")?;
+
+        // Rename legacy .d directories if they exist
+        let _ = rename_legacy_directories(config_dir);
 
         let config_path = config_dir.join("config.toml");
 
