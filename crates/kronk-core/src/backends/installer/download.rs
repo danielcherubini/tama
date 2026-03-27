@@ -29,8 +29,7 @@ pub async fn download_file(url: &str, dest: &Path) -> Result<()> {
         ));
     }
 
-    let total_size = parse_content_length(response.headers())
-        .unwrap_or(0);
+    let total_size = parse_content_length(response.headers()).unwrap_or(0);
 
     let pb = ProgressBar::new(total_size);
     pb.set_style(
