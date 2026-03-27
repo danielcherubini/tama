@@ -92,22 +92,11 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
         return Ok(());
     }
 
+    let model_id = repo_id.to_string();
     let models_dir_pathbuf = config.models_dir()?.to_path_buf();
-    // Strip -GGUF suffix from directory name (cleaner paths)
-    // "Tesslate/OmniCoder-9B-GGUF" -> models_dir/Tesslate/OmniCoder-9B
-    let clean_parts: Vec<String> = repo_id
-        .split('/')
-        .map(|part| {
-            part.strip_suffix("-GGUF")
-                .or_else(|| part.strip_suffix("-gguf"))
-                .unwrap_or(part)
-                .to_string()
-        })
-        .collect();
-    let model_id = clean_parts.join("/"); // Re-introduce model_id
     let mut model_dir: PathBuf = models_dir_pathbuf.clone();
-    for part in clean_parts.iter() {
-        model_dir.push(part.as_str()); // Use push with &str
+    for part in repo_id.split('/') {
+        model_dir.push(part);
     }
     std::fs::create_dir_all(&model_dir)
         .with_context(|| format!("Failed to create directory: {}", model_dir.display()))?;
