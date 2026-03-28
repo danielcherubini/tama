@@ -80,6 +80,13 @@ pub fn cmd_service(config: &Config, command: crate::cli::ServiceCommands) -> Res
             service_stop_inner(&service_name)?;
             println!("Wrong lever! '{}' stopped.", service_name);
         }
+        crate::cli::ServiceCommands::Restart { name } => {
+            let service_name = name
+                .map(|n| Config::service_name(&n))
+                .unwrap_or_else(|| "kronk".to_string());
+            service_restart_inner(&service_name)?;
+            println!("Right lever! '{}' restarted.", service_name);
+        }
         crate::cli::ServiceCommands::Remove { name } => {
             let service_name = name
                 .map(|n| Config::service_name(&n))
@@ -107,10 +114,14 @@ pub fn cmd_service(config: &Config, command: crate::cli::ServiceCommands) -> Res
 #[allow(dead_code)]
 fn service_start_inner(service_name: &str) -> Result<()> {
     #[cfg(target_os = "windows")]
-    kronk_core::platform::windows::start_service(service_name)?;
+    {
+        kronk_core::platform::windows::start_service(service_name)?;
+    }
 
     #[cfg(target_os = "linux")]
-    kronk_core::platform::linux::start_service(service_name)?;
+    {
+        kronk_core::platform::linux::start_service(service_name)?;
+    }
 
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
@@ -125,10 +136,39 @@ fn service_start_inner(service_name: &str) -> Result<()> {
 #[allow(dead_code)]
 fn service_stop_inner(service_name: &str) -> Result<()> {
     #[cfg(target_os = "windows")]
-    kronk_core::platform::windows::stop_service(service_name)?;
+    {
+        // First try normal stop, then forcefully kill processes
+        kronk_core::platform::windows::stop_service_force(service_name)?;
+    }
 
     #[cfg(target_os = "linux")]
-    kronk_core::platform::linux::stop_service(service_name)?;
+    {
+        kronk_core::platform::linux::stop_service(service_name)?;
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    {
+        let _ = service_name;
+        anyhow::bail!("Not supported on this platform");
+    }
+
+    Ok(())
+}
+
+/// Restart a service (stop then start)
+#[allow(dead_code)]
+fn service_restart_inner(service_name: &str) -> Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        // Stop forcefully first
+        kronk_core::platform::windows::restart_service(service_name)?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // On Linux, just stop and start
+        kronk_core::platform::linux::restart_service(service_name)?;
+    }
 
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
