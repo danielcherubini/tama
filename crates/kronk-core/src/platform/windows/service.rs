@@ -62,6 +62,11 @@ pub fn start_service(service_name: &str) -> Result<()> {
 
 /// Stop a running service.
 pub fn stop_service(service_name: &str) -> Result<()> {
+    stop_service_force(service_name)
+}
+
+/// Stop a running service, forcefully killing any remaining processes.
+pub fn stop_service_force(service_name: &str) -> Result<()> {
     let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
         .context("Failed to open Service Control Manager — run as Administrator")?;
 
@@ -77,10 +82,43 @@ pub fn stop_service(service_name: &str) -> Result<()> {
         return Ok(());
     }
 
+    // Send stop signal
     service.stop().context("Failed to stop service")?;
 
+    // Wait for normal stop
     wait_for_state(&service, ServiceState::Stopped, Duration::from_secs(30))
         .with_context(|| format!("Service '{}' did not stop in time", service_name))?;
+
+    // Force kill any remaining processes
+    kill_service_processes(service_name)?;
+
+    Ok(())
+}
+
+/// Kill any remaining processes for a stopped service.
+fn kill_service_processes(service_name: &str) -> Result<()> {
+    use std::process;
+
+    // Get the service's process ID from status
+    let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+        .context("Failed to open Service Control Manager")?;
+
+    let service = manager
+        .open_service(service_name, ServiceAccess::QUERY_STATUS)
+        .context("Failed to open service for process check")?;
+
+    let status = service.query_status()?;
+
+    // If we have a process ID, try to kill it
+    if let Some(process_id) = status.process_id {
+        let pid = process_id.as_u32();
+        let mut cmd = process::Command::new("taskkill");
+        cmd.arg("/F").arg("/PID").arg(pid.to_string());
+
+        let result = cmd.output();
+        // Don't fail if taskkill fails (might not exist on all Windows configs)
+        let _ = result;
+    }
 
     Ok(())
 }
@@ -129,6 +167,16 @@ pub fn remove_service(service_name: &str) -> Result<()> {
     super::firewall::remove_firewall_rule(service_name).ok();
 
     Ok(())
+}
+
+/// Restart a service (stop then start).
+pub fn restart_service(service_name: &str) -> Result<()> {
+    stop_service_force(service_name)?;
+
+    // Wait for processes to fully terminate
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    start_service(service_name)
 }
 
 /// Query the status of a service.

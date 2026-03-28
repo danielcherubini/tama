@@ -270,6 +270,11 @@ pub enum ServiceCommands {
         /// Server name (omit to stop the proxy service)
         name: Option<String>,
     },
+    /// Restart the kronk service (stop then start)
+    Restart {
+        /// Server name (omit to restart the proxy service)
+        name: Option<String>,
+    },
     /// Remove the kronk service
     Remove {
         /// Server name (omit to remove the proxy service)
