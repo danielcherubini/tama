@@ -99,6 +99,10 @@ pub fn start_service(service_name: &str) -> Result<()> {
 }
 
 pub fn stop_service(service_name: &str) -> Result<()> {
+    stop_service_force(service_name)
+}
+
+pub fn stop_service_force(service_name: &str) -> Result<()> {
     let status = Command::new("systemctl")
         .args(["--user", "stop", service_name])
         .status()
@@ -107,7 +111,20 @@ pub fn stop_service(service_name: &str) -> Result<()> {
     if !status.success() {
         anyhow::bail!("Failed to stop service '{}'", service_name);
     }
+
+    // Wait for systemd to fully stop the service
+    std::thread::sleep(std::time::Duration::from_secs(2));
+
     Ok(())
+}
+
+pub fn restart_service(service_name: &str) -> Result<()> {
+    stop_service_force(service_name)?;
+
+    // Wait for processes to fully terminate
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    start_service(service_name)
 }
 
 pub fn remove_service(service_name: &str) -> Result<()> {
