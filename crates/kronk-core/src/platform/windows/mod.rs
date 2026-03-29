@@ -11,4 +11,6 @@ mod service;
 // e.g. `kronk_core::platform::windows::start_service` still works.
 pub use firewall::{add_firewall_rule, remove_firewall_rule};
 pub use install::{install_proxy_service, install_service};
-pub use service::{query_service, remove_service, start_service, stop_service};
+pub use service::{
+    query_service, remove_service, restart_service, start_service, stop_service, stop_service_force,
+};
