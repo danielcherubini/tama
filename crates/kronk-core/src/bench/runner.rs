@@ -53,25 +53,32 @@ fn _extract_gpu_layers(args: &[String]) -> Option<String> {
 /// Removes **all** existing occurrences of `flag` and its following value, then
 /// appends a single canonical `flag value` pair.  This prevents duplicate flags
 /// left by `build_full_args` from conflicting with the bench-specific values.
+///
+/// Two forms are recognised and stripped:
+/// - Space-separated: `["--port", "8080"]` — removes both tokens.
+/// - Inline-equals: `["--port=8080"]` — removes the single token.
 fn _override_arg(args: &mut Vec<String>, flag: &str, value: &str) {
-    // Collect indices of every occurrence of the flag (iterate in reverse so
-    // removal doesn't shift indices we haven't visited yet).
-    let positions: Vec<usize> = args
-        .iter()
-        .enumerate()
-        .filter_map(|(i, a)| if a == flag { Some(i) } else { None })
-        .collect();
-
-    for pos in positions.into_iter().rev() {
-        // Remove the value first (higher index), then the flag.
-        if pos + 1 < args.len() {
-            args.remove(pos + 1);
+    let inline_prefix = format!("{}=", flag);
+    let mut cleaned: Vec<String> = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == flag {
+            // Space-separated form: skip the flag token and its value token.
+            i += 1;
+            if i < args.len() {
+                i += 1;
+            }
+        } else if args[i].starts_with(&inline_prefix) {
+            // Inline-equals form: skip the single combined token.
+            i += 1;
+        } else {
+            cleaned.push(args[i].clone());
+            i += 1;
         }
-        args.remove(pos);
     }
-
-    args.push(flag.to_string());
-    args.push(value.to_string());
+    cleaned.push(flag.to_string());
+    cleaned.push(value.to_string());
+    *args = cleaned;
 }
 
 /// Start a backend process and wait for it to be healthy
@@ -194,7 +201,29 @@ async fn _stop_backend(backend: &BenchBackend) -> Result<()> {
     Ok(())
 }
 
-/// Run a benchmark and return a complete report
+/// Run a benchmark against a named server config and return a complete report.
+///
+/// Resolves the server configuration, spawns the backend process, runs warmup
+/// and measurement iterations for every `(pp_size, tg_size)` combination in
+/// `bench_config`, collects statistics, and tears the backend down before
+/// returning.
+///
+/// # Parameters
+/// - `config` — workspace [`Config`] used to resolve the server and backend settings.
+/// - `server_name` — name of the server entry in `config.models` to benchmark.
+/// - `bench_config` — benchmark parameters: PP/TG sizes, run counts, warmup
+///   iterations, and optional context-size override.
+///
+/// # Returns
+/// `Ok(BenchReport)` containing model metadata, per-combination summaries,
+/// backend load time, and a VRAM snapshot taken just before shutdown.
+///
+/// # Errors
+/// Returns `Err` if:
+/// - `server_name` cannot be resolved in `config`.
+/// - The backend process fails to start or does not become healthy within 120 s.
+/// - All measurement runs for any `(pp_size, tg_size)` combination fail.
+/// - The backend cannot be stopped cleanly after a successful benchmark run.
 pub async fn run_benchmark(
     config: &Config,
     server_name: &str,
@@ -378,5 +407,23 @@ mod tests {
         assert!(args.contains(&"--host".to_string()));
         let pos = args.iter().position(|a| a == "--host").unwrap();
         assert_eq!(args[pos + 1], "127.0.0.1");
+    }
+
+    /// Verifies that `_override_arg` removes inline `--flag=value` tokens.
+    #[test]
+    fn test_override_arg_removes_inline_equals_form() {
+        let mut args = vec![
+            "--model".to_string(),
+            "foo.gguf".to_string(),
+            "--port=8080".to_string(),
+        ];
+        _override_arg(&mut args, "--port", "54321");
+        // The inline token must be gone
+        assert!(!args.iter().any(|a| a.starts_with("--port=")));
+        // Exactly one --port flag must be present with the correct value
+        let port_count = args.iter().filter(|a| a.as_str() == "--port").count();
+        assert_eq!(port_count, 1);
+        let pos = args.iter().position(|a| a == "--port").unwrap();
+        assert_eq!(args[pos + 1], "54321");
     }
 }
