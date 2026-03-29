@@ -21,7 +21,6 @@ use futures_util::StreamExt;
 pub async fn send_bench_request(
     base_url: &str,
     prompt_tokens: u32,
-    max_tokens: u32,
 ) -> Result<crate::bench::RequestMeasurement> {
     // Build the request body
     let prompt = crate::bench::build_prompt(prompt_tokens);
@@ -31,7 +30,6 @@ pub async fn send_bench_request(
             {"role": "system", "content": "You are a helpful assistant. Continue generating text without stopping."},
             {"role": "user", "content": prompt}
         ],
-        "max_tokens": max_tokens,
         "stream": true
     });
 
