@@ -155,21 +155,18 @@ pub fn parse_sse_content(line: &str) -> Option<String> {
     }
 
     // Parse as JSON
-    match serde_json::from_str::<serde_json::Value>(sse_data) {
-        Ok(json) => {
-            // Check for choices[0].delta.content
-            let choices = json.get("choices");
-            let choice = choices?.as_array().and_then(|arr| arr.first());
-            let delta = choice?.as_object().and_then(|obj| obj.get("delta"));
-            let content = delta?.as_object().and_then(|obj| obj.get("content"));
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(sse_data) {
+        // Check for choices[0].delta.content
+        let choices = json.get("choices");
+        let choice = choices?.as_array().and_then(|arr| arr.first());
+        let delta = choice?.as_object().and_then(|obj| obj.get("delta"));
+        let content = delta?.as_object().and_then(|obj| obj.get("content"));
 
-            if let Some(content_str) = content?.as_str() {
-                if !content_str.is_empty() {
-                    return Some(content_str.to_string());
-                }
+        if let Some(content_str) = content?.as_str() {
+            if !content_str.is_empty() {
+                return Some(content_str.to_string());
             }
         }
-        Err(_) => {}
     }
 
     None
