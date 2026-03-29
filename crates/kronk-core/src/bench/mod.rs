@@ -115,7 +115,18 @@ pub struct BenchReport {
     pub vram: Option<crate::gpu::VramInfo>,
 }
 
-/// Compute summary statistics from a set of measurements
+/// Compute summary statistics (mean and population stddev) from a set of measurements.
+///
+/// # Parameters
+/// - `test_name`: label for this test case, e.g. `"pp512/tg128"`.
+/// - `prompt_tokens`: number of prompt tokens used in the test (PP size).
+/// - `gen_tokens`: target number of generated tokens (TG size).
+/// - `measurements`: slice of [`RequestMeasurement`] values to aggregate; may be empty.
+///
+/// # Returns
+/// A [`BenchSummary`] containing mean and stddev for PP speed, TG speed, TTFT, and total
+/// latency.  If `measurements` is empty all fields are `0.0`.  If it contains exactly one
+/// entry stddev is `0.0`.
 pub fn compute_summary(
     test_name: &str,
     prompt_tokens: u32,
@@ -200,10 +211,20 @@ pub fn compute_summary(
     }
 }
 
-/// Build a user message string of approximately target_tokens tokens
+/// Build a user message string of approximately `target_tokens` tokens.
 ///
-/// Uses the heuristic that English text is ~4 chars/token for common BPE tokenizers.
-/// The sentence "The quick brown fox jumps over the lazy dog." is approximately 10 tokens.
+/// Uses the ~4 chars/token heuristic for English text with common BPE tokenizers.
+/// The base sentence ("The quick brown fox jumps over the lazy dog. ") is repeated until the
+/// character count reaches `target_tokens * 4`, then truncated to that exact length.
+///
+/// The result is approximate and intentionally so — it provides a consistent, reproducible
+/// prompt for relative performance comparisons without requiring a real tokenizer.
+///
+/// # Parameters
+/// - `target_tokens`: desired approximate token count for the returned string.
+///
+/// # Returns
+/// A plain text string suitable for use as the `content` of a user message.
 pub fn build_prompt(target_tokens: u32) -> String {
     let repeat_text = "The quick brown fox jumps over the lazy dog. ";
     let chars_per_token = 4.0;
@@ -223,6 +244,7 @@ mod tests {
     use super::*;
     use crate::bench::display::format_stat;
 
+    /// Verifies that `BenchConfig::default()` has the expected field values.
     #[test]
     fn test_bench_config_default() {
         let config = BenchConfig::default();
@@ -233,6 +255,7 @@ mod tests {
         assert_eq!(config.ctx_override, None);
     }
 
+    /// Verifies that `compute_summary` correctly computes mean and population stddev from three measurements.
     #[test]
     fn test_compute_summary_basic() {
         let measurements = vec![
@@ -277,6 +300,7 @@ mod tests {
         assert!((summary.pp_stddev - 81.65).abs() < 1.0);
     }
 
+    /// Verifies that `compute_summary` returns stddev of 0.0 when given a single measurement.
     #[test]
     fn test_compute_summary_single_measurement() {
         let measurements = vec![RequestMeasurement {
@@ -297,6 +321,7 @@ mod tests {
         assert_eq!(summary.total_stddev, 0.0);
     }
 
+    /// Verifies that `compute_summary` returns all-zero fields when given an empty slice.
     #[test]
     fn test_compute_summary_empty() {
         let summary = compute_summary("pp512/tg128", 512, 128, &[]);
@@ -311,6 +336,7 @@ mod tests {
         assert_eq!(summary.total_stddev, 0.0);
     }
 
+    /// Verifies that `build_prompt(512)` produces a string within the expected character-count range.
     #[test]
     fn test_build_prompt_approximate_length() {
         let prompt = build_prompt(512);
@@ -318,6 +344,7 @@ mod tests {
         assert!(prompt.len() >= 1500 && prompt.len() <= 2500);
     }
 
+    /// Verifies that a larger `target_tokens` value produces a proportionally longer prompt string.
     #[test]
     fn test_build_prompt_scales() {
         let prompt_512 = build_prompt(512);
@@ -325,12 +352,14 @@ mod tests {
         assert!(prompt_1024.len() > prompt_512.len());
     }
 
+    /// Verifies that `format_stat` returns "mean ± stddev" when stddev is non-zero.
     #[test]
     fn test_format_stat_with_stddev() {
         let result = format_stat(4821.3, 42.1);
         assert_eq!(result, "4821.3 ± 42.1");
     }
 
+    /// Verifies that `format_stat` returns only the mean when stddev is 0.0.
     #[test]
     fn test_format_stat_zero_stddev() {
         let result = format_stat(4821.3, 0.0);

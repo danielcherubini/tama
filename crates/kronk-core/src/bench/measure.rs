@@ -4,9 +4,10 @@
 //! OpenAI-compatible chat completion request to a running llama-server and
 //! measures timing from the SSE (Server-Sent Events) stream.
 
+use std::time::Instant;
+
 use anyhow::{bail, Context, Result};
 use futures_util::StreamExt;
-use std::time::Instant;
 
 /// Sends a benchmark request to the LLM server and measures performance metrics.
 ///
@@ -106,9 +107,13 @@ pub async fn send_bench_request(
 
     let total_ms = end_time.duration_since(request_start).as_secs_f64() * 1000.0;
 
-    // Compute tokens per second
-    let pp_tokens_per_sec = prompt_tokens as f64 / (ttft_ms / 1000.0);
-    let tg_tokens_per_sec = if generated_token_count > 1 {
+    // Compute tokens per second, guarding against division by zero / Inf / NaN
+    let pp_tokens_per_sec = if ttft_ms > 0.0 {
+        prompt_tokens as f64 / (ttft_ms / 1000.0)
+    } else {
+        0.0
+    };
+    let tg_tokens_per_sec = if generated_token_count > 1 && total_ms > ttft_ms {
         (generated_token_count - 1) as f64 / ((total_ms - ttft_ms) / 1000.0)
     } else {
         0.0

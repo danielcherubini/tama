@@ -6,15 +6,15 @@
 //! - `stop_backend`: gracefully stop a backend
 //! - `run_benchmark`: orchestrate benchmark runs
 
-use anyhow::{Context, Result};
 use std::time::Instant;
+
+use anyhow::{anyhow, Context, Result};
 use tokio::process::Command;
+use tracing::info;
 
 use crate::bench::{compute_summary, BenchConfig, BenchReport, BenchSummary, ModelInfo};
 use crate::config::Config;
-use crate::proxy::process::check_health;
-use crate::proxy::process::{force_kill_process, is_process_alive, kill_process};
-use tracing::info;
+use crate::proxy::process::{check_health, force_kill_process, is_process_alive, kill_process};
 
 /// Information about a running backend
 struct BenchBackend {
@@ -86,7 +86,7 @@ async fn start_backend(
 
     let pid = child
         .id()
-        .ok_or_else(|| anyhow::anyhow!("Failed to get backend PID"))?;
+        .ok_or_else(|| anyhow!("Failed to get backend PID"))?;
 
     // Spawn reaper task
     tokio::spawn(async move {
@@ -100,6 +100,15 @@ async fn start_backend(
     while start.elapsed() < timeout {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
+        // Fail fast if the process died before becoming healthy
+        if !is_process_alive(pid) {
+            return Err(anyhow!(
+                "Backend '{}' (pid {}) exited before becoming healthy",
+                server_name,
+                pid
+            ));
+        }
+
         if let Ok(response) = check_health(&health_url, Some(30)).await {
             if response.status().is_success() {
                 info!("Backend '{}' is healthy", server_name);
@@ -112,7 +121,7 @@ async fn start_backend(
 
     if start.elapsed() >= timeout {
         let _ = kill_process(pid).await;
-        return Err(anyhow::anyhow!(
+        return Err(anyhow!(
             "Backend '{}' failed to become healthy after {}s",
             server_name,
             timeout.as_secs()
@@ -171,7 +180,7 @@ pub async fn run_benchmark(
         quant: server_config.quant.clone(),
         backend: server_config.backend.clone(),
         gpu_type: detect_gpu_type(&backend_config.path, crate::gpu::query_vram().is_some()),
-        context_length: server_config.context_length,
+        context_length: bench_config.ctx_override.or(server_config.context_length),
         gpu_layers: extract_gpu_layers(&server_config.args),
     };
 
@@ -180,11 +189,10 @@ pub async fn run_benchmark(
 
     println!("Backend loaded in {:.0} ms", backend.load_time_ms);
 
-    // Run inner benchmark logic
-    let summaries = run_benchmark_inner(&backend, bench_config).await;
-
-    // Stop backend (don't propagate errors over measurement errors)
+    // Run inner benchmark logic — always stop backend regardless of outcome
+    let inner_result = run_benchmark_inner(&backend, bench_config).await;
     stop_backend(&backend).await.ok();
+    let summaries = inner_result?;
 
     Ok(BenchReport {
         model_info,
@@ -199,7 +207,7 @@ pub async fn run_benchmark(
 async fn run_benchmark_inner(
     backend: &BenchBackend,
     bench_config: &BenchConfig,
-) -> Vec<BenchSummary> {
+) -> Result<Vec<BenchSummary>> {
     let mut summaries = Vec::new();
 
     // For each pp_size × tg_size combination
@@ -228,12 +236,20 @@ async fn run_benchmark_inner(
                 }
             }
 
+            if measurements.is_empty() {
+                return Err(anyhow!(
+                    "All {} measurement run(s) failed for {} — no results to summarize",
+                    bench_config.runs,
+                    test_name
+                ));
+            }
+
             let summary = compute_summary(&test_name, pp_size, tg_size, &measurements);
             summaries.push(summary);
         }
     }
 
-    summaries
+    Ok(summaries)
 }
 
 /// Override a CLI flag's value in an argument list
@@ -254,24 +270,28 @@ fn override_arg(args: &mut Vec<String>, flag: &str, value: &str) {
 mod tests {
     use super::*;
 
+    /// Verifies that a backend binary path containing "cuda" is detected as CUDA.
     #[test]
     fn test_gpu_type_from_path_cuda() {
         let result = detect_gpu_type("llama-server-cuda", false);
         assert_eq!(result, "CUDA");
     }
 
+    /// Verifies that a backend binary path containing "vulkan" is detected as Vulkan.
     #[test]
     fn test_gpu_type_from_path_vulkan() {
         let result = detect_gpu_type("llama-server-vulkan", false);
         assert_eq!(result, "Vulkan");
     }
 
+    /// Verifies that an unrecognised backend path without NVIDIA presence defaults to CPU.
     #[test]
     fn test_gpu_type_from_path_default() {
         let result = detect_gpu_type("llama-server", false);
         assert_eq!(result, "CPU");
     }
 
+    /// Verifies that `extract_gpu_layers` returns the value following "-ngl" in the args list.
     #[test]
     fn test_extract_gpu_layers_some() {
         let args = vec![
@@ -284,6 +304,7 @@ mod tests {
         assert_eq!(result, Some("99".to_string()));
     }
 
+    /// Verifies that `extract_gpu_layers` returns `None` when "-ngl" is absent from the args list.
     #[test]
     fn test_extract_gpu_layers_none() {
         let args = vec!["-m".to_string(), "model.gguf".to_string()];

@@ -8,7 +8,11 @@ use kronk_core::config::Config;
 
 /// Parse comma-separated sizes into a Vec<u32>
 pub fn parse_comma_sizes(s: &str) -> Result<Vec<u32>> {
-    let parts: Vec<&str> = s.split(',').map(|p| p.trim()).collect();
+    let parts: Vec<&str> = s
+        .split(',')
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .collect();
 
     if parts.is_empty() {
         bail!("At least one size must be specified");
