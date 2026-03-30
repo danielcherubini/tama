@@ -186,6 +186,19 @@ impl ProxyState {
             }
         }
 
+        // Write to DB after model is ready (best-effort)
+        if let Some(conn) = self.open_db() {
+            let _ = crate::db::queries::insert_active_model(
+                &conn,
+                &server_name,
+                model_name,
+                &server_config.backend,
+                pid as i64,
+                port as i64,
+                &backend_url,
+            );
+        }
+
         info!("Server '{}' loaded successfully", server_name);
         self.metrics
             .models_loaded
@@ -248,6 +261,11 @@ impl ProxyState {
         let mut models = self.models.write().await;
         models.remove(server_name);
 
+        // Write to DB after model is unloaded (best-effort)
+        if let Some(conn) = self.open_db() {
+            let _ = crate::db::queries::remove_active_model(&conn, &server_name);
+        }
+
         info!("Server '{}' unloaded", server_name);
         self.metrics
             .models_unloaded
@@ -309,5 +327,36 @@ impl ProxyState {
 
         to_unload.extend(failed_to_remove);
         to_unload
+    }
+
+    /// Cleanup stale process entries from the database.
+    fn cleanup_stale_processes(state: &ProxyState) {
+        if let Some(conn) = state.open_db() {
+            if let Ok(active) = crate::db::queries::get_active_models(&conn) {
+                for entry in &active {
+                    let pid = entry.pid as u32;
+                    if !is_process_alive(pid) {
+                        tracing::info!(
+                            "Cleaning up stale process entry: {} (pid {})",
+                            entry.server_name,
+                            pid
+                        );
+                        let _ = crate::db::queries::remove_active_model(&conn, &entry.server_name);
+                    } else {
+                        tracing::warn!(
+                            "Orphaned backend process detected: {} (pid {}). Killing.",
+                            entry.server_name,
+                            pid
+                        );
+                        let _ = std::process::Command::new("kill")
+                            .arg(pid.to_string())
+                            .status();
+                        let _ = crate::db::queries::remove_active_model(&conn, &entry.server_name);
+                    }
+                }
+            }
+            // Clear any remaining entries to start fresh
+            let _ = crate::db::queries::clear_active_models(&conn);
+        }
     }
 }

@@ -58,7 +58,21 @@ async fn start_proxy_server(
     tracing::info!("Starting Kronk on {}", addr);
     tracing::info!("Idle timeout: {}s", idle_timeout);
 
-    let state = Arc::new(ProxyState::new(updated_config));
+    let db_dir = kronk_core::config::Config::config_dir().ok();
+    // Trigger backfill if DB is fresh
+    if let Some(ref dir) = db_dir {
+        if let Ok(db_result) = kronk_core::db::open(dir) {
+            if db_result.needs_backfill {
+                tracing::info!("Running initial backfill...");
+                let _ = kronk_core::db::backfill::run_initial_backfill(
+                    &db_result.conn,
+                    &updated_config,
+                )
+                .await;
+            }
+        }
+    }
+    let state = Arc::new(ProxyState::new(updated_config, db_dir));
 
     // Create and run proxy server
     let server = ProxyServer::new(state.clone());
