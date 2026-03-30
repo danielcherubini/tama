@@ -268,7 +268,7 @@ pub async fn refresh_metadata(conn: &Connection, repo_id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{open_in_memory, queries};
+    use crate::db::{open_in_memory, OpenResult};
 
     fn make_file_record(
         filename: &str,
@@ -448,7 +448,7 @@ mod tests {
     /// when the in-memory DB contains no pull record for the given repo.
     #[tokio::test]
     async fn test_check_no_prior_record() {
-        let conn = open_in_memory().unwrap();
+        let OpenResult { conn, .. } = open_in_memory().unwrap();
         let result = check_for_updates(&conn, "test/repo")
             .await
             .expect("check_for_updates should not fail for an empty DB");
