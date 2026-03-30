@@ -27,7 +27,7 @@ use crate::models::pull::{self, BlobInfo};
 // ---------------------------------------------------------------------------
 
 /// Result of checking a single model for updates.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UpdateCheckResult {
     pub repo_id: String,
     pub status: UpdateStatus,
@@ -35,7 +35,7 @@ pub struct UpdateCheckResult {
 }
 
 /// High-level update status for a model.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UpdateStatus {
     /// No stored metadata — model was pulled before DB existed
     NoPriorRecord,
@@ -52,7 +52,7 @@ pub enum UpdateStatus {
 }
 
 /// Per-file update status.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileUpdateInfo {
     pub filename: String,
     pub quant: Option<String>,
@@ -62,7 +62,7 @@ pub struct FileUpdateInfo {
 }
 
 /// Status of an individual file compared to remote.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum FileStatus {
     Unchanged,
     /// LFS SHA256 changed
@@ -95,14 +95,13 @@ pub async fn check_for_updates(conn: &Connection, repo_id: &str) -> Result<Updat
     let file_records = get_model_files(conn, repo_id)?;
 
     // Step 2: handle no prior record
-    if pull_record.is_none() {
+    let Some(pull_record) = pull_record else {
         return Ok(UpdateCheckResult {
             repo_id: repo_id.to_string(),
             status: UpdateStatus::NoPriorRecord,
             file_updates: vec![],
         });
-    }
-    let pull_record = pull_record.unwrap();
+    };
 
     // Step 3: ASYNC — fetch remote state (conn not referenced after this point)
     let remote_listing = match pull::list_gguf_files(repo_id).await {
@@ -295,6 +294,8 @@ mod tests {
         }
     }
 
+    /// Verifies `compare_files` returns `FileStatus::Unchanged` when local and
+    /// remote entries share the same filename, size, and LFS hash.
     #[test]
     fn test_compare_files_unchanged() {
         let local = vec![make_file_record("model.gguf", Some("sha_abc"), Some(1000))];
@@ -309,6 +310,8 @@ mod tests {
         assert!(matches!(result[0].status, FileStatus::Unchanged));
     }
 
+    /// Verifies `compare_files` returns `FileStatus::Changed` with the old and new
+    /// OIDs when the remote LFS hash differs from the locally stored one.
     #[test]
     fn test_compare_files_changed() {
         let local = vec![make_file_record("model.gguf", Some("sha_old"), Some(1000))];
@@ -331,6 +334,8 @@ mod tests {
         assert_eq!(result[0].remote_size, Some(1100));
     }
 
+    /// Verifies `compare_files` returns `FileStatus::NewRemote` for a GGUF that
+    /// exists on the remote but has no corresponding local record.
     #[test]
     fn test_compare_files_new_remote() {
         let local: Vec<ModelFileRecord> = vec![];
@@ -346,6 +351,8 @@ mod tests {
         assert_eq!(result[0].filename, "model-new.gguf");
     }
 
+    /// Verifies `compare_files` returns `FileStatus::RemovedFromRemote` for a
+    /// locally tracked file that is absent from the remote blob map.
     #[test]
     fn test_compare_files_removed() {
         let local = vec![make_file_record(
@@ -360,6 +367,8 @@ mod tests {
         assert!(matches!(result[0].status, FileStatus::RemovedFromRemote));
     }
 
+    /// Verifies `compare_files` returns `FileStatus::Unknown` when the local record
+    /// has no stored LFS hash (e.g. pulled before the DB existed).
     #[test]
     fn test_compare_files_unknown() {
         // Local file has no lfs_oid (legacy pull)
@@ -375,6 +384,8 @@ mod tests {
         assert!(matches!(result[0].status, FileStatus::Unknown));
     }
 
+    /// Verifies `compare_files` handles all `FileStatus` variants in a single call:
+    /// Unchanged, Changed, RemovedFromRemote, NewRemote, and Unknown.
     #[test]
     fn test_compare_files_mixed() {
         let local = vec![
@@ -433,13 +444,18 @@ mod tests {
         assert!(matches!(unknown.status, FileStatus::Unknown));
     }
 
-    #[test]
-    fn test_check_no_prior_record() {
-        // Uses in-memory DB with no data — should return NoPriorRecord
+    /// Verifies that `check_for_updates` returns `UpdateStatus::NoPriorRecord`
+    /// when the in-memory DB contains no pull record for the given repo.
+    #[tokio::test]
+    async fn test_check_no_prior_record() {
         let conn = open_in_memory().unwrap();
-        // We can't call the async function directly in a sync test,
-        // so we test the sync DB path by checking the query directly.
-        let result = queries::get_model_pull(&conn, "test/repo").unwrap();
-        assert!(result.is_none(), "expected no prior record in empty DB");
+        let result = check_for_updates(&conn, "test/repo")
+            .await
+            .expect("check_for_updates should not fail for an empty DB");
+        assert!(
+            matches!(result.status, UpdateStatus::NoPriorRecord),
+            "expected NoPriorRecord, got {:?}",
+            result.status
+        );
     }
 }

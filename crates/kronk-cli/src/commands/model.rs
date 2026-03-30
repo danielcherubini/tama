@@ -722,6 +722,9 @@ async fn cmd_update(
             update::UpdateStatus::RepoChangedFilesUnchanged => {
                 "Repo changed, files unchanged".to_string()
             }
+            update::UpdateStatus::VerificationFailed => {
+                "Verification failed (no stored hashes — run with --refresh)".to_string()
+            }
             update::UpdateStatus::CheckFailed(msg) => format!("Check failed: {}", msg),
         };
         println!("  Status: {}", status_label);
