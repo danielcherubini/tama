@@ -2,6 +2,7 @@
 //!
 //! Provides connection helpers and automatic migration system.
 
+pub mod backfill;
 pub mod migrations;
 pub mod queries;
 
