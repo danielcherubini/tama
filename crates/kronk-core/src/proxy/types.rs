@@ -134,4 +134,15 @@ pub struct ProxyState {
     pub models: Arc<tokio::sync::RwLock<std::collections::HashMap<String, ModelState>>>,
     pub client: reqwest::Client,
     pub metrics: Arc<ProxyMetrics>,
+    pub db_dir: Option<std::path::PathBuf>,
+}
+
+impl ProxyState {
+    /// Open a DB connection for a quick sync operation.
+    /// Returns None if db_dir is not configured (e.g., in tests).
+    pub fn open_db(&self) -> Option<rusqlite::Connection> {
+        self.db_dir
+            .as_ref()
+            .and_then(|dir| crate::db::open(dir).ok().map(|r| r.conn))
+    }
 }

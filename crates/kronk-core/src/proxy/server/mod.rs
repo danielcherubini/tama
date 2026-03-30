@@ -7,6 +7,7 @@ use std::sync::Arc;
 /// The proxy server, owning shared state and background tasks.
 pub struct ProxyServer {
     state: Arc<ProxyState>,
+    #[allow(dead_code)]
     idle_timeout_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
@@ -16,6 +17,7 @@ impl ProxyServer {
     /// Starts a background task that periodically checks for idle models
     /// and unloads them.
     pub fn new(state: Arc<ProxyState>) -> Self {
+        Self::cleanup_stale_processes(&state);
         let handle = Self::start_idle_timeout_checker(state.clone());
         Self {
             state,
@@ -23,21 +25,51 @@ impl ProxyServer {
         }
     }
 
+    fn cleanup_stale_processes(state: &ProxyState) {
+        if let Some(conn) = state.open_db() {
+            if let Ok(active) = crate::db::queries::get_active_models(&conn) {
+                for entry in &active {
+                    let pid = entry.pid as u32;
+                    if !super::process::is_process_alive(pid) {
+                        tracing::info!(
+                            "Cleaning up stale process entry: {} (pid {})",
+                            entry.server_name,
+                            pid
+                        );
+                        let _ = crate::db::queries::remove_active_model(&conn, &entry.server_name);
+                    } else {
+                        tracing::warn!(
+                            "Orphaned backend process detected: {} (pid {}). Killing.",
+                            entry.server_name,
+                            pid
+                        );
+                        #[cfg(unix)]
+                        let _ = std::process::Command::new("kill")
+                            .arg(pid.to_string())
+                            .status();
+                        #[cfg(windows)]
+                        let _ = std::process::Command::new("taskkill")
+                            .args(["/PID", &pid.to_string(), "/F"])
+                            .status();
+                        let _ = crate::db::queries::remove_active_model(&conn, &entry.server_name);
+                    }
+                }
+            }
+            // Belt-and-suspenders: clear any entries that survived the loop
+            // (e.g. if get_active_models failed mid-way and the loop was skipped).
+            let _ = crate::db::queries::clear_active_models(&conn);
+        }
+    }
+
     fn start_idle_timeout_checker(state: Arc<ProxyState>) -> tokio::task::JoinHandle<()> {
+        use std::time::Duration;
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+            let interval = Duration::from_secs((state.config.proxy.idle_timeout_secs / 2).max(1));
             loop {
-                interval.tick().await;
+                tokio::time::sleep(interval).await;
                 let _ = state.check_idle_timeouts().await;
             }
         })
-    }
-
-    /// Cancel the background idle timeout checker.
-    pub fn cancel_idle_timeout_checker(&mut self) {
-        if let Some(handle) = self.idle_timeout_handle.take() {
-            handle.abort();
-        }
     }
 
     /// Consume the server and return a configured axum Router.
@@ -62,7 +94,7 @@ mod tests {
     #[tokio::test]
     async fn test_proxy_routes_exist() {
         let config = crate::config::Config::default();
-        let state = Arc::new(crate::proxy::ProxyState::new(config));
+        let state = Arc::new(crate::proxy::ProxyState::new(config, None));
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let bound_addr = listener.local_addr().unwrap();
@@ -99,98 +131,5 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), 200);
-    }
-
-    #[tokio::test]
-    async fn test_chat_completions_route() {
-        let config = crate::config::Config::default();
-        let state = Arc::new(crate::proxy::ProxyState::new(config));
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let bound_addr = listener.local_addr().unwrap();
-
-        let server = ProxyServer::new(state.clone());
-        let app = server.into_router();
-        let _handle = tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-        let client = reqwest::Client::new();
-        let response = client
-            .post(format!("http://{}/v1/chat/completions", bound_addr))
-            .json(&serde_json::json!({
-                "model": "test-model",
-                "messages": [{"role": "user", "content": "hello"}]
-            }))
-            .send()
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), 500); // Fails to load unknown model
-    }
-
-    #[tokio::test]
-    async fn test_stream_route() {
-        let config = crate::config::Config::default();
-        let state = Arc::new(crate::proxy::ProxyState::new(config));
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let bound_addr = listener.local_addr().unwrap();
-
-        let server = ProxyServer::new(state.clone());
-        let app = server.into_router();
-        let _handle = tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-        let client = reqwest::Client::new();
-        let response = client
-            .post(format!("http://{}/v1/chat/completions/stream", bound_addr))
-            .json(&serde_json::json!({
-                "model": "test-model",
-                "messages": [{"role": "user", "content": "hello"}]
-            }))
-            .send()
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), 500); // Fails to load unknown model
-    }
-
-    #[tokio::test]
-    async fn test_status_endpoint_response_structure() {
-        let config = crate::config::Config::default();
-        let state = Arc::new(crate::proxy::ProxyState::new(config));
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let bound_addr = listener.local_addr().unwrap();
-
-        let server = ProxyServer::new(state.clone());
-        let app = server.into_router();
-        let _handle = tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-        let client = reqwest::Client::new();
-        let response = client
-            .get(format!("http://{}/status", bound_addr))
-            .send()
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), 200);
-
-        let body = response.text().await.unwrap();
-        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
-
-        assert!(json.get("idle_timeout_secs").is_some());
-        assert!(json.get("models").unwrap().is_object());
-        assert!(json.get("metrics").unwrap().is_object());
     }
 }

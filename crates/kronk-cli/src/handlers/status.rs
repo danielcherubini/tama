@@ -57,6 +57,10 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
                     .get("loaded")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
+                let backend_pid = model
+                    .get("backend_pid")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32);
 
                 let loaded_str = if loaded {
                     let last_accessed = model
@@ -67,11 +71,20 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
                         .get("idle_timeout_remaining_secs")
                         .and_then(|v| v.as_u64())
                         .unwrap_or(0);
-                    format!(
-                        "true (idle: {}s ago, unloads in {})",
-                        last_accessed,
-                        format_duration_secs(remaining),
-                    )
+                    if let Some(pid) = backend_pid {
+                        format!(
+                            "true (pid: {}, idle: {}s ago, unloads in {})",
+                            pid,
+                            last_accessed,
+                            format_duration_secs(remaining),
+                        )
+                    } else {
+                        format!(
+                            "true (idle: {}s ago, unloads in {})",
+                            last_accessed,
+                            format_duration_secs(remaining),
+                        )
+                    }
                 } else {
                     "false".to_string()
                 };
@@ -94,7 +107,29 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
             println!("  VRAM:     {} / {} MiB", vram.used_mib, vram.total_mib);
         }
 
+        // Query active_models from DB for fallback status
+        let db_active = Config::config_dir()
+            .ok()
+            .and_then(|dir| kronk_core::db::open(&dir).ok())
+            .and_then(|r| kronk_core::db::queries::get_active_models(&r.conn).ok())
+            .unwrap_or_default();
+
         for (name, srv) in &config.models {
+            // Check if there's an active DB entry for this model
+            let db_entry = db_active.iter().find(|m| m.server_name == *name);
+
+            let loaded_str = match db_entry {
+                Some(active) => {
+                    let pid = active.pid;
+                    if kronk_core::proxy::process::is_process_alive(pid as u32) {
+                        format!("true (pid: {}, port: {})", pid, active.port)
+                    } else {
+                        format!("false (stale — pid {} no longer running)", pid)
+                    }
+                }
+                None => "false".to_string(),
+            };
+
             let backend_path = config
                 .backends
                 .get(&srv.backend)
@@ -116,7 +151,7 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
                 println!("  Context:  {}", ctx);
             }
             println!("  Backend:  {} ({})", srv.backend, backend_path);
-            println!("  Loaded:   proxy not running");
+            println!("  Loaded:   {}", loaded_str);
         }
     }
 

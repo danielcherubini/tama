@@ -24,7 +24,7 @@ mod tests {
     #[tokio::test]
     async fn test_proxy_state_new() {
         let config = Config::default();
-        let state = ProxyState::new(config.clone());
+        let state = ProxyState::new(config.clone(), None);
         assert!(state.models.read().await.is_empty());
         assert_eq!(
             state.config.proxy.idle_timeout_secs,
@@ -35,7 +35,7 @@ mod tests {
     #[tokio::test]
     async fn test_no_available_server_for_unknown_model() {
         let config = Config::default();
-        let state = ProxyState::new(config);
+        let state = ProxyState::new(config, None);
         let result = state.get_available_server_for_model("nonexistent").await;
         assert!(result.is_none());
     }
@@ -43,7 +43,7 @@ mod tests {
     #[tokio::test]
     async fn test_build_status_response() {
         let config = Config::default();
-        let state = ProxyState::new(config);
+        let state = ProxyState::new(config, None);
 
         let response = state.build_status_response().await;
 
@@ -65,7 +65,7 @@ mod tests {
     #[tokio::test]
     async fn test_build_status_response_model_fields() {
         let config = Config::default();
-        let state = ProxyState::new(config);
+        let state = ProxyState::new(config, None);
 
         let response = state.build_status_response().await;
 

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use super::types::{ModelState, ProxyMetrics, ProxyState};
 
 impl ProxyState {
-    pub fn new(config: crate::config::Config) -> Self {
+    pub fn new(config: crate::config::Config, db_dir: Option<std::path::PathBuf>) -> Self {
         let config_clone = config.clone();
         Self {
             config,
@@ -19,6 +19,7 @@ impl ProxyState {
                 // which is not recoverable — panic is acceptable here.
                 .expect("failed to build HTTP client"),
             metrics: Arc::new(ProxyMetrics::default()),
+            db_dir,
         }
     }
 

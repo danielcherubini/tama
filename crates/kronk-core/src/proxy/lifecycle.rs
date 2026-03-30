@@ -176,7 +176,7 @@ impl ProxyState {
                         model_name: model_name.to_string(),
                         backend: server_config.backend.clone(),
                         backend_pid: pid,
-                        backend_url,
+                        backend_url: backend_url.clone(),
                         load_time: std::time::SystemTime::now(),
                         last_accessed: Instant::now(),
                         consecutive_failures: cf,
@@ -184,6 +184,19 @@ impl ProxyState {
                     };
                 }
             }
+        }
+
+        // Write to DB after model is ready (best-effort)
+        if let Some(conn) = self.open_db() {
+            let _ = crate::db::queries::insert_active_model(
+                &conn,
+                &server_name,
+                model_name,
+                &server_config.backend,
+                pid as i64,
+                port as i64,
+                &backend_url,
+            );
         }
 
         info!("Server '{}' loaded successfully", server_name);
@@ -247,6 +260,11 @@ impl ProxyState {
         // Remove from models
         let mut models = self.models.write().await;
         models.remove(server_name);
+
+        // Write to DB after model is unloaded (best-effort)
+        if let Some(conn) = self.open_db() {
+            let _ = crate::db::queries::remove_active_model(&conn, server_name);
+        }
 
         info!("Server '{}' unloaded", server_name);
         self.metrics
