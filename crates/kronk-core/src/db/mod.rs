@@ -3,6 +3,7 @@
 //! Provides connection helpers and automatic migration system.
 
 pub mod migrations;
+pub mod queries;
 
 use std::path::Path;
 

@@ -8,6 +8,63 @@ use std::path::PathBuf;
 
 use crate::cli::ModelCommands;
 
+/// Return a naive ISO 8601 UTC timestamp for DB logging.
+fn chrono_or_manual_timestamp() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let (y, mo, d, h, mi, s) = secs_to_datetime(secs);
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.000Z",
+        y, mo, d, h, mi, s
+    )
+}
+
+/// Convert Unix seconds to (year, month, day, hour, min, sec) UTC.
+fn secs_to_datetime(secs: u64) -> (u64, u64, u64, u64, u64, u64) {
+    let sec = secs % 60;
+    let min = (secs / 60) % 60;
+    let hour = (secs / 3600) % 24;
+    let days = secs / 86400;
+    let mut year = 1970u64;
+    let mut remaining = days;
+    loop {
+        let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+        let days_in_year = if leap { 366 } else { 365 };
+        if remaining < days_in_year {
+            break;
+        }
+        remaining -= days_in_year;
+        year += 1;
+    }
+    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    let days_in_months: [u64; 12] = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    let mut month = 1u64;
+    for &dim in &days_in_months {
+        if remaining < dim {
+            break;
+        }
+        remaining -= dim;
+        month += 1;
+    }
+    (year, month, remaining + 1, hour, min, sec)
+}
+
 /// Generate a unique key for a quant entry, avoiding collisions in the map.
 /// If `base_key` is already taken, appends the filename stem as a suffix.
 fn unique_quant_key(quants: &HashMap<String, QuantInfo>, base_key: &str, filename: &str) -> String {
@@ -64,14 +121,15 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
     println!();
     println!("  Fetching file list from {}...", repo_id);
 
-    let (resolved_repo, ggufs) = pull::list_gguf_files(repo_id).await?;
+    let listing = pull::list_gguf_files(repo_id).await?;
 
-    if resolved_repo != repo_id {
-        println!("  Resolved to: {}", resolved_repo);
+    if listing.repo_id != repo_id {
+        println!("  Resolved to: {}", listing.repo_id);
     }
 
     // Use the resolved repo_id for all subsequent operations
-    let repo_id = &resolved_repo;
+    let repo_id = &listing.repo_id;
+    let ggufs = &listing.files;
 
     let options: Vec<String> = ggufs
         .iter()
@@ -153,6 +211,14 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
         }
     };
 
+    // Track successful downloads for DB recording
+    struct DownloadedFile {
+        filename: String,
+        quant: Option<String>,
+        size_bytes: u64,
+    }
+    let mut downloaded_files: Vec<DownloadedFile> = Vec::new();
+
     for display_str in &selected {
         let idx = options.iter().position(|o| o == display_str).unwrap();
         let gguf = &ggufs[idx];
@@ -173,6 +239,12 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
                 context_length: None,
             },
         );
+
+        downloaded_files.push(DownloadedFile {
+            filename: gguf.filename.clone(),
+            quant: gguf.quant.clone(),
+            size_bytes: result.size_bytes,
+        });
 
         println!("  Downloaded: {}", result.path.display());
     }
@@ -255,6 +327,79 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
     }
 
     println!("  Context: {} tokens", selected_ctx);
+
+    // Record metadata in DB (all sync, after all async downloads are complete)
+    let db_record_result: anyhow::Result<()> = (|| {
+        let db_dir = kronk_core::config::Config::config_dir()?;
+        let conn = kronk_core::db::open(&db_dir)?;
+
+        // Fetch per-file blob metadata using hf_hub's authenticated client
+        // (called async before this block, but we'll do it synchronously here via a block_in_place
+        //  or — since we're still in async context — we can't call async here).
+        // Instead, record what we know (size, quant) without LFS OIDs for now.
+        // The blob metadata fetch happens separately in fetch_blob_metadata().
+        kronk_core::db::queries::upsert_model_pull(&conn, repo_id, &listing.commit_sha)?;
+
+        let now = chrono_or_manual_timestamp();
+        for df in &downloaded_files {
+            kronk_core::db::queries::upsert_model_file(
+                &conn,
+                repo_id,
+                &df.filename,
+                df.quant.as_deref(),
+                None, // lfs_oid: fetched separately below
+                Some(df.size_bytes as i64),
+            )?;
+            kronk_core::db::queries::log_download(
+                &conn,
+                &kronk_core::db::queries::DownloadLogEntry {
+                    repo_id: repo_id.to_string(),
+                    filename: df.filename.clone(),
+                    started_at: now.clone(),
+                    completed_at: Some(now.clone()),
+                    size_bytes: Some(df.size_bytes as i64),
+                    duration_ms: None,
+                    success: true,
+                    error_message: None,
+                },
+            )?;
+        }
+        Ok(())
+    })();
+    if let Err(e) = db_record_result {
+        tracing::warn!("Failed to record pull metadata in DB (non-fatal): {}", e);
+    }
+
+    // Fetch and store LFS blob metadata (best-effort, non-fatal)
+    {
+        match pull::fetch_blob_metadata(repo_id).await {
+            Ok(blobs) => {
+                let db_blob_result: anyhow::Result<()> = (|| {
+                    let db_dir = kronk_core::config::Config::config_dir()?;
+                    let conn = kronk_core::db::open(&db_dir)?;
+                    for df in &downloaded_files {
+                        if let Some(blob) = blobs.get(&df.filename) {
+                            kronk_core::db::queries::upsert_model_file(
+                                &conn,
+                                repo_id,
+                                &df.filename,
+                                df.quant.as_deref(),
+                                blob.lfs_sha256.as_deref(),
+                                blob.size,
+                            )?;
+                        }
+                    }
+                    Ok(())
+                })();
+                if let Err(e) = db_blob_result {
+                    tracing::warn!("Failed to store LFS blob metadata (non-fatal): {}", e);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to fetch blob metadata (non-fatal): {}", e);
+            }
+        }
+    }
 
     card.save(&card_path)?;
 

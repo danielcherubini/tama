@@ -64,9 +64,9 @@ pub fn run(conn: &Connection) -> anyhow::Result<()> {
         conn.pragma_query_value::<i32, _>(None, "user_version", |row| row.get(0))?;
 
     for (version, sql) in migrations {
-        if *version as i32 > current_version {
+        if *version > current_version {
             conn.execute_batch(sql)?;
-            conn.execute("PRAGMA user_version = ?", (version,))?;
+            conn.execute_batch(&format!("PRAGMA user_version = {version};"))?;
             tracing::debug!("Applied migration to version {}", version);
         }
     }
