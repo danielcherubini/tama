@@ -97,7 +97,7 @@ mod tests {
         let conn = open_in_memory().unwrap();
 
         let version: i32 = conn
-            .pragma_query_value(None, "user_version", |_| 0)
+            .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
         assert_eq!(version, migrations::LATEST_VERSION);
     }

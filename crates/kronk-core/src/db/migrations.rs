@@ -60,9 +60,8 @@ pub fn run(conn: &Connection) -> anyhow::Result<()> {
             "#,
     )];
 
-    let current_version: i32 = conn
-        .pragma_query_value(None, "user_version", |_| 0)?
-        .unwrap_or(0);
+    let current_version: i32 =
+        conn.pragma_query_value::<i32, _>(None, "user_version", |row| row.get(0))?;
 
     for (version, sql) in migrations {
         if *version as i32 > current_version {
