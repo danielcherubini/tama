@@ -245,7 +245,7 @@ pub fn touch_active_model(conn: &Connection, server_name: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::open_in_memory;
+    use crate::db::{open_in_memory, OpenResult};
 
     #[test]
     fn test_upsert_and_get_model_pull() {
