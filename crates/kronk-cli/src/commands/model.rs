@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use kronk_core::config::Config;
+use kronk_core::db::OpenResult;
 use kronk_core::models::pull;
 use kronk_core::models::search::{self, SortBy};
 use kronk_core::models::{ModelCard, ModelMeta, ModelRegistry, QuantInfo};
