@@ -65,8 +65,12 @@ pub fn run(conn: &Connection) -> anyhow::Result<()> {
 
     for (version, sql) in migrations {
         if *version > current_version {
-            conn.execute_batch(sql)?;
-            conn.execute_batch(&format!("PRAGMA user_version = {version};"))?;
+            // Run each migration in its own transaction so a crash mid-migration
+            // leaves the DB in a consistent state (user_version only updates on commit).
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(sql)?;
+            tx.execute_batch(&format!("PRAGMA user_version = {version};"))?;
+            tx.commit()?;
             tracing::debug!("Applied migration to version {}", version);
         }
     }

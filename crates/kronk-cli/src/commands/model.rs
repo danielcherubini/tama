@@ -335,27 +335,41 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
 
     println!("  Context: {} tokens", selected_ctx);
 
-    // Record metadata in DB (all sync, after all async downloads are complete)
+    // Fetch LFS blob metadata (async, before opening DB)
+    let blobs = match pull::fetch_blob_metadata(repo_id).await {
+        Ok(b) => Some(b),
+        Err(e) => {
+            tracing::warn!("Failed to fetch blob metadata (non-fatal): {}", e);
+            None
+        }
+    };
+
+    // Record all pull metadata in DB (sync, single connection, after all async work)
     let db_record_result: anyhow::Result<()> = (|| {
         let db_dir = kronk_core::config::Config::config_dir()?;
         let conn = kronk_core::db::open(&db_dir)?;
 
-        // Fetch per-file blob metadata using hf_hub's authenticated client
-        // (called async before this block, but we'll do it synchronously here via a block_in_place
-        //  or — since we're still in async context — we can't call async here).
-        // Instead, record what we know (size, quant) without LFS OIDs for now.
-        // The blob metadata fetch happens separately in fetch_blob_metadata().
         kronk_core::db::queries::upsert_model_pull(&conn, repo_id, &listing.commit_sha)?;
 
         let now = chrono_or_manual_timestamp();
         for df in &downloaded_files {
+            let lfs_sha = blobs
+                .as_ref()
+                .and_then(|b| b.get(&df.filename))
+                .and_then(|b| b.lfs_sha256.as_deref());
+            let size = blobs
+                .as_ref()
+                .and_then(|b| b.get(&df.filename))
+                .and_then(|b| b.size)
+                .unwrap_or(df.size_bytes as i64);
+
             kronk_core::db::queries::upsert_model_file(
                 &conn,
                 repo_id,
                 &df.filename,
                 df.quant.as_deref(),
-                None, // lfs_oid: fetched separately below
-                Some(df.size_bytes as i64),
+                lfs_sha,
+                Some(size),
             )?;
             kronk_core::db::queries::log_download(
                 &conn,
@@ -375,37 +389,6 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
     })();
     if let Err(e) = db_record_result {
         tracing::warn!("Failed to record pull metadata in DB (non-fatal): {}", e);
-    }
-
-    // Fetch and store LFS blob metadata (best-effort, non-fatal)
-    {
-        match pull::fetch_blob_metadata(repo_id).await {
-            Ok(blobs) => {
-                let db_blob_result: anyhow::Result<()> = (|| {
-                    let db_dir = kronk_core::config::Config::config_dir()?;
-                    let conn = kronk_core::db::open(&db_dir)?;
-                    for df in &downloaded_files {
-                        if let Some(blob) = blobs.get(&df.filename) {
-                            kronk_core::db::queries::upsert_model_file(
-                                &conn,
-                                repo_id,
-                                &df.filename,
-                                df.quant.as_deref(),
-                                blob.lfs_sha256.as_deref(),
-                                blob.size,
-                            )?;
-                        }
-                    }
-                    Ok(())
-                })();
-                if let Err(e) = db_blob_result {
-                    tracing::warn!("Failed to store LFS blob metadata (non-fatal): {}", e);
-                }
-            }
-            Err(e) => {
-                tracing::warn!("Failed to fetch blob metadata (non-fatal): {}", e);
-            }
-        }
     }
 
     card.save(&card_path)?;
@@ -803,8 +786,14 @@ async fn cmd_update(
     for (result, model) in &models_to_update {
         let repo_id = &result.repo_id;
 
-        // Fetch fresh listing for current commit SHA
+        // Fetch fresh listing and blob metadata once per repo (not per file)
         let listing = kronk_core::models::pull::list_gguf_files(repo_id).await?;
+        let blobs = kronk_core::models::pull::fetch_blob_metadata(repo_id)
+            .await
+            .ok();
+
+        // Clone card once before the loop so all file updates are accumulated
+        let mut card = model.card.clone();
 
         for file_info in &result.file_updates {
             let should_download = matches!(
@@ -830,10 +819,7 @@ async fn cmd_update(
                 kronk_core::models::pull::download_gguf(repo_id, &file_info.filename, &model.dir)
                     .await?;
 
-            // Update DB
-            let blobs = kronk_core::models::pull::fetch_blob_metadata(repo_id)
-                .await
-                .ok();
+            // Update DB with blob metadata (fetched once above)
             let lfs_sha = blobs
                 .as_ref()
                 .and_then(|b| b.get(&file_info.filename))
@@ -863,18 +849,18 @@ async fn cmd_update(
                 },
             );
 
-            // Update size_bytes in the model card quants
-            // (find the quant entry with matching filename)
-            let mut card = model.card.clone();
+            // Accumulate size_bytes updates into the shared card clone
             for quant_info in card.quants.values_mut() {
                 if quant_info.file == file_info.filename {
                     quant_info.size_bytes = Some(dl.size_bytes);
                 }
             }
-            card.save(&model.card_path)?;
 
             println!("    Done: {}", dl.path.display());
         }
+
+        // Save card once after all files for this repo are processed
+        card.save(&model.card_path)?;
 
         // Update DB pull record with new commit SHA
         let _ = kronk_core::db::queries::upsert_model_pull(&conn, repo_id, &listing.commit_sha);

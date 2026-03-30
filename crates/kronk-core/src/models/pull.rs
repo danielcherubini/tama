@@ -125,6 +125,13 @@ pub async fn fetch_blob_metadata(repo_id: &str) -> Result<HashMap<String, BlobIn
         .send()
         .await
         .with_context(|| format!("Failed to fetch blob metadata for '{}'", repo_id))?
+        .error_for_status()
+        .with_context(|| {
+            format!(
+                "HuggingFace returned an error for blob metadata request for '{}'",
+                repo_id
+            )
+        })?
         .json::<serde_json::Value>()
         .await
         .with_context(|| format!("Failed to parse blob metadata response for '{}'", repo_id))?;
