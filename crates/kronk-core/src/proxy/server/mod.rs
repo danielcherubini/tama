@@ -43,8 +43,13 @@ impl ProxyServer {
                             entry.server_name,
                             pid
                         );
+                        #[cfg(unix)]
                         let _ = std::process::Command::new("kill")
                             .arg(pid.to_string())
+                            .status();
+                        #[cfg(windows)]
+                        let _ = std::process::Command::new("taskkill")
+                            .args(["/PID", &pid.to_string(), "/F"])
                             .status();
                         let _ = crate::db::queries::remove_active_model(&conn, &entry.server_name);
                     }

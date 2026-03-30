@@ -76,7 +76,6 @@ pub async fn run_initial_backfill(conn: &Connection, config: &Config) -> Result<
     Ok(())
 }
 
-/// Helper to convert Unix seconds to (year, month, day, hour, min, sec) UTC.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,7 +86,7 @@ mod tests {
     /// Test backfill with no models — should return Ok without error.
     #[tokio::test]
     async fn test_backfill_with_no_models() {
-        let (tmp, config) = setup_test_config();
+        let (_tmp, config) = setup_test_config();
 
         let OpenResult { conn, .. } = open_in_memory().unwrap();
 

@@ -425,14 +425,17 @@ mod tests {
 
     #[test]
     fn test_needs_backfill_false_on_existing_db() {
-        // Open twice - second time should return false
-        let OpenResult { conn, .. } = open_in_memory().unwrap();
-        // Manually set version to 2 to simulate existing DB
-        conn.execute_batch("PRAGMA user_version = 2;").unwrap();
-        drop(conn);
+        // Use a real file so the DB persists between two opens
+        let tmp = tempfile::tempdir().unwrap();
+        let first = crate::db::open(tmp.path()).unwrap();
+        assert!(first.needs_backfill, "first open should need backfill");
+        drop(first.conn);
 
-        // Open again - should detect existing DB
-        // Note: This test is simplified - in practice the DB file would persist
+        let second = crate::db::open(tmp.path()).unwrap();
+        assert!(
+            !second.needs_backfill,
+            "second open should not need backfill"
+        );
     }
 
     #[test]

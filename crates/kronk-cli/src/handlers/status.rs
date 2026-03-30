@@ -109,7 +109,7 @@ pub async fn cmd_status(config: &Config) -> Result<()> {
 
         for (name, srv) in &config.models {
             // Check if there's an active DB entry for this model
-            let db_entry = db_active.iter().find(|m| m.model_name == *name);
+            let db_entry = db_active.iter().find(|m| m.server_name == *name);
 
             let loaded_str = match db_entry {
                 Some(active) => {
