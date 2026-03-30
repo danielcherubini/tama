@@ -250,7 +250,6 @@ async fn test_cmd_server_edit_valid_profile_succeeds() {
             port: None,
             health_check: None,
             enabled: true,
-            source: None,
             context_length: None,
         },
     );

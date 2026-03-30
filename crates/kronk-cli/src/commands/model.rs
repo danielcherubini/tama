@@ -551,7 +551,6 @@ async fn cmd_create(
             port: None,
             health_check: None,
             enabled: true,
-            source: Some(model_id_arg.to_string()),
             context_length: None,
         },
     );

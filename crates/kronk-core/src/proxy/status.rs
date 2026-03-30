@@ -52,7 +52,7 @@ impl ProxyState {
                     serde_json::json!({
                         "backend": model_config.backend,
                         "backend_path": backend_path,
-                        "source": model_config.source,
+                        "model": model_config.model,
                         "quant": model_config.quant,
                         "profile": model_config.profile.as_ref().map(|p| p.to_string()),
                         "context_length": model_config.context_length,
@@ -72,7 +72,7 @@ impl ProxyState {
                     serde_json::json!({
                         "backend": model_config.backend,
                         "backend_path": backend_path,
-                        "source": model_config.source,
+                        "model": model_config.model,
                         "quant": model_config.quant,
                         "profile": model_config.profile.as_ref().map(|p| p.to_string()),
                         "context_length": model_config.context_length,
@@ -90,7 +90,7 @@ impl ProxyState {
                     serde_json::json!({
                         "backend": model_config.backend,
                         "backend_path": backend_path,
-                        "source": model_config.source,
+                        "model": model_config.model,
                         "quant": model_config.quant,
                         "profile": model_config.profile.as_ref().map(|p| p.to_string()),
                         "context_length": model_config.context_length,

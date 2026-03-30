@@ -131,9 +131,6 @@ pub struct ModelConfig {
     pub health_check: Option<HealthCheck>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    /// Source identifier (e.g. "nvidia/Nemotron-Mini-4B-Instruct")
-    #[serde(default)]
-    pub source: Option<String>,
     /// Context length for this model
     #[serde(default)]
     pub context_length: Option<u32>,

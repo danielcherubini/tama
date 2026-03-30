@@ -137,7 +137,6 @@ pub async fn cmd_server_add(
         port: extracted.port,
         health_check: None,
         enabled: true,
-        source: model_info.as_ref().map(|m| m.card.model.source.clone()),
         context_length: extracted.context_length,
     };
 
@@ -152,8 +151,7 @@ pub async fn cmd_server_add(
 
     if let Some(ref model) = model_config.model {
         let quant = model_config.quant.as_deref().unwrap_or("?");
-        let source = model_config.source.as_deref().unwrap_or(model);
-        println!("  Model:    {} ({})", source, quant);
+        println!("  Model:    {} ({})", model, quant);
     }
 
     if let Some(ref profile) = model_config.profile {

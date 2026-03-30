@@ -26,7 +26,6 @@ pub async fn cmd_server_edit(config: &mut Config, name: &str, command: Vec<Strin
         // Selectively merge extracted flags into existing ModelConfig
         if let Some(ref model) = extracted.model {
             srv.model = Some(model.clone());
-            srv.source = Some(model.clone());
         }
         if let Some(ref quant) = extracted.quant {
             srv.quant = Some(quant.clone());
@@ -60,8 +59,7 @@ pub async fn cmd_server_edit(config: &mut Config, name: &str, command: Vec<Strin
 
     if let Some(ref model) = srv.model {
         let quant = srv.quant.as_deref().unwrap_or("?");
-        let source = srv.source.as_deref().unwrap_or(model);
-        println!("  Model:    {} ({})", source, quant);
+        println!("  Model:    {} ({})", model, quant);
     }
     if let Some(ref profile) = srv.profile {
         println!("  Profile:  {}", profile);
