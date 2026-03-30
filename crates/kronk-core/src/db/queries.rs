@@ -530,7 +530,7 @@ mod tests {
         .unwrap();
 
         let models = get_active_models(&conn).unwrap();
-        let loaded_at1 = models[0].loaded_at;
+        let loaded_at1 = models[0].loaded_at.clone();
 
         // Wait a bit to ensure different timestamp
         std::thread::sleep(std::time::Duration::from_millis(10));
