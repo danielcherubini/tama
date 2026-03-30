@@ -162,7 +162,6 @@ impl Default for Config {
                 port: None,
                 health_check: None,
                 enabled: true,
-                source: None,
                 context_length: None,
             },
         );
