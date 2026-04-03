@@ -8,7 +8,7 @@ info:
     local filesystem directly for log tailing and config editing.
 
     All endpoints are prefixed with `/api/`.
-  version: 1.7.2
+  version: 1.8.0
   license:
     name: MIT
 
