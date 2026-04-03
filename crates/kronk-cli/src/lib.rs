@@ -97,5 +97,12 @@ pub async fn main() -> Result<()> {
             let name = name.unwrap_or_else(|| "kronk".to_string());
             crate::handlers::logs::cmd_logs(&config, &name, follow, lines).await
         }
+        #[cfg(feature = "web-ui")]
+        Commands::Web {
+            port,
+            proxy_url,
+            logs_dir,
+            config_path,
+        } => handlers::web::cmd_web(port, proxy_url, logs_dir, config_path).await,
     }
 }

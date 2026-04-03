@@ -15,8 +15,13 @@ path = "src/main.rs"
 name = "tests"
 path = "tests/tests.rs"
 
+[features]
+default = ["web-ui"]
+web-ui = ["dep:kronk-web"]
+
 [dependencies]
 kronk-core = { path = "../kronk-core" }
+kronk-web = { path = "../kronk-web", features = ["ssr"], optional = true }
 tokio.workspace = true
 clap.workspace = true
 tracing.workspace = true

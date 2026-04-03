@@ -29,6 +29,26 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install trunk
+        uses: jetli/trunk-action@v0.5.0
+        with:
+          version: latest
+
+      - name: Build Leptos WASM frontend
+        working-directory: crates/kronk-web
+        run: trunk build --release
 
       - name: Build release
         run: cargo build --release
@@ -60,6 +80,26 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install trunk
+        uses: jetli/trunk-action@v0.5.0
+        with:
+          version: latest
+
+      - name: Build Leptos WASM frontend
+        working-directory: crates/kronk-web
+        run: trunk build --release
 
       - name: Build release
         run: cargo build --release
@@ -138,6 +178,7 @@ jobs:
             1. Edit your config: `kronk config edit`
             2. Set your backend path and model
             3. Install as a service (Windows): `kronk service install` (run as admin)
+            4. Open the web UI: http://localhost:11435
           files: |
             windows/**/*.exe
             linux/**/kronk
