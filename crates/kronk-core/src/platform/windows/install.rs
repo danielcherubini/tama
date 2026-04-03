@@ -184,6 +184,7 @@ pub fn install_proxy_service(config_dir: &std::path::Path, port: u16) -> Result<
         .context("Failed to create service — run as Administrator")?;
 
     super::firewall::add_firewall_rule(service_name, port).ok();
+    super::firewall::add_firewall_rule("kronk-web", 11435).ok();
     super::permissions::grant_user_control(service_name)
         .with_context(|| format!("Failed to set service permissions for '{}'", service_name))?;
 
