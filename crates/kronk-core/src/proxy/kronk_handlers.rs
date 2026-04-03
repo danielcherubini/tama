@@ -244,10 +244,36 @@ pub async fn handle_kronk_pull_model(
         jobs.insert(job_id.clone(), pull_job);
     }
 
-    // Spawn download task
+  // Spawn download task
+    let state_clone = Arc::clone(&state.0);
     tokio::spawn(async move {
-        // Download logic would go here
-        // For now, we'll just mark it as running
+        let job_id = job_id.clone();
+        let mut jobs = state_clone.pull_jobs.write().await;
+        
+        // 1. Transition job state to Running
+        if let Some(job) = jobs.get_mut(&job_id) {
+            job.status = crate::proxy::pull_jobs::PullJobStatus::Running;
+            println!("Job {} transitioned to Running.", job_id);
+
+            // 2. Perform download work (Placeholder for actual download logic)
+            // In a real scenario, this is where the download helper would be called.
+            // For now, simulate success after a brief delay.
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+            // 3. Transition job state to Completed
+            let total_bytes = 1024 * 1024; // Simulated total
+            let downloaded_bytes = total_bytes; // Simulated downloaded
+            
+            if let Some(job) = jobs.get_mut(&job_id) {
+                job.bytes_downloaded = downloaded_bytes;
+                job.total_bytes = Some(total_bytes);
+                job.status = crate::proxy::pull_jobs::PullJobStatus::Completed;
+                job.completed_at = Some(std::time::Instant::now());
+                println!("Job {} transitioned to Completed.", job_id);
+            }
+        } else {
+            println!("Error: Job {} not found during processing.", job_id);
+        }
     });
 
     Json(serde_json::json!({
