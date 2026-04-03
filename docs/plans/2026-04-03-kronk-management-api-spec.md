@@ -4,6 +4,18 @@
 **Status:** Draft  
 **Prefix:** `/kronk/v1/`
 
+## OpenAPI Specs
+
+The machine-readable OpenAPI 3.1.0 specs for all Kronk endpoints live in [`docs/openapi/`](../openapi/):
+
+| File | Covers |
+|---|---|
+| [`docs/openapi/kronk-api.yaml`](../openapi/kronk-api.yaml) | All `/kronk/v1/` management endpoints defined in this spec |
+| [`docs/openapi/openai-compat.yaml`](../openapi/openai-compat.yaml) | `/v1/` chat & model routes + `/health`, `/status`, `/metrics` |
+
+> **The OpenAPI specs are the authoritative request/response contract.** The endpoint descriptions
+> below document intent and implementation detail; the YAML files define the exact schemas.
+
 ---
 
 ## Background
