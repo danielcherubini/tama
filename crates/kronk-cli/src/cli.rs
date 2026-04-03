@@ -190,8 +190,6 @@ pub enum ModelCommands {
     },
     /// Create a model config from an installed model
     Create {
-        /// Config name to create
-        name: String,
         /// Model ID in "company/modelname" format
         #[arg(long)]
         model: String,
@@ -204,6 +202,9 @@ pub enum ModelCommands {
         /// Backend to use. Interactive picker if omitted and multiple exist.
         #[arg(long)]
         backend: Option<String>,
+        /// Config name to create (e.g. "gemma4-coding"). Prompted if omitted.
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Remove an installed model
     Rm {
