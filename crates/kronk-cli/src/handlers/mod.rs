@@ -11,3 +11,5 @@ pub mod serve;
 pub mod server;
 pub mod service_cmd;
 pub mod status;
+#[cfg(feature = "web-ui")]
+pub mod web;

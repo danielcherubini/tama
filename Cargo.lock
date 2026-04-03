@@ -1631,6 +1631,7 @@ dependencies = [
  "directories",
  "inquire",
  "kronk-core",
+ "kronk-web",
  "reqwest",
  "serde_json",
  "tempfile",

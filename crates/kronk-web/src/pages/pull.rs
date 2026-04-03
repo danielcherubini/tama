@@ -32,7 +32,7 @@ pub fn Pull() -> impl IntoView {
     // Poll job status when we have a job_id
     let poll_resource = LocalResource::new(move || async move {
         let _ = poll_trigger.get(); // track trigger
-        let Some(id) = job_id.get() else { return None };
+        let id = job_id.get()?;
         let resp = gloo_net::http::Request::get(&format!("/kronk/v1/pulls/{}", id))
             .send()
             .await

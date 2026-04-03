@@ -141,6 +141,22 @@ pub enum Commands {
         #[arg(short = 'n', long, default_value = "50")]
         lines: usize,
     },
+    /// Start the Kronk web control plane UI
+    #[cfg(feature = "web-ui")]
+    Web {
+        /// Port to listen on (default: 11435)
+        #[arg(long, default_value = "11435")]
+        port: u16,
+        /// Kronk proxy base URL (default: http://127.0.0.1:11434)
+        #[arg(long, default_value = "http://127.0.0.1:11434")]
+        proxy_url: String,
+        /// Directory containing Kronk log files
+        #[arg(long)]
+        logs_dir: Option<std::path::PathBuf>,
+        /// Path to Kronk config file
+        #[arg(long)]
+        config_path: Option<std::path::PathBuf>,
+    },
 }
 
 #[derive(Parser, Debug)]
