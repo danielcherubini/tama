@@ -11,8 +11,8 @@ struct SystemHealth {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct VramInfo {
-    used_mib: i64,
-    total_mib: i64,
+    used_mib: u64,
+    total_mib: u64,
 }
 
 #[component]
