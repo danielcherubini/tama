@@ -16,6 +16,7 @@ name = "tests"
 path = "tests/tests.rs"
 
 [features]
+default = ["web-ui"]
 web-ui = ["dep:kronk-web"]
 
 [dependencies]
