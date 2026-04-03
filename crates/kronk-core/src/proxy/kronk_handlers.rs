@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     extract::{Path, State},
     response::{IntoResponse, Response},
@@ -5,7 +7,6 @@ use axum::{
 };
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 use crate::proxy::{pull_jobs::PullJob, ProxyState};
 
@@ -248,37 +249,39 @@ pub async fn handle_kronk_pull_model(
     let job_id_for_task = job_id.clone();
     let state_clone = Arc::clone(&state.0);
 
-    // Spawn download task
+    // Spawn download task – hold the write lock only for short mutations,
+    // never across an await point.
     tokio::spawn(async move {
-        let mut jobs = state_clone.pull_jobs.write().await;
-
-        // 1. Transition job state to Running
-        if let Some(job) = jobs.get_mut(&job_id_for_task) {
-            job.status = crate::proxy::pull_jobs::PullJobStatus::Running;
-            println!("Job {} transitioned to Running.", job_id_for_task);
-
-            // 2. Perform download work (Placeholder for actual download logic)
-            // In a real scenario, this is where the download helper would be called.
-            // For now, simulate success after a brief delay.
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
-            // 3. Transition job state to Completed
-            let total_bytes: u64 = 1024 * 1024; // Simulated total
-            let downloaded_bytes = total_bytes; // Simulated downloaded
-
+        // 1. Transition job state to Running (short-lived lock, dropped immediately).
+        {
+            let mut jobs = state_clone.pull_jobs.write().await;
             if let Some(job) = jobs.get_mut(&job_id_for_task) {
-                job.bytes_downloaded = downloaded_bytes;
+                job.status = crate::proxy::pull_jobs::PullJobStatus::Running;
+                tracing::info!(job_id = %job_id_for_task, "Job transitioned to Running");
+            } else {
+                tracing::warn!(job_id = %job_id_for_task, "Job not found when setting Running");
+                return;
+            }
+        } // write lock dropped here
+
+        // 2. Perform download work (no lock held during the await).
+        // In a real scenario this is where the download helper would be called.
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        // 3. Transition job state to Completed (new short-lived lock).
+        let total_bytes: u64 = 1024 * 1024; // Simulated total
+        {
+            let mut jobs = state_clone.pull_jobs.write().await;
+            if let Some(job) = jobs.get_mut(&job_id_for_task) {
+                job.bytes_downloaded = total_bytes;
                 job.total_bytes = Some(total_bytes);
                 job.status = crate::proxy::pull_jobs::PullJobStatus::Completed;
                 job.completed_at = Some(std::time::Instant::now());
-                println!("Job {} transitioned to Completed.", job_id_for_task);
+                tracing::info!(job_id = %job_id_for_task, "Job transitioned to Completed");
+            } else {
+                tracing::warn!(job_id = %job_id_for_task, "Job not found when setting Completed");
             }
-        } else {
-            println!(
-                "Error: Job {} not found during processing.",
-                job_id_for_task
-            );
-        }
+        } // write lock dropped here
     });
 
     Json(serde_json::json!({
