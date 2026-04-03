@@ -130,39 +130,35 @@ pub async fn handle_kronk_load_model(
                 Ok(_) => {
                     // Check if model is now loaded
                     let model_state = state.get_model_state(&model_id).await;
-                    let loaded = model_state.as_ref().map_or(false, |ms| ms.is_ready());
-                    return Json(ModelResponse {
+                    let loaded = model_state.as_ref().is_some_and(|ms| ms.is_ready());
+                    Json(ModelResponse {
                         id: model_id,
                         loaded,
                     })
-                    .into_response();
+                    .into_response()
                 }
-                Err(e) => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({
-                            "error": {
-                                "message": format!("Failed to load model: {}", e),
-                                "type": "LoadModelError"
-                            }
-                        })),
-                    )
-                        .into_response();
-                }
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": {
+                            "message": format!("Failed to load model: {}", e),
+                            "type": "LoadModelError"
+                        }
+                    })),
+                )
+                    .into_response(),
             }
         }
-        None => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({
-                    "error": {
-                        "message": "Model not configured",
-                        "type": "NotFoundError"
-                    }
-                })),
-            )
-                .into_response();
-        }
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "error": {
+                    "message": "Model not configured",
+                    "type": "NotFoundError"
+                }
+            })),
+        )
+            .into_response(),
     }
 }
 
@@ -180,39 +176,35 @@ pub async fn handle_kronk_unload_model(
             match state.unload_model(&server_name).await {
                 Ok(_) => {
                     let model_state = state.get_model_state(&model_id).await;
-                    let loaded = model_state.as_ref().map_or(false, |ms| ms.is_ready());
-                    return Json(ModelResponse {
+                    let loaded = model_state.as_ref().is_some_and(|ms| ms.is_ready());
+                    Json(ModelResponse {
                         id: model_id,
                         loaded,
                     })
-                    .into_response();
+                    .into_response()
                 }
-                Err(e) => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({
-                            "error": {
-                                "message": format!("Failed to unload model: {}", e),
-                                "type": "UnloadModelError"
-                            }
-                        })),
-                    )
-                        .into_response();
-                }
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": {
+                            "message": format!("Failed to unload model: {}", e),
+                            "type": "UnloadModelError"
+                        }
+                    })),
+                )
+                    .into_response(),
             }
         }
-        None => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({
-                    "error": {
-                        "message": "Model not configured or not loaded",
-                        "type": "NotFoundError"
-                    }
-                })),
-            )
-                .into_response();
-        }
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "error": {
+                    "message": "Model not configured or not loaded",
+                    "type": "NotFoundError"
+                }
+            })),
+        )
+            .into_response(),
     }
 }
 
@@ -283,7 +275,7 @@ pub async fn handle_kronk_get_pull_job(
                 crate::proxy::pull_jobs::PullJobStatus::Failed => "failed",
             };
 
-            return Json(serde_json::json!({
+            Json(serde_json::json!({
                 "job_id": j.job_id,
                 "status": status_str,
                 "repo_id": j.repo_id,
@@ -292,20 +284,18 @@ pub async fn handle_kronk_get_pull_job(
                 "total_bytes": j.total_bytes,
                 "error": j.error
             }))
-            .into_response();
+            .into_response()
         }
-        None => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({
-                    "error": {
-                        "message": "Pull job not found",
-                        "type": "NotFoundError"
-                    }
-                })),
-            )
-                .into_response();
-        }
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "error": {
+                    "message": "Pull job not found",
+                    "type": "NotFoundError"
+                }
+            })),
+        )
+            .into_response(),
     }
 }
 
@@ -326,9 +316,8 @@ pub async fn handle_kronk_system_health(state: State<Arc<ProxyState>>) -> Json<s
 
 /// Handle system restart (Kronk management API).
 pub async fn handle_kronk_system_restart(_state: State<Arc<ProxyState>>) -> Response {
-    // Send response first
-    return Json(serde_json::json!({
+    Json(serde_json::json!({
         "message": "Restarting kronk..."
     }))
-    .into_response();
+    .into_response()
 }
