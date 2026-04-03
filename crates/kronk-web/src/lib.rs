@@ -1,3 +1,6 @@
+#[cfg(feature = "ssr")]
+pub mod server;
+
 use leptos::prelude::*;
 
 #[component]
