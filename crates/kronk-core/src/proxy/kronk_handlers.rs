@@ -126,40 +126,39 @@ pub async fn handle_kronk_load_model(
     state: State<Arc<ProxyState>>,
     Path(model_id): Path<String>,
 ) -> Response {
-    // Get model card
-    let model_card = state.get_model_card(&model_id).await;
-
-    match model_card {
-        Some(card) => {
-            match state.load_model(&model_id, Some(&card)).await {
-                Ok(_) => {
-                    // Check if model is now loaded
-                    let model_state = state.get_model_state(&model_id).await;
-                    let loaded = model_state.as_ref().is_some_and(|ms| ms.is_ready());
-                    Json(ModelResponse {
-                        id: model_id,
-                        loaded,
-                    })
-                    .into_response()
-                }
-                Err(e) => (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({
-                        "error": {
-                            "message": format!("Failed to load model: {}", e),
-                            "type": "LoadModelError"
-                        }
-                    })),
-                )
-                    .into_response(),
-            }
-        }
-        None => (
+    // Check the model is present in config (model card is optional)
+    if !state.config.models.contains_key(&model_id) {
+        return (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({
                 "error": {
                     "message": "Model not configured",
                     "type": "NotFoundError"
+                }
+            })),
+        )
+            .into_response();
+    }
+
+    // Model card is optional — pass None if it doesn't exist on disk
+    let model_card = state.get_model_card(&model_id).await;
+
+    match state.load_model(&model_id, model_card.as_ref()).await {
+        Ok(_) => {
+            let model_state = state.get_model_state(&model_id).await;
+            let loaded = model_state.as_ref().is_some_and(|ms| ms.is_ready());
+            Json(ModelResponse {
+                id: model_id,
+                loaded,
+            })
+            .into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": {
+                    "message": format!("Failed to load model: {}", e),
+                    "type": "LoadModelError"
                 }
             })),
         )
