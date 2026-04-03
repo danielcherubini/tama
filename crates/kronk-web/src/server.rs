@@ -100,10 +100,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/api/logs", get(api::get_logs))
         .route("/api/config", get(api::get_config).post(api::save_config))
-        .route("/kronk/v1/{*path}", any(proxy_kronk))
+        .route("/kronk/v1/*path", any(proxy_kronk))
         .route("/", get(serve_index))
         .route(
-            "/{*path}",
+            "/*path",
             get(|Path(p): Path<String>| async move { serve_static(Some(Path(p))).await }),
         )
         .with_state(state)

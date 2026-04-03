@@ -89,6 +89,32 @@ kronk status
 
 ---
 
+## Web Control Plane
+
+Kronk includes a web-based control plane UI for managing models, viewing logs, and editing config from a browser.
+
+```bash
+# 1. Build the frontend (requires trunk: cargo install trunk)
+cd crates/kronk-web && trunk build --release && cd ../..
+
+# 2. Start the web server (port 11435 by default)
+cargo run --package kronk-web --features ssr
+
+# Or via the CLI (with web-ui feature):
+cargo run --package kronk --features web-ui -- web --port 11435
+
+# 3. Open http://localhost:11435
+```
+
+The web UI proxies all `/kronk/v1/` requests to the running Kronk proxy (default `http://127.0.0.1:11434`). Configure with env vars:
+- `KRONK_PROXY_URL` — proxy base URL (default: `http://127.0.0.1:11434`)
+- `KRONK_LOGS_DIR` — path to Kronk log files (optional)
+- `KRONK_CONFIG_PATH` — path to `kronk.toml` for config editor (optional)
+
+The web server starts automatically alongside the proxy when using `kronk service start`.
+
+---
+
 ## CLI
 
 ```text

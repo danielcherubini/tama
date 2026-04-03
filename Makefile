@@ -1,4 +1,4 @@
-.PHONY: build install install-global update test check fmt clippy clean
+.PHONY: build install install-global update test check fmt clippy clean build-web build-web-dev
 
 build:
 	cargo build --release --workspace
@@ -28,3 +28,11 @@ clippy:
 
 clean:
 	cargo clean
+
+build-web:
+	cd crates/kronk-web && trunk build --release
+	cargo build --package kronk-web --features ssr
+
+build-web-dev:
+	cd crates/kronk-web && trunk build
+	cargo build --package kronk-web --features ssr

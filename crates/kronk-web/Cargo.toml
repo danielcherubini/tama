@@ -39,3 +39,14 @@ ssr = [
   "dep:reqwest", "dep:mime_guess", "dep:tracing", "dep:tracing-subscriber",
   "dep:kronk-core", "dep:toml",
 ]
+
+[[test]]
+name = "server_test"
+path = "tests/server_test.rs"
+required-features = ["ssr"]
+
+[dev-dependencies]
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }
+axum = { workspace = true }
