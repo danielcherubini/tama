@@ -416,14 +416,18 @@ pub async fn handle_kronk_get_pull_job(
 pub async fn handle_kronk_system_health(state: State<Arc<ProxyState>>) -> Json<serde_json::Value> {
     let models_loaded = state.models.read().await.len();
 
+    let vram = tokio::task::spawn_blocking(crate::gpu::query_vram)
+        .await
+        .unwrap_or(None);
+
     Json(serde_json::json!({
         "status": "ok",
         "service": "kronk",
         "models_loaded": models_loaded,
-        "vram": {
-            "used_mib": 0,
-            "total_mib": 0
-        }
+        "vram": vram.map(|v| serde_json::json!({
+            "used_mib": v.used_mib,
+            "total_mib": v.total_mib,
+        }))
     }))
 }
 
