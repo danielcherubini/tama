@@ -107,7 +107,7 @@ pub async fn run(config: &Config, command: ModelCommands) -> Result<()> {
             quant,
             profile,
             backend,
-        } => cmd_create(config, &name, &model, quant, profile, backend).await,
+        } => cmd_create(config, name, &model, quant, profile, backend).await,
         ModelCommands::Rm { model } => cmd_rm(config, &model),
         ModelCommands::Scan => cmd_scan(config),
         ModelCommands::Update {
@@ -408,7 +408,7 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
     println!("  Create a model config:");
     for quant_key in card.quants.keys() {
         println!(
-            "    kronk model create my-server --model {} --quant {} --profile coding",
+            "    kronk model create --model {} --quant {} --profile coding --name my-server",
             model_id, quant_key
         );
     }
@@ -487,19 +487,27 @@ fn cmd_ls(
 
 async fn cmd_create(
     config: &Config,
-    server_name: &str,  // Renamed from 'name' to avoid confusion and match usage
-    model_id_arg: &str, // Renamed from 'model_id' to avoid confusion and match usage
+    server_name_arg: Option<String>,
+    model_id_arg: &str,
     quant_name: Option<String>,
-    profile_name_arg: Option<String>, // Renamed from 'profile' to avoid confusion and match usage
-    backend_arg: Option<String>, // Renamed from 'backend_key' to avoid confusion and match usage
+    profile_name_arg: Option<String>,
+    backend_arg: Option<String>,
 ) -> Result<()> {
-    let mut config = config.clone(); // Clone config to allow modification
+    let mut config = config.clone();
 
     // No host args needed — proxy handles routing
     let args = vec![];
 
+    // Resolve server name — prompt if not provided
+    let server_name = match server_name_arg {
+        Some(n) => n,
+        None => inquire::Text::new("Config name (e.g. gemma4-coding):")
+            .prompt()
+            .context("Config name input cancelled")?,
+    };
+
     // Check if server name already exists
-    if config.models.contains_key(server_name) {
+    if config.models.contains_key(&server_name) {
         anyhow::bail!(
             "Server '{}' already exists. Use `kronk server edit` or choose a different name.",
             server_name
@@ -542,14 +550,14 @@ async fn cmd_create(
     };
 
     config.models.insert(
-        server_name.to_string(), // Use the 'server_name' parameter
+        server_name.clone(),
         kronk_core::config::ModelConfig {
             backend: resolved_backend_key.clone(),
             args,
             profile: resolved_profile,
             sampling: None,
             model: Some(model_id_arg.to_string()),
-            quant: quant_name.clone(), // Use quant_name
+            quant: quant_name.clone(),
             port: None,
             health_check: None,
             enabled: true,
@@ -564,20 +572,11 @@ async fn cmd_create(
     println!("  Name:      {}", server_name);
     println!("  Model:     {}", model_id_arg);
     if let Some(ref q) = quant_name {
-        // Use quant_name
         println!("  Quant:     {}", q);
     }
-    // GGUF path needs to be resolved here if needed for output, for now just remove.
-    // let models_dir = config.models_dir()?;
-    // let configs_dir = config.configs_dir()?;
-    // let registry = ModelRegistry::new(models_dir.clone(), configs_dir.clone());
-    // let gguf_path = registry.gguf_path(model_id_arg, &quant_name.unwrap_or_default())?; // This needs error handling
-    // println!("  GGUF:      {}", gguf_path.display());
-
-    // Instead, let's look up the model config that was just created to get the profile.
     if let Some(p) = &config
         .models
-        .get(server_name)
+        .get(&server_name)
         .and_then(|mc| mc.profile.as_ref())
     {
         println!("  Profile:   {}", p);
