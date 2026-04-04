@@ -25,9 +25,10 @@ pub async fn forward_request(
             .consecutive_failures()
             .map(|f| f.load(std::sync::atomic::Ordering::Relaxed))
             .unwrap_or(0);
-        if failures >= state.config.proxy.circuit_breaker_threshold {
+        let config = state.config.read().await;
+        if failures >= config.proxy.circuit_breaker_threshold {
             // Check if cooldown has elapsed
-            if !ms.can_reload(state.config.proxy.circuit_breaker_cooldown_seconds) {
+            if !ms.can_reload(config.proxy.circuit_breaker_cooldown_seconds) {
                 info!(
                     "Circuit breaker cooldown active for server '{}' ({} failures). Waiting for cooldown.",
                     server_name, failures

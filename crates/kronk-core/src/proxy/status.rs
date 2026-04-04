@@ -13,12 +13,13 @@ impl ProxyState {
 
         let sys_metrics = self.system_metrics.read().await.clone();
 
-        let idle_timeout_secs = self.config.proxy.idle_timeout_secs;
+        let config = self.config.read().await;
+        let idle_timeout_secs = config.proxy.idle_timeout_secs;
         let models = self.models.read().await;
         let mut models_obj = serde_json::Map::new();
 
-        for (model_name, model_config) in &self.config.models {
-            let backend_path = match self.config.backends.get(&model_config.backend) {
+        for (model_name, model_config) in &config.models {
+            let backend_path = match config.backends.get(&model_config.backend) {
                 Some(b) => b.path.clone(),
                 None => continue,
             };
