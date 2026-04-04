@@ -373,6 +373,37 @@ pub fn list_backend_versions(
         .map_err(Into::into)
 }
 
+/// Get a specific backend installation by (name, version).
+/// Returns Ok(None) if no row matches.
+pub fn get_backend_by_version(
+    conn: &Connection,
+    name: &str,
+    version: &str,
+) -> Result<Option<BackendInstallationRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, backend_type, version, path, installed_at, gpu_type, source, is_active
+         FROM backend_installations
+         WHERE name = ?1 AND version = ?2",
+    )?;
+    let mut rows = stmt.query_map((name, version), |row| {
+        Ok(BackendInstallationRecord {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            backend_type: row.get(2)?,
+            version: row.get(3)?,
+            path: row.get(4)?,
+            installed_at: row.get(5)?,
+            gpu_type: row.get(6)?,
+            source: row.get(7)?,
+            is_active: row.get::<_, i64>(8)? != 0,
+        })
+    })?;
+    match rows.next() {
+        Some(row) => Ok(Some(row?)),
+        None => Ok(None),
+    }
+}
+
 /// Delete a specific `(name, version)` backend installation row.
 pub fn delete_backend_installation(conn: &Connection, name: &str, version: &str) -> Result<()> {
     conn.execute(
@@ -789,6 +820,56 @@ mod tests {
 
         let versions = list_backend_versions(&conn, "llama_cpp").unwrap();
         assert!(versions.is_empty());
+    }
+
+    #[test]
+    fn test_get_backend_by_version() {
+        let OpenResult { conn, .. } = open_in_memory().unwrap();
+
+        // Insert two versions of llama_cpp with distinct paths
+        let r1 = BackendInstallationRecord {
+            id: 0,
+            name: "llama_cpp".to_string(),
+            backend_type: "llama_cpp".to_string(),
+            version: "v1.0.0".to_string(),
+            path: "/v1/llama-server".to_string(),
+            installed_at: 1000,
+            gpu_type: None,
+            source: None,
+            is_active: false,
+        };
+        insert_backend_installation(&conn, &r1).unwrap();
+
+        let r2 = BackendInstallationRecord {
+            id: 0,
+            name: "llama_cpp".to_string(),
+            backend_type: "llama_cpp".to_string(),
+            version: "v2.0.0".to_string(),
+            path: "/v2/llama-server".to_string(),
+            installed_at: 2000,
+            gpu_type: None,
+            source: None,
+            is_active: false,
+        };
+        insert_backend_installation(&conn, &r2).unwrap();
+
+        // v1.0.0 should be found with path /v1/llama-server
+        let found = get_backend_by_version(&conn, "llama_cpp", "v1.0.0")
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.path, "/v1/llama-server");
+        assert_eq!(found.version, "v1.0.0");
+
+        // v2.0.0 should be found with path /v2/llama-server
+        let found = get_backend_by_version(&conn, "llama_cpp", "v2.0.0")
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.path, "/v2/llama-server");
+        assert_eq!(found.version, "v2.0.0");
+
+        // unknown version should return Ok(None)
+        let not_found = get_backend_by_version(&conn, "llama_cpp", "unknown").unwrap();
+        assert!(not_found.is_none());
     }
 
     #[test]
