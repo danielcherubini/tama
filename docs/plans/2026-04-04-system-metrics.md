@@ -9,7 +9,7 @@ A new `SystemMetrics` struct is collected every 5 seconds by a background Tokio 
 
 ---
 
-### Task 1: Add `SystemMetrics` struct and collection functions in `gpu.rs`
+## Task 1: Add `SystemMetrics` struct and collection functions in `gpu.rs`
 
 **Context:**
 All system-level hardware queries currently live in `crates/kronk-core/src/gpu.rs`. We add CPU %, RAM, and GPU utilization % collection to the same file. The `sysinfo` crate (already in `kronk-core`'s dependencies via `sysinfo.workspace = true`) provides cross-platform CPU and RAM. GPU utilization % is queried from `nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits` (integer, 0–100), matching the existing `query_vram` style.
@@ -80,7 +80,7 @@ Implementation:
 
 ---
 
-### Task 2: Add cached metrics background task to `ProxyState`
+## Task 2: Add cached metrics background task to `ProxyState`
 
 **Context:**
 CPU usage is meaningless as a point-in-time snapshot — it needs to be measured over an interval. We run a background Tokio task that calls `collect_system_metrics()` every 5 seconds via `spawn_blocking` and stores the result in `Arc<RwLock<SystemMetrics>>` inside `ProxyState`. Handlers then read the cached value cheaply without doing any blocking work.
@@ -148,7 +148,7 @@ tokio::spawn(async move {
 
 ---
 
-### Task 3: Expose metrics in `/kronk/v1/system/health` endpoint
+## Task 3: Expose metrics in `/kronk/v1/system/health` endpoint
 
 **Context:**
 The `/kronk/v1/system/health` handler in `crates/kronk-core/src/proxy/kronk_handlers.rs` currently builds an ad-hoc `serde_json::json!({...})` response with `status`, `service`, `models_loaded`, and `vram`. We extend it to include the cached `SystemMetrics` fields. We also take this opportunity to replace the ad-hoc `json!({})` with a proper typed response struct for correctness and testability.
@@ -205,7 +205,7 @@ Also update `crates/kronk-core/src/proxy/status.rs`: the `build_status_response`
 
 ---
 
-### Task 4: Update web dashboard to display new metrics
+## Task 4: Update web dashboard to display new metrics
 
 **Context:**
 The Leptos web dashboard in `crates/kronk-web/src/pages/dashboard.rs` fetches `/kronk/v1/system/health` and displays status, models loaded, and VRAM. The local `SystemHealth` deserialization struct and the render function both need updating to show CPU %, RAM, and GPU utilization %.
