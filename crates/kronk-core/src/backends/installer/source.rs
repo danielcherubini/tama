@@ -255,6 +255,12 @@ fn build_cmake_args(options: &InstallOptions, source_dir: &Path, build_output: &
             cmake_args.push("-DGGML_AVX2=ON".to_string());
             cmake_args.push("-DGGML_FMA=ON".to_string());
             cmake_args.push("-DGGML_AVX=ON".to_string());
+            // GGML_NATIVE=OFF also disables the "native" CUDA architecture
+            // detection, causing the fallback list (50;61;70;75;80) to be used.
+            // CUDA 13.x dropped support for compute_50 and below, so we must
+            // set the architecture explicitly. "native" lets nvcc detect the
+            // installed GPU at compile time (requires CUDA >= 11.6 + CMake 3.24).
+            cmake_args.push("-DCMAKE_CUDA_ARCHITECTURES=native".to_string());
         }
     }
 
