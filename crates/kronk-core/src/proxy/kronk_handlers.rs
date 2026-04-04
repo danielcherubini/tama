@@ -244,6 +244,15 @@ pub async fn handle_kronk_unload_model(
     }
 }
 
+/// Returns `false` if the path component contains traversal sequences or invalid characters.
+fn is_safe_path_component(s: &str) -> bool {
+    !s.is_empty()
+        && !s.contains("..")
+        && !s.starts_with('/')
+        && !s.starts_with('\\')
+        && !s.contains('\0')
+}
+
 /// Spawn a real download task for a single file and return the created `PullJob`.
 ///
 /// The job is inserted into `pull_jobs` before this function returns.
@@ -260,6 +269,24 @@ fn spawn_download_job(
     let spec_clone = spec.clone();
 
     tokio::spawn(async move {
+        // Validate filename and repo_id to prevent path traversal.
+        if !is_safe_path_component(&filename_clone) {
+            let mut jobs = pull_jobs_arc.write().await;
+            if let Some(job) = jobs.get_mut(&job_id_clone) {
+                job.status = crate::proxy::pull_jobs::PullJobStatus::Failed;
+                job.error = Some("Invalid filename".to_string());
+            }
+            return;
+        }
+        if !repo_id_clone.split('/').all(is_safe_path_component) {
+            let mut jobs = pull_jobs_arc.write().await;
+            if let Some(job) = jobs.get_mut(&job_id_clone) {
+                job.status = crate::proxy::pull_jobs::PullJobStatus::Failed;
+                job.error = Some("Invalid repo_id".to_string());
+            }
+            return;
+        }
+
         // Update status to Running
         {
             let mut jobs = pull_jobs_arc.write().await;
@@ -647,6 +674,15 @@ pub async fn handle_kronk_system_health(
 /// `repo_id` is captured as a wildcard path segment (e.g. `bartowski/Qwen3-8B-GGUF`)
 /// because HF repo IDs contain a `/`. Registered as `GET /kronk/v1/hf/*repo_id`.
 pub async fn handle_hf_list_quants(Path(repo_id): Path<String>) -> Response {
+    // Reject repo_id segments containing traversal sequences or null bytes (SSRF mitigation).
+    if !repo_id.split('/').all(is_safe_path_component) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Invalid repo_id" })),
+        )
+            .into_response();
+    }
+
     match crate::models::pull::fetch_blob_metadata(&repo_id).await {
         Ok(blobs) => {
             let mut quants: Vec<QuantEntry> = blobs
