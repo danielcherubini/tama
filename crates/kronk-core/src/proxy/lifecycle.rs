@@ -15,7 +15,7 @@ impl ProxyState {
     ) -> Result<String> {
         debug!("Loading model: {}", model_name);
 
-        let config = self.config.clone();
+        let config = self.config.read().await.clone();
 
         // Resolve the server name for this model
         let servers = config.resolve_servers_for_model(model_name);
@@ -135,7 +135,7 @@ impl ProxyState {
         });
 
         // Wait for health check to pass
-        let timeout = Duration::from_secs(self.config.proxy.startup_timeout_secs);
+        let timeout = Duration::from_secs(self.config.read().await.proxy.startup_timeout_secs);
         let start = Instant::now();
         let mut health_ok = false;
 
@@ -305,14 +305,15 @@ impl ProxyState {
                 }
             };
             let idle_duration = now.saturating_duration_since(last);
-            let timeout = Duration::from_secs(self.config.proxy.idle_timeout_secs);
+            let idle_timeout_secs = self.config.read().await.proxy.idle_timeout_secs;
+            let timeout = Duration::from_secs(idle_timeout_secs);
 
             if idle_duration > timeout {
                 warn!(
                     "Server '{}' has been idle for {}s (timeout: {}s)",
                     server_name,
                     idle_duration.as_secs(),
-                    self.config.proxy.idle_timeout_secs
+                    idle_timeout_secs
                 );
                 to_unload.push(server_name.clone());
             }

@@ -8,7 +8,7 @@ impl ProxyState {
     pub fn new(config: crate::config::Config, db_dir: Option<std::path::PathBuf>) -> Self {
         let config_clone = config.clone();
         Self {
-            config,
+            config: Arc::new(tokio::sync::RwLock::new(config)),
             models: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(
@@ -32,7 +32,7 @@ impl ProxyState {
 
     /// Get the backend URL for a server name.
     pub async fn get_backend_url(&self, server_name: &str) -> Result<String> {
-        let config = self.config.clone();
+        let config = self.config.read().await;
         let server = config
             .models
             .get(server_name)
@@ -91,20 +91,29 @@ impl ProxyState {
 
     /// Find an available loaded server for a given model name.
     pub async fn get_available_server_for_model(&self, model_name: &str) -> Option<String> {
-        let config = self.config.clone();
-        let servers = config.resolve_servers_for_model(model_name);
+        let (server_names, circuit_breaker_threshold) = {
+            let config = self.config.read().await;
+            // Collect just the server names (owned Strings) so we can drop the lock.
+            let names: Vec<String> = config
+                .resolve_servers_for_model(model_name)
+                .into_iter()
+                .map(|(name, _, _)| name)
+                .collect();
+            let threshold = config.proxy.circuit_breaker_threshold;
+            (names, threshold)
+        };
 
         let models = self.models.read().await;
 
         // Simple round-robin or first available
-        for (server_name, _, _) in servers {
+        for server_name in server_names {
             if let Some(state) = models.get(&server_name) {
                 if (state.is_ready() || matches!(state, ModelState::Starting { .. }))
                     && state
                         .consecutive_failures()
                         .map(|f| f.load(std::sync::atomic::Ordering::Relaxed))
                         .unwrap_or(0)
-                        < self.config.proxy.circuit_breaker_threshold
+                        < circuit_breaker_threshold
                 {
                     return Some(server_name);
                 }
@@ -132,7 +141,7 @@ impl ProxyState {
 
     /// Get the model card for a model name.
     pub async fn get_model_card(&self, model_name: &str) -> Option<crate::models::card::ModelCard> {
-        let configs_dir = self.config.configs_dir().ok()?;
+        let configs_dir = self.config.read().await.configs_dir().ok()?;
 
         // Try to find the model card file
         // Format: configs/<company>--<model>.toml
