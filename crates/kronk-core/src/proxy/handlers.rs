@@ -198,7 +198,8 @@ pub async fn handle_get_model(
     }
 
     // Check if it's a configured (but not loaded) model
-    for (config_name, server_cfg) in &state.config.models {
+    let config = state.config.read().await;
+    for (config_name, server_cfg) in &config.models {
         if !server_cfg.enabled {
             continue;
         }
@@ -256,10 +257,11 @@ pub async fn handle_metrics(state: State<Arc<ProxyState>>) -> Json<serde_json::V
 #[axum::debug_handler]
 pub async fn handle_list_models(state: State<Arc<ProxyState>>) -> Json<serde_json::Value> {
     let loaded_models = state.models.read().await;
+    let config = state.config.read().await;
 
     // Build a list of all configured (enabled) models, enriched with runtime state
     let mut data: Vec<serde_json::Value> = Vec::new();
-    for (config_name, server_cfg) in &state.config.models {
+    for (config_name, server_cfg) in &config.models {
         if !server_cfg.enabled {
             continue;
         }

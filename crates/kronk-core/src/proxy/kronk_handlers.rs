@@ -131,7 +131,8 @@ pub async fn handle_kronk_get_model(
     }
 
     // Check if it's a configured (but not loaded) model
-    for (config_name, server_cfg) in &state.config.models {
+    let config = state.config.read().await;
+    for (config_name, server_cfg) in &config.models {
         if !server_cfg.enabled {
             continue;
         }
@@ -165,7 +166,7 @@ pub async fn handle_kronk_load_model(
     Path(model_id): Path<String>,
 ) -> Response {
     // Check the model is present in config (model card is optional)
-    if !state.config.models.contains_key(&model_id) {
+    if !state.config.read().await.models.contains_key(&model_id) {
         return (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({
@@ -263,19 +264,19 @@ fn is_safe_path_component(s: &str) -> bool {
 ///
 /// The job is inserted into `pull_jobs` before this function returns.
 fn spawn_download_job(
-    pull_jobs_arc: Arc<tokio::sync::RwLock<std::collections::HashMap<String, PullJob>>>,
-    in_flight: Arc<tokio::sync::Mutex<std::collections::HashSet<std::path::PathBuf>>>,
+    state: Arc<ProxyState>,
     job_id: String,
     repo_id: String,
     filename: String,
     spec: QuantDownloadSpec,
-    config: crate::config::Config,
 ) {
+    let pull_jobs_arc = Arc::clone(&state.pull_jobs);
+    let in_flight_clone = Arc::clone(&state.in_flight_downloads);
+    let state_clone = Arc::clone(&state);
     let job_id_clone = job_id.clone();
     let repo_id_clone = repo_id.clone();
     let filename_clone = filename.clone();
     let spec_clone = spec.clone();
-    let in_flight_clone = Arc::clone(&in_flight);
 
     tokio::spawn(async move {
         // Validate filename and repo_id to prevent path traversal.
@@ -308,7 +309,7 @@ fn spawn_download_job(
             }
         }
 
-        let models_dir = match config.models_dir() {
+        let models_dir = match state_clone.config.read().await.models_dir() {
             Ok(d) => d,
             Err(e) => {
                 let mut jobs = pull_jobs_arc.write().await;
@@ -416,8 +417,14 @@ fn spawn_download_job(
                 // a retry of the same file can start immediately if needed.
                 in_flight_clone.lock().await.remove(&dest_path);
                 // Post-download: auto-create model card and config entries (best-effort)
-                setup_model_after_pull(config.clone(), &repo_id_clone, &spec_clone, &dest_dir)
-                    .await;
+                // Also updates the live ProxyState.config so the model appears immediately.
+                setup_model_after_pull(
+                    Arc::clone(&state_clone),
+                    &repo_id_clone,
+                    &spec_clone,
+                    &dest_dir,
+                )
+                .await;
             }
             Err(e) => {
                 in_flight_clone.lock().await.remove(&dest_path);
@@ -511,9 +518,6 @@ pub async fn handle_kronk_pull_model(
             }
         }
 
-        let pull_jobs_arc = Arc::clone(&state.pull_jobs);
-        let in_flight = Arc::clone(&state.in_flight_downloads);
-        let config = state.config.clone();
         let mut job_entries = Vec::with_capacity(request.quants.len());
 
         for spec in &request.quants {
@@ -530,18 +534,16 @@ pub async fn handle_kronk_pull_model(
             };
 
             {
-                let mut jobs = pull_jobs_arc.write().await;
+                let mut jobs = state.pull_jobs.write().await;
                 jobs.insert(job_id.clone(), pull_job);
             }
 
             spawn_download_job(
-                Arc::clone(&pull_jobs_arc),
-                Arc::clone(&in_flight),
+                Arc::clone(&state),
                 job_id.clone(),
                 repo_id.clone(),
                 spec.filename.clone(),
                 spec.clone(),
-                config.clone(),
             );
 
             job_entries.push(serde_json::json!({
@@ -663,13 +665,11 @@ pub async fn handle_kronk_pull_model(
         context_length: request.context_length,
     };
     spawn_download_job(
-        Arc::clone(&state.pull_jobs),
-        Arc::clone(&state.in_flight_downloads),
+        Arc::clone(&state),
         job_id.clone(),
         repo_id.clone(),
         filename.clone(),
         legacy_spec,
-        state.config.clone(),
     );
 
     Json(serde_json::json!({
@@ -939,18 +939,20 @@ async fn _setup_model_after_pull_with_config(
 
 /// Post-download: auto-create model card and config entries.
 ///
-/// Called after a quant download completes. Loads the config, creates/updates
-/// the model card at `<configs_dir>/<repo_slug>.toml`, and adds a `[models.<slug>]`
-/// entry to `config.toml` if one doesn't already exist.
+/// Called after a quant download completes. Updates the model card, saves config to
+/// disk, and — critically — also inserts the new model entry into the live
+/// `ProxyState.config` so it appears immediately in the models list without a restart.
 async fn setup_model_after_pull(
-    mut config: crate::config::Config,
+    state: Arc<ProxyState>,
     repo_id: &str,
     spec: &QuantDownloadSpec,
     dest_dir: &std::path::Path,
 ) {
     let _guard = CONFIG_WRITE_LOCK.lock().await;
+    let mut config = state.config.write().await;
     _setup_model_after_pull_with_config(&mut config, repo_id, spec, dest_dir).await;
     // _guard dropped here, releasing the lock
+    // config write guard also dropped here, making the new model entry visible immediately
 }
 
 /// Handle system restart (Kronk management API).

@@ -29,7 +29,7 @@ mod tests {
         let state = ProxyState::new(config.clone(), None);
         assert!(state.models.read().await.is_empty());
         assert_eq!(
-            state.config.proxy.idle_timeout_secs,
+            state.config.read().await.proxy.idle_timeout_secs,
             config.proxy.idle_timeout_secs
         );
     }
