@@ -218,15 +218,17 @@ fn build_cmake_args(options: &InstallOptions, source_dir: &Path, build_output: &
     ) {
         cmake_args.push("-DGGML_IQK_FA_ALL_QUANTS=ON".to_string());
 
-        // On Windows with MSVC, AVX2 is not enabled by default. Without it,
-        // __AVX2__ is not defined and the IQK optimized CPU kernels are
-        // compiled out (HAVE_FANCY_SIMD / IQK_IMPLEMENT not defined).
-        // This causes the SSM (Mamba) layers in hybrid models like Qwen3.5
-        // to fall back to broken scalar code, producing inf/NaN logits and
-        // crashing on the first token.
+        // On Windows with MSVC, GGML_NATIVE=ON uses -march=native which MSVC
+        // does not support, so AVX2 is silently not enabled. Without GGML_AVX2=ON,
+        // __AVX2__ is not defined and the IQK optimized CPU kernels are compiled
+        // out (IQK_IMPLEMENT / HAVE_FANCY_SIMD not defined). For hybrid
+        // Mamba/attention models like Qwen3.5 the SSM layers run on CPU and
+        // require these kernels — without them they produce inf/NaN logits and
+        // crash on the first token.
         if cfg!(target_os = "windows") {
-            cmake_args.push("-DCMAKE_CXX_FLAGS=/arch:AVX2".to_string());
-            cmake_args.push("-DCMAKE_C_FLAGS=/arch:AVX2".to_string());
+            cmake_args.push("-DGGML_AVX2=ON".to_string());
+            cmake_args.push("-DGGML_FMA=ON".to_string());
+            cmake_args.push("-DGGML_AVX=ON".to_string());
         }
     }
 
@@ -322,13 +324,13 @@ mod tests {
         let opts = make_options(BackendType::IkLlama, None);
         let args = build_cmake_args(&opts, Path::new("/src"), Path::new("/build"));
         assert!(
-            args.contains(&"-DCMAKE_CXX_FLAGS=/arch:AVX2".to_string()),
-            "Windows ik_llama build must include /arch:AVX2 for CXX, got: {:?}",
+            args.contains(&"-DGGML_AVX2=ON".to_string()),
+            "Windows ik_llama build must include -DGGML_AVX2=ON, got: {:?}",
             args
         );
         assert!(
-            args.contains(&"-DCMAKE_C_FLAGS=/arch:AVX2".to_string()),
-            "Windows ik_llama build must include /arch:AVX2 for C, got: {:?}",
+            args.contains(&"-DGGML_FMA=ON".to_string()),
+            "Windows ik_llama build must include -DGGML_FMA=ON, got: {:?}",
             args
         );
     }
