@@ -132,7 +132,7 @@ pub struct ProxyMetrics {
 /// Manages proxy state and model lifecycle.
 #[derive(Clone)]
 pub struct ProxyState {
-    pub config: crate::config::Config,
+    pub config: Arc<tokio::sync::RwLock<crate::config::Config>>,
     pub models: Arc<tokio::sync::RwLock<std::collections::HashMap<String, ModelState>>>,
     pub client: reqwest::Client,
     pub metrics: Arc<ProxyMetrics>,
