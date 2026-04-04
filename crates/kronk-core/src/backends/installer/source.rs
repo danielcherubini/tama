@@ -487,23 +487,59 @@ async fn build_cmake(build_output: &Path) -> Result<()> {
         "Building with {} parallel jobs (this may take several minutes)...",
         num_jobs
     );
-    let status = tokio::process::Command::new("cmake")
-        .args([
-            "--build",
-            &build_output.to_string_lossy(),
-            "--config",
-            "Release",
-            "-j",
-            &num_jobs.to_string(),
-        ])
-        .status()
-        .await?;
 
-    if !status.success() {
-        return Err(anyhow!("Build failed. Check the output above for errors."));
+    // On Windows, nvcc requires cl.exe to be on PATH (it's the CUDA host
+    // compiler). vcvarsall.bat was sourced during configure, but each
+    // Command::new() spawns a fresh process that doesn't inherit that
+    // environment. Wrap the build step in the same .bat-file approach.
+    #[cfg(target_os = "windows")]
+    {
+        let cmake_build_cmd = format!(
+            "cmake --build \"{}\" --config Release -j {}",
+            build_output.to_string_lossy(),
+            num_jobs
+        );
+        let bat_contents = match find_vcvarsall() {
+            Some(vcvarsall) => format!(
+                "@echo off\r\ncall \"{vcvarsall}\" x64\r\nif errorlevel 1 exit /b 1\r\n{cmake}\r\n",
+                vcvarsall = vcvarsall.to_string_lossy(),
+                cmake = cmake_build_cmd,
+            ),
+            None => format!("@echo off\r\n{}\r\n", cmake_build_cmd),
+        };
+        let bat_path = build_output.join("kronk_cmake_build.bat");
+        std::fs::write(&bat_path, &bat_contents)
+            .with_context(|| format!("Failed to write build bat file: {:?}", bat_path))?;
+        let status = tokio::process::Command::new("cmd")
+            .args(["/c", &bat_path.to_string_lossy()])
+            .status()
+            .await?;
+        if !status.success() {
+            return Err(anyhow!("Build failed. Check the output above for errors."));
+        }
+        return Ok(());
     }
 
-    Ok(())
+    #[cfg(not(target_os = "windows"))]
+    {
+        let status = tokio::process::Command::new("cmake")
+            .args([
+                "--build",
+                &build_output.to_string_lossy(),
+                "--config",
+                "Release",
+                "-j",
+                &num_jobs.to_string(),
+            ])
+            .status()
+            .await?;
+
+        if !status.success() {
+            return Err(anyhow!("Build failed. Check the output above for errors."));
+        }
+
+        Ok(())
+    }
 }
 
 /// Copy the built binary (and shared libs) to the target directory.
