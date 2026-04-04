@@ -458,6 +458,7 @@ pub async fn handle_kronk_system_restart(_state: State<Arc<ProxyState>>) -> Resp
 mod tests {
     use super::*;
 
+    /// Verifies that `SystemHealthResponse` serializes to JSON with all expected fields.
     #[test]
     fn test_system_health_response_serializes() {
         let response = SystemHealthResponse {

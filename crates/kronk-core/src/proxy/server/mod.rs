@@ -9,6 +9,8 @@ pub struct ProxyServer {
     state: Arc<ProxyState>,
     #[allow(dead_code)]
     idle_timeout_handle: Option<tokio::task::JoinHandle<()>>,
+    #[allow(dead_code)]
+    metrics_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl ProxyServer {
@@ -25,7 +27,7 @@ impl ProxyServer {
         // CPU-usage deltas are computed correctly across iterations without the
         // per-call MINIMUM_CPU_UPDATE_INTERVAL sleep.
         let metrics_arc = Arc::clone(&state.system_metrics);
-        tokio::spawn(async move {
+        let metrics_handle = tokio::spawn(async move {
             let mut sys = sysinfo::System::new();
             loop {
                 let (snapshot, returned_sys) = tokio::task::spawn_blocking(move || {
@@ -46,6 +48,7 @@ impl ProxyServer {
         Self {
             state,
             idle_timeout_handle: Some(handle),
+            metrics_handle: Some(metrics_handle),
         }
     }
 

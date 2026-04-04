@@ -513,6 +513,7 @@ mod tests {
         assert!(!DEFAULT_CUDA_VERSION.is_empty());
     }
 
+    /// Verifies `collect_system_metrics` returns sane CPU and RAM values on any machine.
     #[test]
     fn test_collect_system_metrics() {
         let metrics = collect_system_metrics();
@@ -536,6 +537,7 @@ mod tests {
         println!("vram: {:?}", metrics.vram);
     }
 
+    /// Verifies `collect_system_metrics_with` works correctly when `System` is reused across calls.
     #[test]
     fn test_collect_system_metrics_with_reuses_system() {
         // Verify collect_system_metrics_with works when System is reused across calls.
