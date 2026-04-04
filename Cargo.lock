@@ -1693,6 +1693,7 @@ version = "1.9.0"
 dependencies = [
  "anyhow",
  "axum",
+ "futures-util",
  "gloo-net",
  "gloo-timers",
  "include_dir",
