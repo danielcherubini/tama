@@ -278,6 +278,7 @@ pub fn ModelEditor() -> impl IntoView {
 
     let backends = RwSignal::new(Vec::<String>::new());
     let quants: RwSignal<Vec<(String, QuantInfo)>> = RwSignal::new(vec![]);
+    let add_quant_counter = RwSignal::new(0);
 
     // Status
     let model_status = RwSignal::new(Option::<(bool, String)>::None);
@@ -1169,7 +1170,10 @@ pub fn ModelEditor() -> impl IntoView {
                                     type="button"
                                     class="btn btn-secondary btn-sm"
                                     on:click=move |_| {
-                                        quants.update(|rows| rows.push((String::new(), QuantInfo::default())));
+                                        let counter = add_quant_counter.get() + 1;
+                                        add_quant_counter.set(counter);
+                                        let unique_name = format!("quant-{}", counter);
+                                        quants.update(|rows| rows.push((unique_name, QuantInfo::default())));
                                     }
                                 >"+ Add Quant"</button>
                             </div>
