@@ -12,7 +12,11 @@ pub fn migrate_cards_to_unified_config(config: &mut Config) -> anyhow::Result<()
     }
 
     // 2. Back up config.toml
-    let config_path = config.loaded_from.as_ref().unwrap().join("config.toml");
+    let dir = config
+        .loaded_from
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("Config has no loaded_from path"))?;
+    let config_path = dir.join("config.toml");
     let backup_path = config_path.with_extension("toml.pre-unified-migration");
     if !backup_path.exists() {
         fs::copy(&config_path, &backup_path)?;
@@ -24,9 +28,14 @@ pub fn migrate_cards_to_unified_config(config: &mut Config) -> anyhow::Result<()
         let entry = entry?;
         let path = entry.path();
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("toml") {
-            let card = ModelCard::load(&path)?;
-            let filename = path.file_name().unwrap().to_string_lossy().to_string();
-            card_data.insert(filename, card);
+            if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                let filename = file_name.to_string();
+                let card = ModelCard::load(&path)?;
+                card_data.insert(filename, card);
+            } else {
+                tracing::warn!("Skipping file with invalid name: {}", path.display());
+                continue;
+            }
         }
     }
 
@@ -348,7 +357,6 @@ pub fn rename_legacy_directories(config_dir: &std::path::Path) -> anyhow::Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::card::ModelCard;
     use crate::profiles::SamplingParams;
     use std::collections::{BTreeMap, HashMap};
     use std::fs;

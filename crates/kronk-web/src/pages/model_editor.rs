@@ -616,7 +616,10 @@ pub fn ModelEditor() -> impl IntoView {
                             if is_new() { "New Model".to_string() } else { format!("Edit Model: {}", model_id()) }
                         }}</h2>
 
-                    <form>
+                    <form on:submit={move |e| {
+                        e.prevent_default();
+                        _save_action.dispatch(());
+                    }}>
                             <div class="form-grid">
                                 <label class="form-label" for="field-id">"ID"</label>
                                 <input
@@ -1137,9 +1140,13 @@ pub fn ModelEditor() -> impl IntoView {
 
                             <hr class="section-divider" />
 
-                            <div class="form-actions">
-                                <button type="submit" class="btn btn-primary">"Save Model"</button>
-                                <A href="/models"><button type="button" class="btn btn-secondary">"Cancel"</button></A>
+                            <form on:submit={move |e| {
+                                e.prevent_default();
+                                _save_action.dispatch(());
+                            }}>
+                                <div class="form-actions">
+                                     <button type="submit" class="btn btn-primary">"Save Model"</button>
+                                     <A href="/models"><button type="button" class="btn btn-secondary">"Cancel"</button></A>
                                 {move || (!is_new()).then(|| view! {
                                     <button
                                         type="button"
@@ -1152,9 +1159,10 @@ pub fn ModelEditor() -> impl IntoView {
                                         }
                                     >"Delete Model"</button>
                                 })}
-                            </div>
+                                </div>
+                            </form>
 
-                            {move || model_status.get().map(|(ok, msg)| {
+                             {move || model_status.get().map(|(ok, msg)| {
                                 let cls = if ok { "alert alert--success mt-2" } else { "alert alert--error mt-2" };
                                 let icon = if ok { "✓" } else { "✕" };
                                 view! {

@@ -139,15 +139,6 @@ impl Default for Config {
                 version: None,
             },
         );
-        backends.insert(
-            "ik_llama".to_string(),
-            BackendConfig {
-                path: None,
-                default_args: vec![],
-                health_check_url: Some("http://localhost:8080/health".to_string()),
-                version: None,
-            },
-        );
 
         let mut models = HashMap::new();
         models.insert(
