@@ -155,26 +155,10 @@ pub async fn cmd_server_add(
     }
 
     if model_config.sampling.is_some() {
-        // Show which profile was used based on sampling values
-        if model_config.sampling.as_ref().unwrap().temperature == Some(0.3)
-            && model_config.sampling.as_ref().unwrap().top_p == Some(0.9)
-        {
-            println!("  Profile:  coding");
-        } else if model_config.sampling.as_ref().unwrap().temperature == Some(0.7)
-            && model_config.sampling.as_ref().unwrap().top_p == Some(0.95)
-        {
-            println!("  Profile:  chat");
-        } else if model_config.sampling.as_ref().unwrap().temperature == Some(0.2)
-            && model_config.sampling.as_ref().unwrap().top_p == Some(0.5)
-        {
-            println!("  Profile:  analysis");
-        } else if model_config.sampling.as_ref().unwrap().temperature == Some(0.9)
-            && model_config.sampling.as_ref().unwrap().top_p == Some(0.95)
-        {
-            println!("  Profile:  creative");
-        } else {
-            println!("  Profile:  custom");
-        }
+        println!(
+            "  Profile:  {}",
+            model_config.sampling.as_ref().unwrap().preset_label()
+        );
     }
 
     // Use single registry for both lookups

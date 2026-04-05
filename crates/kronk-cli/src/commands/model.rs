@@ -579,26 +579,10 @@ async fn cmd_create(
     }
     if let Some(mc) = config.models.get(&server_name) {
         if mc.sampling.is_some() {
-            // Show which profile was used based on sampling values
-            if mc.sampling.as_ref().unwrap().temperature == Some(0.3)
-                && mc.sampling.as_ref().unwrap().top_p == Some(0.9)
-            {
-                println!("  Profile:   coding");
-            } else if mc.sampling.as_ref().unwrap().temperature == Some(0.7)
-                && mc.sampling.as_ref().unwrap().top_p == Some(0.95)
-            {
-                println!("  Profile:   chat");
-            } else if mc.sampling.as_ref().unwrap().temperature == Some(0.2)
-                && mc.sampling.as_ref().unwrap().top_p == Some(0.5)
-            {
-                println!("  Profile:   analysis");
-            } else if mc.sampling.as_ref().unwrap().temperature == Some(0.9)
-                && mc.sampling.as_ref().unwrap().top_p == Some(0.95)
-            {
-                println!("  Profile:   creative");
-            } else {
-                println!("  Profile:   custom");
-            }
+            println!(
+                "  Profile:   {}",
+                mc.sampling.as_ref().unwrap().preset_label()
+            );
         } else if let Some(p) = &mc.profile {
             println!("  Profile:   {}", p);
         }

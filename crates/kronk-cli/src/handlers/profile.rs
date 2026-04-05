@@ -42,22 +42,7 @@ pub fn cmd_profile(config: &Config, command: crate::cli::ProfileCommands) -> Res
             for (name, srv) in &config.models {
                 // Check if model uses sampling (unified config) or has legacy profile field
                 let profile_str = if let Some(sampling) = &srv.sampling {
-                    // Check if sampling is from a known preset
-                    let _sampling_templates = &config.sampling_templates;
-                    if sampling.temperature == Some(0.3)
-                        && sampling.top_p == Some(0.9)
-                        && sampling.top_k == Some(50)
-                    {
-                        "coding".to_string()
-                    } else if sampling.temperature == Some(0.7) && sampling.top_p == Some(0.95) {
-                        "chat".to_string()
-                    } else if sampling.temperature == Some(0.2) && sampling.top_p == Some(0.5) {
-                        "analysis".to_string()
-                    } else if sampling.temperature == Some(0.9) && sampling.top_p == Some(0.95) {
-                        "creative".to_string()
-                    } else {
-                        "custom".to_string()
-                    }
+                    sampling.preset_label().to_string()
                 } else if let Some(ref profile) = srv.profile {
                     profile.clone()
                 } else {
