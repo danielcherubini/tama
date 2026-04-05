@@ -63,7 +63,7 @@ pub async fn cmd_server_edit(config: &mut Config, name: &str, command: Vec<Strin
         let quant = srv.quant.as_deref().unwrap_or("?");
         println!("  Model:    {} ({})", model, quant);
     }
-    if let Some(_) = srv.sampling {
+    if srv.sampling.is_some() {
         // Show which profile was used based on sampling values
         if srv.sampling.as_ref().unwrap().temperature == Some(0.3)
             && srv.sampling.as_ref().unwrap().top_p == Some(0.9)

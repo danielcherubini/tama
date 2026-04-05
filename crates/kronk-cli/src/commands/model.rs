@@ -568,7 +568,6 @@ async fn cmd_create(
         },
     );
 
-
     config.save()?;
 
     println!("Oh yeah, it's all coming together.");
@@ -579,7 +578,7 @@ async fn cmd_create(
         println!("  Quant:     {}", q);
     }
     if let Some(mc) = config.models.get(&server_name) {
-        if let Some(_) = mc.sampling {
+        if mc.sampling.is_some() {
             // Show which profile was used based on sampling values
             if mc.sampling.as_ref().unwrap().temperature == Some(0.3)
                 && mc.sampling.as_ref().unwrap().top_p == Some(0.9)

@@ -118,10 +118,7 @@ pub async fn cmd_server_add(
 
     // Parse profile if provided and look up sampling template
     let sampling = if let Some(profile_name) = &extracted.profile {
-        config
-            .sampling_templates
-            .get(profile_name)
-            .cloned()
+        config.sampling_templates.get(profile_name).cloned()
     } else {
         None
     };
@@ -157,7 +154,7 @@ pub async fn cmd_server_add(
         println!("  Model:    {} ({})", model, quant);
     }
 
-    if let Some(_) = model_config.sampling {
+    if model_config.sampling.is_some() {
         // Show which profile was used based on sampling values
         if model_config.sampling.as_ref().unwrap().temperature == Some(0.3)
             && model_config.sampling.as_ref().unwrap().top_p == Some(0.9)
