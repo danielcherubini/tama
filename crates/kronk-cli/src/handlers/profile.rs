@@ -78,7 +78,9 @@ pub fn cmd_profile(config: &Config, command: crate::cli::ProfileCommands) -> Res
                 .ok_or_else(|| anyhow::anyhow!("Profile '{}' not found", profile))?;
 
             // Set sampling from template
-            config.models.get_mut(&server).unwrap().sampling = Some(template.clone());
+            let srv = config.models.get_mut(&server).unwrap();
+            srv.sampling = Some(template.clone());
+            srv.profile = None; // Clear legacy profile field
 
             config.save()?;
 

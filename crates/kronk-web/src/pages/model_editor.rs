@@ -575,10 +575,13 @@ pub fn ModelEditor() -> impl IntoView {
                                 model_status
                                     .set(Some((false, format!("Save failed, rolled back: {}", e))));
                             }
-                            Err(_) => {
+                            Err(rename_err) => {
                                 model_status.set(Some((
                                     false,
-                                    format!("Save failed, rollback also failed: {}", e),
+                                    format!(
+                                        "Save failed ({}), and rollback also failed ({})",
+                                        e, rename_err
+                                    ),
                                 )));
                             }
                         }
@@ -1069,9 +1072,9 @@ pub fn ModelEditor() -> impl IntoView {
                                 </thead>
                                 <tbody>
                                    <For
-                                        each=move || quants.get().into_iter().enumerate()
-                                        key=|(_i, (name, _))| name.clone()
-                                        children=move |(_i, (name, q))| {
+                                         each=move || quants.get().into_iter().enumerate()
+                                         key=|(_i, (_name, _))| _i.to_string()
+                                         children=move |(_i, (name, q))| {
                                             let name_arc = Arc::new(name.clone());
                                             view! {
                                                 <tr>
