@@ -117,8 +117,18 @@ pub async fn cmd_server_add(
     }
 
     // Parse profile if provided and look up sampling template
-    let sampling = if let Some(profile_name) = &extracted.profile {
-        config.sampling_templates.get(profile_name).cloned()
+    let sampling = if let Some(ref profile_name) = extracted.profile {
+        config
+            .sampling_templates
+            .get(profile_name)
+            .cloned()
+            .or_else(|| {
+                tracing::warn!(
+                    "Unknown profile '{}' not found in sampling_templates",
+                    profile_name
+                );
+                None
+            })
     } else {
         None
     };

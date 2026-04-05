@@ -77,11 +77,8 @@ pub fn cmd_profile(config: &Config, command: crate::cli::ProfileCommands) -> Res
                 .get(&profile)
                 .ok_or_else(|| anyhow::anyhow!("Profile '{}' not found", profile))?;
 
-            // Set sampling from template and profile field for migration
+            // Set sampling from template
             config.models.get_mut(&server).unwrap().sampling = Some(template.clone());
-
-            // Set profile field for migration compatibility
-            config.models.get_mut(&server).unwrap().profile = Some(profile.clone());
 
             config.save()?;
 
