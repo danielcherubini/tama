@@ -4,7 +4,7 @@ mod migrate;
 mod resolve;
 mod types;
 
-pub use migrate::{migrate_model_cards_to_configs, migrate_profiles_to_model_cards};
+pub use migrate::migrate_cards_to_unified_config;
 pub use types::{
     BackendConfig, Config, General, HealthCheck, ModelConfig, ProxyConfig, Supervisor,
     DEFAULT_PROXY_PORT, MAX_REQUEST_BODY_SIZE,

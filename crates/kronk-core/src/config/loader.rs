@@ -1,4 +1,4 @@
-use super::migrate::{migrate_profiles_to_model_cards, rename_legacy_directories};
+use super::migrate::{migrate_cards_to_unified_config, rename_legacy_directories};
 use super::types::{BackendConfig, Config, General, ModelConfig, ProxyConfig, Supervisor};
 use crate::profiles::Profile;
 use anyhow::{Context, Result};
@@ -68,7 +68,7 @@ impl Config {
         };
 
         config.loaded_from = Some(config_dir.to_path_buf());
-        migrate_profiles_to_model_cards(&mut config)?;
+        migrate_cards_to_unified_config(&mut config)?;
         Ok(config)
     }
 
@@ -139,6 +139,15 @@ impl Default for Config {
                 version: None,
             },
         );
+        backends.insert(
+            "ik_llama".to_string(),
+            BackendConfig {
+                path: None,
+                default_args: vec![],
+                health_check_url: Some("http://localhost:8080/health".to_string()),
+                version: None,
+            },
+        );
 
         let mut models = HashMap::new();
         models.insert(
@@ -160,14 +169,65 @@ impl Default for Config {
                 .into_iter()
                 .map(String::from)
                 .collect(),
-                profile: Some(Profile::Coding),
-                sampling: None,
+                profile: None,
+                sampling: Some(crate::profiles::SamplingParams {
+                    temperature: Some(0.3),
+                    top_p: Some(0.9),
+                    top_k: Some(50),
+                    min_p: Some(0.05),
+                    presence_penalty: Some(0.1),
+                    frequency_penalty: None,
+                    repeat_penalty: None,
+                }),
                 model: None,
                 quant: None,
                 port: None,
                 health_check: None,
                 enabled: true,
                 context_length: None,
+                display_name: None,
+                gpu_layers: None,
+                quants: std::collections::BTreeMap::new(),
+            },
+        );
+        models.insert(
+            "default".to_string(),
+            ModelConfig {
+                backend: "llama_cpp".to_string(),
+                args: vec![
+                    "--host",
+                    "0.0.0.0",
+                    "-m",
+                    "path/to/model.gguf",
+                    "-ngl",
+                    "999",
+                    "-fa",
+                    "1",
+                    "-c",
+                    "8192",
+                ]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+                profile: None,
+                sampling: Some(crate::profiles::SamplingParams {
+                    temperature: Some(0.3),
+                    top_p: Some(0.9),
+                    top_k: Some(50),
+                    min_p: Some(0.05),
+                    presence_penalty: Some(0.1),
+                    frequency_penalty: None,
+                    repeat_penalty: None,
+                }),
+                model: None,
+                quant: None,
+                port: None,
+                health_check: None,
+                enabled: true,
+                context_length: None,
+                display_name: None,
+                gpu_layers: None,
+                quants: std::collections::BTreeMap::new(),
             },
         );
 
