@@ -238,7 +238,7 @@ async fn test_cmd_server_edit_valid_profile_succeeds() {
     let mut config = kronk_core::config::Config::load_from(temp_dir.path())
         .expect("Failed to load/create default config");
     // Insert a dummy server first
-    config.models.insert(
+      config.models.insert(
         "test_server".to_string(),
         kronk_core::config::ModelConfig {
             backend: "test".to_string(),
@@ -251,6 +251,9 @@ async fn test_cmd_server_edit_valid_profile_succeeds() {
             health_check: None,
             enabled: true,
             context_length: None,
+            display_name: None,
+            gpu_layers: None,
+            quants: std::collections::BTreeMap::new(),
         },
     );
     // Need a matching backend

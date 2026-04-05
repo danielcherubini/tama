@@ -116,28 +116,31 @@ pub async fn cmd_server_add(
         }
     }
 
-    // Parse profile if provided
-    let profile = extracted
-        .profile
-        .as_ref()
-        .map(|s| {
-            s.parse::<kronk_core::profiles::Profile>()
-                .map_err(|e| anyhow::anyhow!(e))
-        })
-        .transpose()?;
+    // Parse profile if provided and look up sampling template
+    let sampling = if let Some(profile_name) = &extracted.profile {
+        config
+            .sampling_templates
+            .get(profile_name)
+            .cloned()
+    } else {
+        None
+    };
 
     // Build ModelConfig
     let model_config = kronk_core::config::ModelConfig {
         backend: backend_key.clone(),
         args: extracted.remaining_args.clone(),
-        profile,
-        sampling: None,
+        profile: extracted.profile.clone(), // Keep for migration compatibility
+        sampling,
         model: extracted.model.clone(),
         quant: quant_name,
         port: extracted.port,
         health_check: None,
         enabled: true,
         context_length: extracted.context_length,
+        display_name: None,
+        gpu_layers: None,
+        quants: std::collections::BTreeMap::new(),
     };
 
     config.models.insert(name.to_string(), model_config.clone());
@@ -154,8 +157,27 @@ pub async fn cmd_server_add(
         println!("  Model:    {} ({})", model, quant);
     }
 
-    if let Some(ref profile) = model_config.profile {
-        println!("  Profile:  {}", profile);
+    if let Some(_) = model_config.sampling {
+        // Show which profile was used based on sampling values
+        if model_config.sampling.as_ref().unwrap().temperature == Some(0.3)
+            && model_config.sampling.as_ref().unwrap().top_p == Some(0.9)
+        {
+            println!("  Profile:  coding");
+        } else if model_config.sampling.as_ref().unwrap().temperature == Some(0.7)
+            && model_config.sampling.as_ref().unwrap().top_p == Some(0.95)
+        {
+            println!("  Profile:  chat");
+        } else if model_config.sampling.as_ref().unwrap().temperature == Some(0.2)
+            && model_config.sampling.as_ref().unwrap().top_p == Some(0.5)
+        {
+            println!("  Profile:  analysis");
+        } else if model_config.sampling.as_ref().unwrap().temperature == Some(0.9)
+            && model_config.sampling.as_ref().unwrap().top_p == Some(0.95)
+        {
+            println!("  Profile:  creative");
+        } else {
+            println!("  Profile:  custom");
+        }
     }
 
     // Use single registry for both lookups

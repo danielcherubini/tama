@@ -922,18 +922,21 @@ async fn _setup_model_after_pull_with_config(
     config
         .models
         .entry(model_key)
-        .or_insert_with(|| crate::config::ModelConfig {
-            backend: "llama_cpp".to_string(),
-            model: Some(repo_id.to_string()),
-            quant: Some(quant_key),
-            context_length: spec.context_length,
-            enabled: true,
-            args: vec![],
-            profile: None,
-            sampling: None,
-            port: None,
-            health_check: None,
-        });
+.or_insert_with(|| crate::config::ModelConfig {
+             backend: "llama_cpp".to_string(),
+             model: Some(repo_id.to_string()),
+             quant: Some(quant_key),
+             context_length: spec.context_length,
+         enabled: true,
+              args: vec![],
+              sampling: None,
+              port: None,
+              health_check: None,
+              profile: None,
+              display_name: None,
+              gpu_layers: None,
+              quants: std::collections::BTreeMap::new(),
+          });
 
     // Save card and config (best-effort — download is already marked Completed)
     let _ = std::fs::create_dir_all(&configs_dir);

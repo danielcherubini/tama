@@ -1,6 +1,5 @@
 use crate::config::Config;
-use crate::models::card::{ModelCard, QuantInfo};
-use crate::profiles::SamplingParams;
+use crate::models::card::ModelCard;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -34,7 +33,7 @@ pub fn migrate_cards_to_unified_config(config: &mut Config) -> anyhow::Result<()
     // 4. For each (key, model_config) in config.models
     let mut migrated_count = 0;
     for model_config in config.models.values_mut() {
-        // First, handle the deprecated profile field for ALL models (with or without model field)
+        // First, handle sampling resolution for ALL models (with or without model field)
         if model_config.sampling.is_none() {
             if let Some(profile_name) = &model_config.profile {
                 // look up card.sampling[profile_name] if we have the card, otherwise use sampling_templates
@@ -106,14 +105,9 @@ pub fn migrate_cards_to_unified_config(config: &mut Config) -> anyhow::Result<()
             }
 
             // Increment migrated_count if we migrated from a card or resolved a profile
-            if card_data.get(&filename).is_some() || model_config.sampling.is_some() {
+            if card_data.contains_key(&filename) || model_config.sampling.is_some() {
                 migrated_count += 1;
             }
-        }
-
-        // Clear profile field for all models (not just those with a model field)
-        if model_config.profile.is_some() {
-            model_config.profile = None;
         }
     }
 
@@ -121,7 +115,7 @@ pub fn migrate_cards_to_unified_config(config: &mut Config) -> anyhow::Result<()
     config.save()?;
 
     // 6. Delete migrated card files (best-effort)
-    for (filename, _) in &card_data {
+    for filename in card_data.keys() {
         let path = configs_dir.join(filename);
         if path.exists() {
             if let Err(e) = fs::remove_file(&path) {
@@ -155,6 +149,7 @@ pub fn migrate_cards_to_unified_config(config: &mut Config) -> anyhow::Result<()
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn migrate_model_cards_to_configs(config: &crate::config::Config) -> anyhow::Result<()> {
     let configs_dir = config.configs_dir()?;
     let models_dir = config
@@ -180,7 +175,7 @@ pub fn migrate_model_cards_to_configs(config: &crate::config::Config) -> anyhow:
                 let new_filename = format!(
                     "{}--{}.toml",
                     company,
-                    model_entry.file_name().to_string_lossy().to_string()
+                    model_entry.file_name().to_string_lossy()
                 );
                 let new_path = configs_dir.join(&new_filename);
                 if new_path.exists() {
@@ -215,6 +210,7 @@ pub fn migrate_model_cards_to_configs(config: &crate::config::Config) -> anyhow:
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn migrate_profiles_to_model_cards(config: &mut Config) -> anyhow::Result<()> {
     let configs_dir = config.configs_dir()?;
     let profiles_dir = config
@@ -352,7 +348,6 @@ pub fn rename_legacy_directories(config_dir: &std::path::Path) -> anyhow::Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::types::{ModelConfig, QuantEntry};
     use crate::models::card::ModelCard;
     use crate::profiles::SamplingParams;
     use std::collections::{BTreeMap, HashMap};
@@ -375,7 +370,6 @@ mod tests {
 backend = "llama_cpp"
 model = "org/repo"
 quant = "Q4_K_M"
-profile = "coding"
 "#;
         fs::write(&config_path, config_toml).unwrap();
 
@@ -404,11 +398,21 @@ top_k = 40
             backends: HashMap::new(),
             models: {
                 let mut m = HashMap::new();
-                let mut model = ModelConfig::default();
-                model.backend = "llama_cpp".to_string();
-                model.model = Some("org/repo".to_string());
-                model.quant = Some("Q4_K_M".to_string());
-                model.profile = Some("coding".to_string());
+                let mut model = crate::config::ModelConfig {
+                    backend: "llama_cpp".to_string(),
+                    args: vec![],
+                    sampling: None,
+                    model: Some("org/repo".to_string()),
+                    quant: Some("Q4_K_M".to_string()),
+                    port: None,
+                    health_check: None,
+                    enabled: true,
+                    context_length: None,
+                    profile: None,
+                    display_name: None,
+                    gpu_layers: None,
+                    quants: BTreeMap::new(),
+                };
                 m.insert("test-model".to_string(), model);
                 m
             },
@@ -449,7 +453,6 @@ top_k = 40
             model_config.sampling.as_ref().unwrap().temperature,
             Some(0.2)
         );
-        assert_eq!(model_config.profile, None);
 
         // Card file should be gone
         assert!(!card_path.exists());
@@ -476,7 +479,6 @@ top_k = 40
 backend = "llama_cpp"
 model = "org/repo"
 quant = "Q4_K_M"
-profile = "coding"
 "#;
         fs::write(&config_path, config_toml).unwrap();
 
@@ -505,11 +507,21 @@ top_k = 40
             backends: HashMap::new(),
             models: {
                 let mut m = HashMap::new();
-                let mut model = ModelConfig::default();
-                model.backend = "llama_cpp".to_string();
-                model.model = Some("org/repo".to_string());
-                model.quant = Some("Q4_K_M".to_string());
-                model.profile = Some("coding".to_string());
+                let mut model = crate::config::ModelConfig {
+                    backend: "llama_cpp".to_string(),
+                    args: vec![],
+                    sampling: None,
+                    model: Some("org/repo".to_string()),
+                    quant: Some("Q4_K_M".to_string()),
+                    port: None,
+                    health_check: None,
+                    enabled: true,
+                    context_length: None,
+                    profile: None,
+                    display_name: None,
+                    gpu_layers: None,
+                    quants: BTreeMap::new(),
+                };
                 m.insert("test-model".to_string(), model);
                 m
             },
@@ -542,7 +554,6 @@ top_k = 40
         assert_eq!(model_config.display_name, Some("TestModel".to_string()));
         assert_eq!(model_config.gpu_layers, Some(99));
         assert_eq!(model_config.context_length, Some(8192));
-        assert_eq!(model_config.profile, None);
         assert!(!card_path.exists());
 
         // Second migration - should be no-op
@@ -553,68 +564,6 @@ top_k = 40
         assert_eq!(model_config.display_name, Some("TestModel".to_string()));
         assert_eq!(model_config.gpu_layers, Some(99));
         assert_eq!(model_config.context_length, Some(8192));
-        assert_eq!(model_config.profile, None);
-    }
-
-    #[test]
-    fn test_migrate_no_card_with_profile() {
-        let dir = tempdir().unwrap();
-        let config_dir = dir.path();
-
-        // Create config.toml with profile but no model card
-        let config_path = config_dir.join("config.toml");
-        let config_toml = r#"
-[models.test-model]
-backend = "llama_cpp"
-profile = "coding"
-"#;
-        fs::write(&config_path, config_toml).unwrap();
-
-        // Setup config object with sampling_templates
-        let mut config = Config {
-            general: crate::config::types::General::default(),
-            backends: HashMap::new(),
-            models: {
-                let mut m = HashMap::new();
-                let mut model = ModelConfig::default();
-                model.backend = "llama_cpp".to_string();
-                model.profile = Some("coding".to_string());
-                m.insert("test-model".to_string(), model);
-                m
-            },
-            supervisor: crate::config::types::Supervisor::default(),
-            sampling_templates: {
-                let mut t = HashMap::new();
-                t.insert(
-                    "coding".to_string(),
-                    SamplingParams {
-                        temperature: Some(0.3),
-                        top_p: Some(0.9),
-                        top_k: Some(50),
-                        min_p: Some(0.05),
-                        presence_penalty: Some(0.1),
-                        frequency_penalty: None,
-                        repeat_penalty: None,
-                    },
-                );
-                t
-            },
-            proxy: crate::config::types::ProxyConfig::default(),
-            loaded_from: Some(config_dir.to_path_buf()),
-        };
-
-        // Run migration - should resolve profile from sampling_templates
-        migrate_cards_to_unified_config(&mut config).unwrap();
-
-        // Verify profile was resolved to sampling
-        let model_config = config.models.get("test-model").unwrap();
-        assert_eq!(model_config.profile, None);
-        assert!(model_config.sampling.is_some());
-        assert_eq!(
-            model_config.sampling.as_ref().unwrap().temperature,
-            Some(0.3)
-        );
-        assert_eq!(model_config.sampling.as_ref().unwrap().top_k, Some(50));
     }
 
     #[test]
@@ -659,21 +608,32 @@ size_bytes = 8000000000
             backends: HashMap::new(),
             models: {
                 let mut m = HashMap::new();
-                let mut model = ModelConfig::default();
-                model.backend = "llama_cpp".to_string();
-                model.model = Some("org/repo".to_string());
-                model.quant = Some("Q4_K_M".to_string());
-                // Pre-populate with existing quants
-                let mut quants = std::collections::BTreeMap::new();
-                quants.insert(
-                    "Q4_K_M".to_string(),
-                    crate::config::types::QuantEntry {
-                        file: "existing-model-Q4_K_M.gguf".to_string(),
-                        size_bytes: Some(1000000000),
-                        context_length: None,
+                let mut model = crate::config::ModelConfig {
+                    backend: "llama_cpp".to_string(),
+                    args: vec![],
+                    sampling: None,
+                    model: Some("org/repo".to_string()),
+                    quant: Some("Q4_K_M".to_string()),
+                    port: None,
+                    health_check: None,
+                    enabled: true,
+                    context_length: None,
+                    profile: None,
+                    display_name: None,
+                    gpu_layers: None,
+                    quants: {
+                        let mut quants = std::collections::BTreeMap::new();
+                        quants.insert(
+                            "Q4_K_M".to_string(),
+                            crate::config::types::QuantEntry {
+                                file: "existing-model-Q4_K_M.gguf".to_string(),
+                                size_bytes: Some(1000000000),
+                                context_length: None,
+                            },
+                        );
+                        quants
                     },
-                );
-                model.quants = quants;
+                };
                 m.insert("test-model".to_string(), model);
                 m
             },

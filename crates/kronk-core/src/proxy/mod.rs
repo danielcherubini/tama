@@ -109,6 +109,9 @@ mod tests {
                 enabled: true,
                 context_length: None,
                 profile: None,
+                display_name: None,
+                gpu_layers: None,
+                quants: std::collections::BTreeMap::new(),
             },
         );
         let state = ProxyState::new(config, None);
@@ -138,6 +141,9 @@ mod tests {
                 enabled: true,
                 context_length: None,
                 profile: None,
+                display_name: None,
+                gpu_layers: None,
+                quants: std::collections::BTreeMap::new(),
             },
         );
         config.models.insert(
@@ -153,6 +159,9 @@ mod tests {
                 enabled: true,
                 context_length: None,
                 profile: None,
+                display_name: None,
+                gpu_layers: None,
+                quants: std::collections::BTreeMap::new(),
             },
         );
         let state = ProxyState::new(config, None);
@@ -160,7 +169,10 @@ mod tests {
         // Rename should fail because new name is taken
         let result = state.rename_model("old-name", "new-name").await;
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "model name 'new-name' already taken");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "model name 'new-name' already taken"
+        );
     }
 
     #[tokio::test]
@@ -179,6 +191,9 @@ mod tests {
                 enabled: true,
                 context_length: None,
                 profile: None,
+                display_name: None,
+                gpu_layers: None,
+                quants: std::collections::BTreeMap::new(),
             },
         );
         let state = ProxyState::new(config, None);
@@ -186,7 +201,10 @@ mod tests {
         // Rename should fail because old name doesn't exist
         let result = state.rename_model("non-existent", "new-name").await;
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "model 'non-existent' does not exist");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "model 'non-existent' does not exist"
+        );
     }
 
     #[tokio::test]
@@ -205,6 +223,9 @@ mod tests {
                 enabled: true,
                 context_length: None,
                 profile: None,
+                display_name: None,
+                gpu_layers: None,
+                quants: std::collections::BTreeMap::new(),
             },
         );
         let state = ProxyState::new(config, None);
@@ -231,6 +252,9 @@ mod tests {
                 enabled: true,
                 context_length: None,
                 profile: None,
+                display_name: None,
+                gpu_layers: None,
+                quants: std::collections::BTreeMap::new(),
             },
         );
         let state = ProxyState::new(config, None);

@@ -40,11 +40,29 @@ pub fn cmd_profile(config: &Config, command: crate::cli::ProfileCommands) -> Res
             // Show which models use which profile
             println!("Model assignments:");
             for (name, srv) in &config.models {
-                let profile_str = srv
-                    .profile
-                    .as_ref()
-                    .map(|p| p.to_string())
-                    .unwrap_or_else(|| "none".to_string());
+                // Check if model uses sampling (unified config) or has legacy profile field
+                let profile_str = if let Some(sampling) = &srv.sampling {
+                    // Check if sampling is from a known preset
+                    let _sampling_templates = &config.sampling_templates;
+                    if sampling.temperature == Some(0.3)
+                        && sampling.top_p == Some(0.9)
+                        && sampling.top_k == Some(50)
+                    {
+                        "coding".to_string()
+                    } else if sampling.temperature == Some(0.7) && sampling.top_p == Some(0.95) {
+                        "chat".to_string()
+                    } else if sampling.temperature == Some(0.2) && sampling.top_p == Some(0.5) {
+                        "analysis".to_string()
+                    } else if sampling.temperature == Some(0.9) && sampling.top_p == Some(0.95) {
+                        "creative".to_string()
+                    } else {
+                        "custom".to_string()
+                    }
+                } else if let Some(ref profile) = srv.profile {
+                    profile.clone()
+                } else {
+                    "none".to_string()
+                };
                 println!("  {} -> {}", name, profile_str);
             }
 
@@ -68,9 +86,18 @@ pub fn cmd_profile(config: &Config, command: crate::cli::ProfileCommands) -> Res
                 );
             }
 
-            let resolved: Profile = profile.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+            // Look up the sampling template for this profile
+            let template = config
+                .sampling_templates
+                .get(&profile)
+                .ok_or_else(|| anyhow::anyhow!("Profile '{}' not found", profile))?;
 
-            config.models.get_mut(&server).unwrap().profile = Some(resolved);
+            // Set sampling from template and profile field for migration
+            config.models.get_mut(&server).unwrap().sampling = Some(template.clone());
+
+            // Set profile field for migration compatibility
+            config.models.get_mut(&server).unwrap().profile = Some(profile.clone());
+
             config.save()?;
 
             println!("Oh yeah, it's all coming together.");
@@ -85,6 +112,7 @@ pub fn cmd_profile(config: &Config, command: crate::cli::ProfileCommands) -> Res
                 .get_mut(&server)
                 .with_context(|| format!("Model '{}' not found", server))?;
 
+            srv.sampling = None;
             srv.profile = None;
             config.save()?;
 

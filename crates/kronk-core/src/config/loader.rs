@@ -169,7 +169,6 @@ impl Default for Config {
                 .into_iter()
                 .map(String::from)
                 .collect(),
-                profile: None,
                 sampling: Some(crate::profiles::SamplingParams {
                     temperature: Some(0.3),
                     top_p: Some(0.9),
@@ -185,46 +184,7 @@ impl Default for Config {
                 health_check: None,
                 enabled: true,
                 context_length: None,
-                display_name: None,
-                gpu_layers: None,
-                quants: std::collections::BTreeMap::new(),
-            },
-        );
-        models.insert(
-            "default".to_string(),
-            ModelConfig {
-                backend: "llama_cpp".to_string(),
-                args: vec![
-                    "--host",
-                    "0.0.0.0",
-                    "-m",
-                    "path/to/model.gguf",
-                    "-ngl",
-                    "999",
-                    "-fa",
-                    "1",
-                    "-c",
-                    "8192",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect(),
                 profile: None,
-                sampling: Some(crate::profiles::SamplingParams {
-                    temperature: Some(0.3),
-                    top_p: Some(0.9),
-                    top_k: Some(50),
-                    min_p: Some(0.05),
-                    presence_penalty: Some(0.1),
-                    frequency_penalty: None,
-                    repeat_penalty: None,
-                }),
-                model: None,
-                quant: None,
-                port: None,
-                health_check: None,
-                enabled: true,
-                context_length: None,
                 display_name: None,
                 gpu_layers: None,
                 quants: std::collections::BTreeMap::new(),

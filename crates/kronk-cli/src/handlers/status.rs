@@ -256,10 +256,24 @@ fn print_offline_status(config: &Config) {
         }
         println!(
             "  Profile:  {}",
-            srv.profile
-                .as_ref()
-                .map(|p| p.to_string())
-                .unwrap_or_else(|| "none".to_string())
+            if let Some(sampling) = &srv.sampling {
+                // Show which profile was used based on sampling values
+                if sampling.temperature == Some(0.3) && sampling.top_p == Some(0.9) {
+                    "coding".to_string()
+                } else if sampling.temperature == Some(0.7) && sampling.top_p == Some(0.95) {
+                    "chat".to_string()
+                } else if sampling.temperature == Some(0.2) && sampling.top_p == Some(0.5) {
+                    "analysis".to_string()
+                } else if sampling.temperature == Some(0.9) && sampling.top_p == Some(0.95) {
+                    "creative".to_string()
+                } else {
+                    "custom".to_string()
+                }
+            } else if let Some(ref profile) = srv.profile {
+                profile.clone()
+            } else {
+                "none".to_string()
+            }
         );
         println!("  Backend:  {} ({})", srv.backend, backend_path);
         if !srv.enabled {
