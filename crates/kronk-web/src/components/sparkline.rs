@@ -1,12 +1,11 @@
 use leptos::prelude::*;
 
 #[component]
-#[allow(dead_code)]
 pub fn SparklineChart(data: Vec<f32>, max_value: f32, color: String, height: f32) -> impl IntoView {
     // Handle empty data case
     if data.is_empty() {
         return view! {
-            <svg viewBox="0 0 100 {height}" class="sparkline" preserveAspectRatio="none"/>
+            <svg viewBox=format!("0 0 100 {height}") class="sparkline" preserveAspectRatio="none"/>
         }
         .into_any();
     }
@@ -18,26 +17,29 @@ pub fn SparklineChart(data: Vec<f32>, max_value: f32, color: String, height: f32
         data
     };
 
+    // Guard against division by zero if max_value is 0
+    let safe_max = if max_value > 0.0 { max_value } else { 1.0 };
+
     // Build path data strings
     let mut fill_path = String::new();
     let mut line_path = String::new();
 
     // Start at first point
     let first_x = 0.0;
-    let first_y = height - (points[0] / max_value * height).clamp(0.0, height);
+    let first_y = height - (points[0] / safe_max * height).clamp(0.0, height);
     fill_path.push_str(&format!("M {first_x},{first_y}"));
     line_path.push_str(&format!("M {first_x},{first_y}"));
 
     // Add remaining points
     for (i, &value) in points.iter().enumerate().skip(1) {
         let x = (i as f32 / (points.len() - 1) as f32) * 100.0;
-        let y = height - (value / max_value * height).clamp(0.0, height);
+        let y = height - (value / safe_max * height).clamp(0.0, height);
         fill_path.push_str(&format!(" L {x},{y}"));
         line_path.push_str(&format!(" L {x},{y}"));
     }
 
     // Close the fill path to bottom corners
-    fill_path.push_str(" L 100,0 L 0,0 Z");
+    fill_path.push_str(&format!(" L 100,{height} L 0,{height} Z"));
 
     view! {
         <svg
