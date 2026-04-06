@@ -17,6 +17,24 @@ struct ModelsResponse {
     models: Vec<ModelEntry>,
 }
 
+fn partition_models_by_loaded(models: Vec<ModelEntry>) -> (Vec<ModelEntry>, Vec<ModelEntry>) {
+    let mut loaded: Vec<ModelEntry> = vec![];
+    let mut unloaded: Vec<ModelEntry> = vec![];
+
+    for model in models {
+        if model.loaded {
+            loaded.push(model);
+        } else {
+            unloaded.push(model);
+        }
+    }
+
+    loaded.sort_by(|a, b| a.id.cmp(&b.id));
+    unloaded.sort_by(|a, b| a.id.cmp(&b.id));
+
+    (loaded, unloaded)
+}
+
 #[component]
 pub fn Models() -> impl IntoView {
     // Refresh trigger signal — increment to force a refetch
@@ -73,72 +91,159 @@ pub fn Models() -> impl IntoView {
                                 <a href="/pull"><button class="btn btn-primary mt-2">"Pull a Model"</button></a>
                             </div>
                         }.into_any(),
-                        Some(data) => view! {
-                            <div class="models-grid">
-                                {data.models.into_iter().map(|m| {
-                                    let id_load = m.id.clone();
-                                    let id_unload = m.id.clone();
-                                    let id_edit = m.id.clone();
-                                    let enabled_class = if m.enabled { "badge badge-success" } else { "badge badge-warning" };
-                                    let loaded_class = if m.loaded { "badge badge-success" } else { "badge badge-muted" };
-                                    view! {
-                                        <div class="model-card card">
-                                            <div class="model-card__header">
-                                                <span class="model-card__id text-mono">{m.id.clone()}</span>
-                                                <div class="model-card__badges">
-                                                    <span class=enabled_class>
-                                                        {if m.enabled { "Enabled" } else { "Disabled" }}
-                                                    </span>
-                                    <span class=loaded_class>
-                                        {if m.loaded { "Loaded" } else { "Idle" }}
-                                    </span>
+                        Some(data) => {
+                            let (loaded, unloaded) = partition_models_by_loaded(data.models);
+                            view! {
+                                <div>
+                                    {if !loaded.is_empty() {
+                                        view! {
+                                            <div class="model-section">
+                                                <h2 class="model-section__title">"Loaded Models"</h2>
+                                                <div class="models-grid">
+                                                    {loaded.into_iter().map(|m| {
+                                                        let id_load = m.id.clone();
+                                                        let id_unload = m.id.clone();
+                                                        let id_edit = m.id.clone();
+                                                        let enabled_class = if m.enabled { "badge badge-success" } else { "badge badge-warning" };
+                                                        let loaded_class = if m.loaded { "badge badge-success" } else { "badge badge-muted" };
+                                                        view! {
+                                                            <div class="model-card card">
+                                                                <div class="model-card__header">
+                                                                    <span class="model-card__id text-mono">{m.id.clone()}</span>
+                                                                    <div class="model-card__badges">
+                                                                        <span class=enabled_class>
+                                                                            {if m.enabled { "Enabled" } else { "Disabled" }}
+                                                                        </span>
+                                                                        <span class=loaded_class>
+                                                                            {if m.loaded { "Loaded" } else { "Idle" }}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                                <div class="model-card__body">
+                                                                    <div class="model-card__field">
+                                                                        <span class="model-card__label">"Backend"</span>
+                                                                        <span class="model-card__value text-mono">{m.backend}</span>
+                                                                    </div>
+                                                                    <div class="model-card__field">
+                                                                        <span class="model-card__label">"Model"</span>
+                                                                        <span class="model-card__value text-mono">{m.model}</span>
+                                                                    </div>
+                                                                    {m.quant.map(|q| view! {
+                                                                        <div class="model-card__field">
+                                                                            <span class="model-card__label">"Quant"</span>
+                                                                            <span class="model-card__value text-mono">{q}</span>
+                                                                        </div>
+                                                                    })}
+                                                                </div>
+                                                                <div class="model-card__actions">
+                                                                    {if m.loaded {
+                                                                        view! {
+                                                                            <button
+                                                                                class="btn btn-danger btn-sm"
+                                                                                on:click=move |_| { unload_action.dispatch(id_unload.clone()); }
+                                                                            >
+                                                                                "Unload"
+                                                                            </button>
+                                                                        }.into_any()
+                                                                    } else {
+                                                                        view! {
+                                                                            <button
+                                                                                class="btn btn-success btn-sm"
+                                                                                on:click=move |_| { load_action.dispatch(id_load.clone()); }
+                                                                            >
+                                                                                "Load"
+                                                                            </button>
+                                                                        }.into_any()
+                                                                    }}
+                                                                    <A href=format!("/models/{}/edit", id_edit)>
+                                                                        <button class="btn btn-secondary btn-sm">"Edit"</button>
+                                                                    </A>
+                                                                </div>
+                                                            </div>
+                                                        }
+                                                    }).collect::<Vec<_>>()}
                                                 </div>
                                             </div>
-                                            <div class="model-card__body">
-                                                <div class="model-card__field">
-                                                    <span class="model-card__label">"Backend"</span>
-                                                    <span class="model-card__value text-mono">{m.backend}</span>
+                                        }.into_any()
+                                    } else {
+                                        view! { <div></div> }.into_any()
+                                    }}
+                                    {if !unloaded.is_empty() {
+                                        view! {
+                                            <div class="model-section">
+                                                <h2 class="model-section__title">"Unloaded Models"</h2>
+                                                <div class="models-grid">
+                                                    {unloaded.into_iter().map(|m| {
+                                                        let id_load = m.id.clone();
+                                                        let id_unload = m.id.clone();
+                                                        let id_edit = m.id.clone();
+                                                        let enabled_class = if m.enabled { "badge badge-success" } else { "badge badge-warning" };
+                                                        let loaded_class = if m.loaded { "badge badge-success" } else { "badge badge-muted" };
+                                                        view! {
+                                                            <div class="model-card card">
+                                                                <div class="model-card__header">
+                                                                    <span class="model-card__id text-mono">{m.id.clone()}</span>
+                                                                    <div class="model-card__badges">
+                                                                        <span class=enabled_class>
+                                                                            {if m.enabled { "Enabled" } else { "Disabled" }}
+                                                                        </span>
+                                                                        <span class=loaded_class>
+                                                                            {if m.loaded { "Loaded" } else { "Idle" }}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                                <div class="model-card__body">
+                                                                    <div class="model-card__field">
+                                                                        <span class="model-card__label">"Backend"</span>
+                                                                        <span class="model-card__value text-mono">{m.backend}</span>
+                                                                    </div>
+                                                                    <div class="model-card__field">
+                                                                        <span class="model-card__label">"Model"</span>
+                                                                        <span class="model-card__value text-mono">{m.model}</span>
+                                                                    </div>
+                                                                    {m.quant.map(|q| view! {
+                                                                        <div class="model-card__field">
+                                                                            <span class="model-card__label">"Quant"</span>
+                                                                            <span class="model-card__value text-mono">{q}</span>
+                                                                        </div>
+                                                                    })}
+                                                                </div>
+                                                                <div class="model-card__actions">
+                                                                    {if m.loaded {
+                                                                        view! {
+                                                                            <button
+                                                                                class="btn btn-danger btn-sm"
+                                                                                on:click=move |_| { unload_action.dispatch(id_unload.clone()); }
+                                                                            >
+                                                                                "Unload"
+                                                                            </button>
+                                                                        }.into_any()
+                                                                    } else {
+                                                                        view! {
+                                                                            <button
+                                                                                class="btn btn-success btn-sm"
+                                                                                on:click=move |_| { load_action.dispatch(id_load.clone()); }
+                                                                            >
+                                                                                "Load"
+                                                                            </button>
+                                                                        }.into_any()
+                                                                    }}
+                                                                    <A href=format!("/models/{}/edit", id_edit)>
+                                                                        <button class="btn btn-secondary btn-sm">"Edit"</button>
+                                                                    </A>
+                                                                </div>
+                                                            </div>
+                                                        }
+                                                    }).collect::<Vec<_>>()}
                                                 </div>
-                                                <div class="model-card__field">
-                                                    <span class="model-card__label">"Model"</span>
-                                                    <span class="model-card__value text-mono">{m.model}</span>
-                                                </div>
-                                                {m.quant.map(|q| view! {
-                                                    <div class="model-card__field">
-                                                        <span class="model-card__label">"Quant"</span>
-                                                        <span class="model-card__value text-mono">{q}</span>
-                                                    </div>
-                                                })}
                                             </div>
-                                            <div class="model-card__actions">
-                                                {if m.loaded {
-                                                    view! {
-                                                        <button
-                                                            class="btn btn-danger btn-sm"
-                                                            on:click=move |_| { unload_action.dispatch(id_unload.clone()); }
-                                                        >
-                                                            "Unload"
-                                                        </button>
-                                                    }.into_any()
-                                                } else {
-                                                    view! {
-                                                        <button
-                                                            class="btn btn-success btn-sm"
-                                                            on:click=move |_| { load_action.dispatch(id_load.clone()); }
-                                                        >
-                                                            "Load"
-                                                        </button>
-                                                    }.into_any()
-                                                }}
-                                                <A href=format!("/models/{}/edit", id_edit)>
-                                                    <button class="btn btn-secondary btn-sm">"Edit"</button>
-                                                </A>
-                                            </div>
-                                        </div>
-                                    }
-                                }).collect::<Vec<_>>()}
-                            </div>
-                        }.into_any(),
+                                        }.into_any()
+                                    } else {
+                                        view! { <div></div> }.into_any()
+                                    }}
+                                </div>
+                            }.into_any()
+                        },
                         None => view! {
                             <div class="card">
                                 <p class="text-error">"Failed to load models."</p>
@@ -155,10 +260,7 @@ pub fn Models() -> impl IntoView {
 mod tests {
     use super::*;
 
-    // Stub for TDD - returns empty partitions (will fail tests)
-    fn partition_models_by_loaded(models: Vec<ModelEntry>) -> (Vec<ModelEntry>, Vec<ModelEntry>) {
-        (vec![], vec![])
-    }
+    // partition_models_by_loaded is defined above
 
     #[test]
     fn test_all_loaded_returns_n_zero() {
