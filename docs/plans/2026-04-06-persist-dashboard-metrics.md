@@ -69,7 +69,7 @@ The plan requires a user-tunable retention window for stored metric samples. The
 ### Task 2: DB migration v4 — `system_metrics_history` table and queries
 
 **Context:**
-Koji already uses a SQLite database at `<config_dir>/koji.db` with a `PRAGMA user_version`-driven migration system in `crates/koji-core/src/db/migrations.rs` (currently at `LATEST_VERSION = 3`). All write/read helpers live in `crates/koji-core/src/db/queries.rs` and take a plain `&Connection`. We add a new migration (v4) that creates `system_metrics_history`, plus typed helpers to insert (with inline pruning) and read recent rows. This task is independently commitable: nothing else in the codebase references the new table or helpers yet. Time is stored as `INTEGER` unix milliseconds for sortability and simple range queries.
+Koji already uses a SQLite database at `<config_dir>/koji.db` with a `PRAGMA user_version`-driven migration system in `crates/koji-core/src/db/migrations.rs` (currently at `LATEST_VERSION = 3`). All write/read helpers live in `crates/koji-core/src/db/queries.rs` and take a plain `&Connection`. We add a new migration (v4) that creates `system_metrics_history`, plus typed helpers to insert (with inline pruning) and read recent rows. This task is independently committable: nothing else in the codebase references the new table or helpers yet. Time is stored as `INTEGER` unix milliseconds for sortability and simple range queries.
 
 **Files:**
 - Modify: `crates/koji-core/src/db/migrations.rs`
@@ -522,7 +522,7 @@ This mirrors the existing `handle_pull_job_stream` in `crates/koji-core/src/prox
 ### Task 6: Document the new endpoint in OpenAPI
 
 **Context:**
-The Koji management API is documented in `docs/openapi/koji-api.yaml`. The existing `/koji/v1/system/health` entry lives around line 301. We add a peer entry for `/koji/v1/system/metrics/stream` and a `MetricSample` schema. This task is independently commitable: it touches only docs and has no Rust code dependencies (the schema is hand-written to match Task 3's struct).
+The Koji management API is documented in `docs/openapi/koji-api.yaml`. The existing `/koji/v1/system/health` entry lives around line 301. We add a peer entry for `/koji/v1/system/metrics/stream` and a `MetricSample` schema. This task is independently committable: it touches only docs and has no Rust code dependencies (the schema is hand-written to match Task 3's struct).
 
 **Files:**
 - Modify: `docs/openapi/koji-api.yaml`
