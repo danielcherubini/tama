@@ -208,45 +208,10 @@ pub fn quote_value(value: &str) -> String {
     }
 }
 
-/// Merge multiple argument lists into a single vector.
-///
-/// Combines all provided argument vectors into one, maintaining order and
-/// removing duplicates while preserving the first occurrence of each argument.
-/// Note: This performs exact string matching, not flag-name-based matching.
-///
-/// # Examples
-///
-/// ```
-/// use koji_core::config::merge_args;
-///
-/// let args1 = vec!["--verbose".to_string(), "--model=/path".to_string()];
-/// let args2 = vec!["--quiet".to_string(), "--model=/other".to_string()];
-/// let merged = merge_args(&[args1, args2]).unwrap();
-/// assert_eq!(merged.len(), 4); // verbose, model=/path, quiet, model=/other
-/// assert!(merged.contains(&"--verbose".to_string()));
-/// assert!(merged.contains(&"--model=/path".to_string()));
-/// assert!(merged.contains(&"--quiet".to_string()));
-/// assert!(merged.contains(&"--model=/other".to_string()));
-/// ```
-pub fn merge_args(args_list: &[Vec<String>]) -> Result<Vec<String>> {
-    let mut seen = std::collections::HashSet::new();
-    let mut result = Vec::new();
-
-    for args in args_list {
-        for arg in args {
-            if seen.insert(arg.clone()) {
-                result.push(arg.clone());
-            }
-        }
-    }
-
-    Ok(result)
-}
-
 /// Merge two arg lists with override semantics.
 /// Later arguments fully replace earlier arguments with the same flag.
 /// Returns a flat list suitable for `Command::args`.
-pub fn merge_args_override(base: &[String], override_args: &[String]) -> Vec<String> {
+pub fn merge_args(base: &[String], override_args: &[String]) -> Vec<String> {
     let mut result = base.to_vec();
 
     for arg in override_args {
@@ -258,7 +223,7 @@ pub fn merge_args_override(base: &[String], override_args: &[String]) -> Vec<Str
                 if !a.starts_with('-') {
                     return true;
                 }
-                let a_flag = a.split_whitespace().next().unwrap_or(&a);
+                let a_flag = a.split_whitespace().next().unwrap_or(a);
                 a_flag != flag_name
             });
             result.push(arg.clone());
@@ -513,48 +478,6 @@ mod tests {
     #[test]
     fn test_quote_value_parentheses() {
         assert_eq!(quote_value("cmd(args)"), "\"cmd(args)\"");
-    }
-
-    // ========== merge_args tests ==========
-    #[test]
-    fn test_merge_args_basic() {
-        let args1 = vec!["--verbose".to_string(), "--model=/path".to_string()];
-        let args2 = vec!["--quiet".to_string(), "--help".to_string()];
-        let result = merge_args(&[args1, args2]).unwrap();
-        assert_eq!(result.len(), 4);
-    }
-
-    #[test]
-    fn test_merge_args_with_duplicates() {
-        let args1 = vec!["--verbose".to_string(), "--model=/path".to_string()];
-        let args2 = vec!["--verbose".to_string(), "--quiet".to_string()];
-        let result = merge_args(&[args1, args2]).unwrap();
-        assert_eq!(result.len(), 3);
-        assert!(result.contains(&"--verbose".to_string()));
-    }
-
-    #[test]
-    fn test_merge_args_empty_vectors() {
-        let result = merge_args(&[vec![], vec![]]).unwrap();
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn test_merge_args_single_vector() {
-        let args = vec!["--verbose".to_string(), "--model=/path".to_string()];
-        let result = merge_args(&[args]).unwrap();
-        assert_eq!(result.len(), 2);
-    }
-
-    #[test]
-    fn test_merge_args_preserves_order() {
-        let args1 = vec!["--first".to_string(), "--second".to_string()];
-        let args2 = vec!["--third".to_string(), "--fourth".to_string()];
-        let result = merge_args(&[args1, args2]).unwrap();
-        assert_eq!(result[0], "--first");
-        assert_eq!(result[1], "--second");
-        assert_eq!(result[2], "--third");
-        assert_eq!(result[3], "--fourth");
     }
 
     // ========== group_legacy_flat_args tests ==========
