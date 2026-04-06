@@ -1,10 +1,10 @@
 openapi: 3.1.0
 
 info:
-  title: Kronk Web API
+  title: Koji Web API
   description: |
-    Endpoints served natively by the `kronk-web` process (port 11435).
-    These endpoints are NOT forwarded to the Kronk proxy — they access the
+    Endpoints served natively by the `koji-web` process (port 11435).
+    These endpoints are NOT forwarded to the Koji proxy — they access the
     local filesystem directly for log tailing and config editing.
 
     All endpoints are prefixed with `/api/`.
@@ -14,7 +14,7 @@ info:
 
 servers:
   - url: http://localhost:11435
-    description: Local Kronk web UI (default port)
+    description: Local Koji web UI (default port)
 
 tags:
   - name: web-api
@@ -29,7 +29,7 @@ paths:
       operationId: getLogs
       summary: Get recent log lines
       description: |
-        Returns the last N lines of the `kronk.log` file from the configured
+        Returns the last N lines of the `koji.log` file from the configured
         `logs_dir`. Returns 404 if `logs_dir` was not passed to the web server
         at startup.
       tags: [web-api]
@@ -58,8 +58,8 @@ paths:
                       type: string
               example:
                 lines:
-                  - "2026-04-03T12:00:00Z INFO kronk: starting proxy on 0.0.0.0:11434"
-                  - "2026-04-03T12:00:01Z INFO kronk: loaded model llama3"
+                  - "2026-04-03T12:00:00Z INFO koji: starting proxy on 0.0.0.0:11434"
+                  - "2026-04-03T12:00:01Z INFO koji: loaded model llama3"
         "404":
           description: logs_dir not configured
           content:
@@ -74,7 +74,7 @@ paths:
       operationId: getConfig
       summary: Get current config file contents
       description: |
-        Returns the raw TOML content of the Kronk config file. Returns 404 if
+        Returns the raw TOML content of the Koji config file. Returns 404 if
         `config_path` was not passed to the web server at startup.
       tags: [web-api]
       responses:
@@ -104,11 +104,11 @@ paths:
       operationId: saveConfig
       summary: Save config file contents
       description: |
-        Validates and saves the provided TOML as the Kronk config file.
+        Validates and saves the provided TOML as the Koji config file.
 
         The content is validated by parsing it as a `Config` struct before
-        writing. A restart of the Kronk proxy is required for changes to take
-        effect (use `POST /kronk/v1/system/restart`).
+        writing. A restart of the Koji proxy is required for changes to take
+        effect (use `POST /koji/v1/system/restart`).
 
         **Note:** Only fully valid config files (all required top-level tables
         present) are accepted. Partial TOML edits will be rejected with 422.
@@ -447,4 +447,4 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
           example:
-            error: "Permission denied: /etc/kronk/kronk.toml"
+            error: "Permission denied: /etc/koji/koji.toml"

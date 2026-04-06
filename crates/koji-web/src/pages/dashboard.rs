@@ -56,7 +56,7 @@ pub fn Dashboard() -> impl IntoView {
     // Re-fetch when refresh signal changes.
     let health = LocalResource::new(move || async move {
         let _ = refresh.get(); // track the signal
-        let resp = gloo_net::http::Request::get("/kronk/v1/system/health")
+        let resp = gloo_net::http::Request::get("/koji/v1/system/health")
             .send()
             .await
             .ok()?;
@@ -69,7 +69,7 @@ pub fn Dashboard() -> impl IntoView {
     };
 
     let restart: Action<(), (), LocalStorage> = Action::new_unsync(|_: &()| async move {
-        let _ = gloo_net::http::Request::post("/kronk/v1/system/restart")
+        let _ = gloo_net::http::Request::post("/koji/v1/system/restart")
             .send()
             .await;
     });

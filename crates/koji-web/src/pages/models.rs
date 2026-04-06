@@ -24,7 +24,7 @@ pub fn Models() -> impl IntoView {
 
     let models = LocalResource::new(move || async move {
         let _ = refresh.get(); // track the signal
-        let resp = gloo_net::http::Request::get("/kronk/v1/models")
+        let resp = gloo_net::http::Request::get("/koji/v1/models")
             .send()
             .await
             .ok()?;
@@ -34,7 +34,7 @@ pub fn Models() -> impl IntoView {
     let load_action: Action<String, (), LocalStorage> = Action::new_unsync(move |id: &String| {
         let id = id.clone();
         async move {
-            let _ = gloo_net::http::Request::post(&format!("/kronk/v1/models/{}/load", id))
+            let _ = gloo_net::http::Request::post(&format!("/koji/v1/models/{}/load", id))
                 .send()
                 .await;
             refresh.update(|n| *n += 1);
@@ -44,7 +44,7 @@ pub fn Models() -> impl IntoView {
     let unload_action: Action<String, (), LocalStorage> = Action::new_unsync(move |id: &String| {
         let id = id.clone();
         async move {
-            let _ = gloo_net::http::Request::post(&format!("/kronk/v1/models/{}/unload", id))
+            let _ = gloo_net::http::Request::post(&format!("/koji/v1/models/{}/unload", id))
                 .send()
                 .await;
             refresh.update(|n| *n += 1);

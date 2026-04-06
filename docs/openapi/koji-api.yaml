@@ -1,20 +1,20 @@
 openapi: 3.1.0
 
 info:
-  title: Kronk Management API
+  title: Koji Management API
   description: |
-    Kronk-native management plane for controlling model backends, pulling models
+    Koji-native management plane for controlling model backends, pulling models
     from HuggingFace, and operating the proxy process.
 
     This API is intentionally separate from the OpenAI-compatible `/v1/` surface.
-    All endpoints are prefixed with `/kronk/v1/`.
+    All endpoints are prefixed with `/koji/v1/`.
   version: 1.8.4
   license:
     name: MIT
 
 servers:
   - url: http://localhost:11434
-    description: Local Kronk instance (default port)
+    description: Local Koji instance (default port)
 
 tags:
   - name: models
@@ -30,15 +30,15 @@ paths:
   # Model Management
   # ---------------------------------------------------------------------------
 
-  /kronk/v1/models:
+  /koji/v1/models:
     get:
-      operationId: listKronkModels
+      operationId: listKojiModels
       summary: List all configured models
       description: |
-        Returns all models defined in the Kronk configuration, enriched with
+        Returns all models defined in the Koji configuration, enriched with
         their current runtime state (loaded, PID, idle time, etc.).
 
-        Unlike `GET /v1/models` (OpenAI-spec), this endpoint includes Kronk-specific
+        Unlike `GET /v1/models` (OpenAI-spec), this endpoint includes Koji-specific
         operational fields such as `backend_pid`, `idle_timeout_remaining_secs`,
         and `consecutive_failures`.
       tags: [models]
@@ -48,7 +48,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/KronkModelList"
+                $ref: "#/components/schemas/KojiModelList"
               example:
                 models:
                   - id: llama3
@@ -74,9 +74,9 @@ paths:
                     idle_timeout_remaining_secs: null
                     consecutive_failures: null
 
-  /kronk/v1/models/{id}:
+  /koji/v1/models/{id}:
     get:
-      operationId: getKronkModel
+      operationId: getKojiModel
       summary: Get a single model's runtime state
       description: |
         Returns the configuration and runtime state for a single configured model.
@@ -91,11 +91,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/KronkModel"
+                $ref: "#/components/schemas/KojiModel"
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /kronk/v1/models/{id}/load:
+  /koji/v1/models/{id}/load:
     post:
       operationId: loadModel
       summary: Load a model backend
@@ -107,9 +107,9 @@ paths:
         it returns 200 immediately without re-launching the backend.
 
         The response is synchronous: it blocks until the backend is ready. The
-        duration is bounded by `proxy.startup_timeout_secs` in the Kronk config.
+        duration is bounded by `proxy.startup_timeout_secs` in the Koji config.
 
-        The `id` must match a key in the Kronk config `[models]` table. If the
+        The `id` must match a key in the Koji config `[models]` table. If the
         model is not configured, a `404` is returned.
       tags: [models]
       parameters:
@@ -136,7 +136,7 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
-  /kronk/v1/models/{id}/unload:
+  /koji/v1/models/{id}/unload:
     post:
       operationId: unloadModel
       summary: Unload a model backend
@@ -174,7 +174,7 @@ paths:
   # Pull / Download
   # ---------------------------------------------------------------------------
 
-  /kronk/v1/pulls:
+  /koji/v1/pulls:
     post:
       operationId: pullModel
       summary: Start an async model download
@@ -182,7 +182,7 @@ paths:
         Starts an asynchronous download of a GGUF model file from HuggingFace.
 
         Returns immediately with a `job_id` that can be used to poll for status.
-        The download runs in the background; poll `GET /kronk/v1/pulls/{job_id}`
+        The download runs in the background; poll `GET /koji/v1/pulls/{job_id}`
         to track progress.
 
         **`quant` is required.** If omitted, the request is rejected with a `422`
@@ -233,14 +233,14 @@ paths:
         "502":
           $ref: "#/components/responses/BadGateway"
 
-  /kronk/v1/pulls/{job_id}:
+  /koji/v1/pulls/{job_id}:
     get:
       operationId: getPullJob
       summary: Poll a pull job's status
       description: |
         Returns the current status of an async pull job.
 
-        Poll this endpoint after calling `POST /kronk/v1/pulls` to check whether
+        Poll this endpoint after calling `POST /koji/v1/pulls` to check whether
         the download has completed or failed.
 
         Jobs are evicted from memory 1 hour after completion or failure.
@@ -249,7 +249,7 @@ paths:
         - name: job_id
           in: path
           required: true
-          description: Job ID returned by `POST /kronk/v1/pulls`
+          description: Job ID returned by `POST /koji/v1/pulls`
           schema:
             type: string
             example: pull-a1b2c3d4-e5f6-7890-abcd-ef1234567890
@@ -298,7 +298,7 @@ paths:
   # System
   # ---------------------------------------------------------------------------
 
-  /kronk/v1/system/health:
+  /koji/v1/system/health:
     get:
       operationId: getSystemHealth
       summary: Rich system health
@@ -322,7 +322,7 @@ paths:
                   summary: System with GPU
                   value:
                     status: ok
-                    service: kronk
+                    service: koji
                     models_loaded: 2
                     vram:
                       used_mib: 8192
@@ -331,25 +331,25 @@ paths:
                   summary: CPU-only system
                   value:
                     status: ok
-                    service: kronk
+                    service: koji
                     models_loaded: 1
                     vram: null
 
-  /kronk/v1/system/restart:
+  /koji/v1/system/restart:
     post:
-      operationId: restartKronk
-      summary: Gracefully restart Kronk
+      operationId: restartKoji
+      summary: Gracefully restart Koji
       description: |
-        Triggers a graceful restart of the Kronk proxy process.
+        Triggers a graceful restart of the Koji proxy process.
 
-        The response is sent before the process exits. Kronk sends SIGTERM to
+        The response is sent before the process exits. Koji sends SIGTERM to
         itself, allowing in-flight requests to drain and models to be unloaded
         before the process exits. A process supervisor (systemd, launchd, etc.)
         is expected to restart the process automatically.
 
         Pass `?force=true` to skip graceful model unloading and exit immediately.
 
-        **Note:** If Kronk is not running under a process supervisor, it will
+        **Note:** If Koji is not running under a process supervisor, it will
         simply exit and not restart.
       tags: [system]
       parameters:
@@ -378,10 +378,10 @@ paths:
                 properties:
                   message:
                     type: string
-                    example: "Restarting kronk..."
+                    example: "Restarting koji..."
 
 # ---------------------------------------------------------------------------
-# Legacy root endpoints (documented here for completeness; not under /kronk/v1/)
+# Legacy root endpoints (documented here for completeness; not under /koji/v1/)
 # ---------------------------------------------------------------------------
 # These are defined in the openai-compat.yaml file alongside the /v1/ routes.
 # See docs/openapi/openai-compat.yaml for /health, /status, and /metrics.
@@ -397,7 +397,7 @@ components:
       name: id
       in: path
       required: true
-      description: Model config key (e.g. `llama3`). This is the key used in the Kronk config file, not the underlying HuggingFace repo path.
+      description: Model config key (e.g. `llama3`). This is the key used in the Koji config file, not the underlying HuggingFace repo path.
       schema:
         type: string
         example: llama3
@@ -490,9 +490,9 @@ components:
     # Model schemas
     # -------------------------------------------------------------------------
 
-    KronkModel:
+    KojiModel:
       type: object
-      description: A configured Kronk model with its current runtime state
+      description: A configured Koji model with its current runtime state
       required:
         - id
         - backend
@@ -561,14 +561,14 @@ components:
             `null` when not loaded.
           example: 0
 
-    KronkModelList:
+    KojiModelList:
       type: object
       required: [models]
       properties:
         models:
           type: array
           items:
-            $ref: "#/components/schemas/KronkModel"
+            $ref: "#/components/schemas/KojiModel"
 
     LoadUnloadResult:
       type: object
@@ -701,7 +701,7 @@ components:
         service:
           type: string
           description: Service identifier
-          example: kronk
+          example: koji
         models_loaded:
           type: integer
           format: int32
