@@ -146,12 +146,12 @@ impl Config {
     ///
     /// Merging order: `backend.default_args` → `server.args` →
     /// `server.sampling.to_args()`. Each later layer's flags fully replace
-    /// the same flag in the earlier layers via `merge_args_override`.
+    /// the same flag in the earlier layers via `merge_args`.
     pub fn build_args(&self, server: &ModelConfig, backend: &BackendConfig) -> Vec<String> {
-        let mut args = crate::config::merge_args_override(&backend.default_args, &server.args);
+        let mut args = crate::config::merge_args(&backend.default_args, &server.args);
         if let Some(sampling) = &server.sampling {
             if !sampling.is_empty() {
-                args = crate::config::merge_args_override(&args, &sampling.to_args());
+                args = crate::config::merge_args(&args, &sampling.to_args());
             }
         }
         crate::config::flatten_args(&args).expect("flatten_args failed")
@@ -178,7 +178,7 @@ impl Config {
         backend: &BackendConfig,
         ctx_override: Option<u32>,
     ) -> Result<Vec<String>> {
-        let mut grouped = crate::config::merge_args_override(&backend.default_args, &server.args);
+        let mut grouped = crate::config::merge_args(&backend.default_args, &server.args);
 
         // Inject -m from model card, only if not already present.
         if let (Some(ref model_id), Some(ref quant_name)) = (&server.model, &server.quant) {
@@ -241,7 +241,7 @@ impl Config {
         // anything injected so far.
         if let Some(sampling) = &server.sampling {
             if !sampling.is_empty() {
-                grouped = crate::config::merge_args_override(&grouped, &sampling.to_args());
+                grouped = crate::config::merge_args(&grouped, &sampling.to_args());
             }
         }
 
