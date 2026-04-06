@@ -238,4 +238,85 @@ mod tests {
         assert_eq!(statuses[1].id, "zephyr");
         assert_eq!(statuses[1].backend, "llama_cpp");
     }
+
+    /// When `state.models` contains a `ModelState::Ready` entry under the
+    /// server name that resolves for one of the configured models, that
+    /// model should be reported as `loaded == true` while all other
+    /// configured models remain `loaded == false`. The returned vector
+    /// must still be sorted by id ascending and carry the configured
+    /// `backend` value.
+    #[tokio::test]
+    async fn test_collect_model_statuses_reports_loaded_when_server_is_ready() {
+        use std::sync::atomic::AtomicU32;
+        use std::sync::Arc;
+        use std::time::{Instant, SystemTime};
+
+        let mut config = Config::default();
+        // Clear default fixtures so the test only sees the models we add.
+        config.models.clear();
+        config.backends.insert(
+            "vllm".to_string(),
+            BackendConfig {
+                path: None,
+                default_args: vec![],
+                health_check_url: None,
+                version: None,
+            },
+        );
+        config
+            .models
+            .insert("zephyr".to_string(), make_model_config("llama_cpp"));
+        config
+            .models
+            .insert("alpha".to_string(), make_model_config("vllm"));
+
+        let state = ProxyState::new(config, None);
+
+        // Insert a Ready entry for "alpha" under the server name that
+        // `resolve_servers_for_model("alpha")` will return — the config key
+        // itself, since `make_model_config` leaves `model` as `None`.
+        {
+            let mut runtime = state.models.write().await;
+            runtime.insert(
+                "alpha".to_string(),
+                ModelState::Ready {
+                    model_name: "alpha".to_string(),
+                    backend: "vllm".to_string(),
+                    backend_pid: 12345,
+                    backend_url: "http://127.0.0.1:8000".to_string(),
+                    load_time: SystemTime::now(),
+                    last_accessed: Instant::now(),
+                    consecutive_failures: Arc::new(AtomicU32::new(0)),
+                    failure_timestamp: None,
+                },
+            );
+        }
+
+        let statuses = state.collect_model_statuses().await;
+
+        // Length matches the number of configured models.
+        assert_eq!(statuses.len(), 2);
+
+        // Entries are sorted by id ascending.
+        let ids: Vec<&str> = statuses.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec!["alpha", "zephyr"]);
+
+        // Exactly one model is reported as loaded.
+        let loaded_count = statuses.iter().filter(|s| s.loaded).count();
+        assert_eq!(
+            loaded_count, 1,
+            "expected exactly one loaded model, got: {:?}",
+            statuses
+        );
+
+        // alpha is loaded with the configured backend.
+        assert_eq!(statuses[0].id, "alpha");
+        assert!(statuses[0].loaded, "expected alpha to be loaded");
+        assert_eq!(statuses[0].backend, "vllm");
+
+        // zephyr is not loaded but still carries its configured backend.
+        assert_eq!(statuses[1].id, "zephyr");
+        assert!(!statuses[1].loaded, "expected zephyr to not be loaded");
+        assert_eq!(statuses[1].backend, "llama_cpp");
+    }
 }
