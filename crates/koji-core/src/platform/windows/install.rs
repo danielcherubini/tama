@@ -6,8 +6,8 @@ use windows_service::service::{
 };
 use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
 
-/// Install kronk as a native Windows Service for the given server.
-/// The service will run `kronk.exe service-run --server <name> --config-dir <path>` when started.
+/// Install koji as a native Windows Service for the given server.
+/// The service will run `koji.exe service-run --server <name> --config-dir <path>` when started.
 /// The config-dir is captured at install time from the installing user's environment,
 /// so the service (running as SYSTEM) can find the correct config and models.
 pub fn install_service(
@@ -106,12 +106,12 @@ pub fn install_service(
     Ok(())
 }
 
-/// Install kronk proxy as a native Windows Service.
-/// The service will run `kronk.exe service-run --proxy --config-dir <path>` when started.
+/// Install koji proxy as a native Windows Service.
+/// The service will run `koji.exe service-run --proxy --config-dir <path>` when started.
 pub fn install_proxy_service(config_dir: &std::path::Path, port: u16) -> Result<()> {
     let exe_path = std::env::current_exe().context("Failed to get current exe path")?;
-    let service_name = "kronk";
-    let display_name = "Kronk";
+    let service_name = "koji";
+    let display_name = "Koji";
 
     let manager =
         ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CREATE_SERVICE)
@@ -184,7 +184,7 @@ pub fn install_proxy_service(config_dir: &std::path::Path, port: u16) -> Result<
         .context("Failed to create service — run as Administrator")?;
 
     super::firewall::add_firewall_rule(service_name, port).ok();
-    super::firewall::add_firewall_rule("kronk-web", 11435).ok();
+    super::firewall::add_firewall_rule("koji-web", 11435).ok();
     super::permissions::grant_user_control(service_name)
         .with_context(|| format!("Failed to set service permissions for '{}'", service_name))?;
 
