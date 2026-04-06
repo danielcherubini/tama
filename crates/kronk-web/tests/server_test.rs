@@ -11,6 +11,7 @@ mod tests {
                 client: reqwest::Client::new(),
                 logs_dir: None,
                 config_path: None,
+                proxy_config: None,
             });
             axum::serve(listener, kronk_web::server::build_router(state))
                 .await
