@@ -319,4 +319,93 @@ mod tests {
         assert!(!statuses[1].loaded, "expected zephyr to not be loaded");
         assert_eq!(statuses[1].backend, "llama_cpp");
     }
+
+    /// `collect_model_statuses` should only treat `ModelState::Ready` as
+    /// "loaded". Other variants like `Starting` and `Failed` must be
+    /// reported as `loaded == false` so the dashboard does not falsely
+    /// claim a model is serving traffic while it is still booting or has
+    /// crashed.
+    #[tokio::test]
+    async fn test_collect_model_statuses_ignores_non_ready_states() {
+        use std::sync::atomic::AtomicU32;
+        use std::sync::Arc;
+        use std::time::Instant;
+
+        let mut config = Config::default();
+        // Clear default fixtures so the test only sees the model we add.
+        config.models.clear();
+        config
+            .models
+            .insert("alpha".to_string(), make_model_config("llama_cpp"));
+
+        let state = ProxyState::new(config, None);
+
+        // The server name `resolve_servers_for_model("alpha")` returns is
+        // the config key itself, since `make_model_config` leaves
+        // `model` as `None`.
+        let server_name = "alpha".to_string();
+
+        // --- Case 1: Starting must NOT count as loaded ---------------------
+        {
+            let mut runtime = state.models.write().await;
+            runtime.insert(
+                server_name.clone(),
+                ModelState::Starting {
+                    model_name: "alpha".to_string(),
+                    backend: "llama_cpp".to_string(),
+                    backend_url: "http://127.0.0.1:8000".to_string(),
+                    last_accessed: Instant::now(),
+                    consecutive_failures: Arc::new(AtomicU32::new(0)),
+                    failure_timestamp: None,
+                },
+            );
+        }
+
+        let statuses = state.collect_model_statuses().await;
+        assert_eq!(
+            statuses.len(),
+            1,
+            "expected one status entry per configured model, got: {:?}",
+            statuses
+        );
+        let alpha = statuses
+            .iter()
+            .find(|s| s.id == "alpha")
+            .expect("alpha entry missing from collect_model_statuses output");
+        assert!(
+            !alpha.loaded,
+            "ModelState::Starting must not be reported as loaded, got: {:?}",
+            alpha
+        );
+
+        // --- Case 2: Failed must NOT count as loaded -----------------------
+        {
+            let mut runtime = state.models.write().await;
+            runtime.insert(
+                server_name.clone(),
+                ModelState::Failed {
+                    model_name: "alpha".to_string(),
+                    backend: "llama_cpp".to_string(),
+                    error: "backend exited with status 1".to_string(),
+                },
+            );
+        }
+
+        let statuses = state.collect_model_statuses().await;
+        assert_eq!(
+            statuses.len(),
+            1,
+            "expected one status entry per configured model, got: {:?}",
+            statuses
+        );
+        let alpha = statuses
+            .iter()
+            .find(|s| s.id == "alpha")
+            .expect("alpha entry missing from collect_model_statuses output");
+        assert!(
+            !alpha.loaded,
+            "ModelState::Failed must not be reported as loaded, got: {:?}",
+            alpha
+        );
+    }
 }
