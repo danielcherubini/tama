@@ -1,24 +1,24 @@
 [Setup]
-AppName=Kronk
-AppVersion={#GetEnv("KRONK_VERSION")}
-DefaultDirName={autopf}\Kronk
-DefaultGroupName=Kronk
+AppName=Koji
+AppVersion={#GetEnv("KOJI_VERSION")}
+DefaultDirName={autopf}\Koji
+DefaultGroupName=Koji
 OutputDir=..\dist
-OutputBaseFilename=kronk-{#GetEnv("KRONK_VERSION")}-windows-x64-setup
+OutputBaseFilename=koji-{#GetEnv("KOJI_VERSION")}-windows-x64-setup
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=admin
 LicenseFile=..\LICENSE
 ChangesEnvironment=yes
-UninstallDisplayName=Kronk
+UninstallDisplayName=Koji
 
 [Files]
-Source: "..\target\release\kronk.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\target\release\koji.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Kronk Config"; Filename: "notepad.exe"; Parameters: """{userappdata}\kronk\config.toml"""
-Name: "{group}\Uninstall Kronk"; Filename: "{uninstallexe}"
+Name: "{group}\Koji Config"; Filename: "notepad.exe"; Parameters: """{userappdata}\koji\config.toml"""
+Name: "{group}\Uninstall Koji"; Filename: "{uninstallexe}"
 
 [Registry]
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; \
@@ -26,11 +26,11 @@ Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environmen
     Check: NeedsAddPath('{app}')
 
 [Run]
-Filename: "notepad.exe"; Parameters: """{userappdata}\kronk\config.toml"""; \
+Filename: "notepad.exe"; Parameters: """{userappdata}\koji\config.toml"""; \
     Description: "Edit configuration"; Flags: postinstall nowait skipifsilent unchecked
 
 [UninstallRun]
-Filename: "{app}\kronk.exe"; Parameters: "service remove"; Flags: runhidden
+Filename: "{app}\koji.exe"; Parameters: "service remove"; Flags: runhidden
 
 [Code]
 function NeedsAddPath(Param: string): boolean;
@@ -56,10 +56,10 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
-    DataDir := ExpandConstant('{userappdata}\kronk');
+    DataDir := ExpandConstant('{userappdata}\koji');
     if DirExists(DataDir) then
     begin
-      if MsgBox('Remove all Kronk data (models, config)?'#13#10#13#10 +
+      if MsgBox('Remove all Koji data (models, config)?'#13#10#13#10 +
                 'Location: ' + DataDir,
                 mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
       begin
