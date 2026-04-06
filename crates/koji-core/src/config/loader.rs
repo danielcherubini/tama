@@ -7,26 +7,36 @@ use std::fs;
 use std::path::PathBuf;
 
 impl Config {
-    /// Base directory for all kronk data.
-    /// Windows: `%APPDATA%\kronk`
-    /// Linux: `~/.config/kronk`
+    /// Base directory for all koji data.
+    /// Windows: `%APPDATA%\koji`
+    /// Linux: `~/.config/koji`
+    ///
+    /// On first run after the rename from `kronk` to `koji`, this function
+    /// also performs a one-time auto-migration of the legacy `kronk` data
+    /// directory to the new `koji` location (including renaming `kronk.db`
+    /// to `koji.db`).
     pub fn base_dir() -> Result<PathBuf> {
-        let proj = directories::ProjectDirs::from("", "", "kronk")
+        let proj = directories::ProjectDirs::from("", "", "koji")
             .context("Failed to determine config directory")?;
-        // config_dir() on Windows = %APPDATA%\kronk\config, we want the parent
-        // On Linux config_dir() = ~/.config/kronk which is already the base
+        // config_dir() on Windows = %APPDATA%\koji\config, we want the parent
+        // On Linux config_dir() = ~/.config/koji which is already the base
         #[cfg(target_os = "windows")]
-        {
-            Ok(proj
-                .config_dir()
-                .parent()
-                .unwrap_or(proj.config_dir())
-                .to_path_buf())
-        }
+        let base = proj
+            .config_dir()
+            .parent()
+            .unwrap_or(proj.config_dir())
+            .to_path_buf();
         #[cfg(not(target_os = "windows"))]
-        {
-            Ok(proj.config_dir().to_path_buf())
+        let base = proj.config_dir().to_path_buf();
+
+        // One-time auto-migration from the legacy kronk directory. This is
+        // a no-op if the new directory already exists or if no legacy
+        // directory is present.
+        if let Err(e) = super::rename_legacy::migrate_legacy_data_dir(&base) {
+            tracing::warn!("Legacy data directory migration failed: {}", e);
         }
+
+        Ok(base)
     }
 
     pub fn config_dir() -> Result<PathBuf> {
@@ -95,7 +105,7 @@ impl Config {
 
     /// Resolve the logs directory path.
     /// Uses `general.logs_dir` if set, otherwise defaults to `<base_dir>/logs/`.
-    /// On Windows this is `%APPDATA%\kronk\logs\`, on Linux `~/.config/kronk/logs/`.
+    /// On Windows this is `%APPDATA%\koji\logs\`, on Linux `~/.config/koji/logs/`.
     pub fn logs_dir(&self) -> Result<PathBuf> {
         if let Some(ref dir) = self.general.logs_dir {
             Ok(PathBuf::from(dir))
