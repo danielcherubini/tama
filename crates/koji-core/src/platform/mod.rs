@@ -8,4 +8,4 @@ pub mod job_object;
 pub mod windows;
 
 #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-compile_error!("KRONK only supports Linux and Windows");
+compile_error!("Koji only supports Linux and Windows");

@@ -270,7 +270,7 @@ impl Config {
     }
 
     pub fn service_name(server_name: &str) -> String {
-        format!("kronk-{}", server_name)
+        format!("koji-{}", server_name)
     }
 
     /// Open the application database, falling back to an in-memory connection on error.
@@ -320,7 +320,7 @@ impl Config {
 
     /// Build the proxy base URL from config, e.g. `http://0.0.0.0:11411`.
     /// Always returns a URL since the proxy may be running even if not
-    /// marked as enabled in config (e.g. started manually via `kronk serve`).
+    /// marked as enabled in config (e.g. started manually via `koji serve`).
     pub fn proxy_url(&self) -> String {
         format!("http://{}:{}", self.proxy.host, self.proxy.port)
     }
@@ -344,7 +344,7 @@ impl Config {
             return match crate::db::queries::get_backend_by_version(conn, name, pinned_version)? {
                 Some(record) => Ok(std::path::PathBuf::from(record.path)),
                 None => anyhow::bail!(
-                    "Backend '{}' version '{}' not found in DB. Run `kronk backend install {}` first.",
+                    "Backend '{}' version '{}' not found in DB. Run `koji backend install {}` first.",
                     name,
                     pinned_version,
                     name
@@ -364,7 +364,7 @@ impl Config {
             .map(std::path::PathBuf::from)
             .ok_or_else(|| {
                 anyhow::anyhow!(
-                    "Backend '{}' has no installed path. Run `kronk backend install {}` first.",
+                    "Backend '{}' has no installed path. Run `koji backend install {}` first.",
                     name,
                     name
                 )

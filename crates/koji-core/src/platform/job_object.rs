@@ -2,7 +2,7 @@
 //!
 //! Creates a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and assigns
 //! the current process to it. Any child processes spawned after this are
-//! automatically part of the job, and Windows kills them all when kronk exits.
+//! automatically part of the job, and Windows kills them all when koji exits.
 
 use anyhow::Result;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};

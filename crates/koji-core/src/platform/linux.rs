@@ -16,7 +16,7 @@ pub fn install_service(
     let args_str = args.join(" ");
     let unit = format!(
         "[Unit]\n\
-         Description=Kronk: {service_name}\n\
+         Description=Koji: {service_name}\n\
          After=network.target\n\
          \n\
          [Service]\n\
@@ -45,7 +45,7 @@ pub fn install_service(
     Ok(())
 }
 
-/// Install the kronk proxy as a systemd user service.
+/// Install the koji proxy as a systemd user service.
 pub fn install_proxy_service() -> Result<()> {
     let config_dir = systemd_user_dir()?;
     fs::create_dir_all(&config_dir).context("Failed to create systemd user dir")?;
@@ -57,7 +57,7 @@ pub fn install_proxy_service() -> Result<()> {
 
     let unit = format!(
         "[Unit]\n\
-         Description=Kronk\n\
+         Description=Koji\n\
          After=network.target\n\
          \n\
          [Service]\n\
@@ -70,7 +70,7 @@ pub fn install_proxy_service() -> Result<()> {
          WantedBy=default.target\n"
     );
 
-    let unit_path = config_dir.join("kronk.service");
+    let unit_path = config_dir.join("koji.service");
     fs::write(&unit_path, unit).context("Failed to write unit file")?;
 
     Command::new("systemctl")
@@ -79,7 +79,7 @@ pub fn install_proxy_service() -> Result<()> {
         .context("Failed to reload systemd")?;
 
     Command::new("systemctl")
-        .args(["--user", "enable", "kronk"])
+        .args(["--user", "enable", "koji"])
         .status()
         .context("Failed to enable service")?;
 
