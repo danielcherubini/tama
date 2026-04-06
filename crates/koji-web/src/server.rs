@@ -50,15 +50,15 @@ async fn serve_static(path: Option<Path<String>>) -> Response {
     }
 }
 
-/// Forward a request to the Kronk proxy at `/kronk/v1/<path>`.
-async fn proxy_kronk(
+/// Forward a request to the Koji proxy at `/koji/v1/<path>`.
+async fn proxy_koji(
     State(state): State<Arc<AppState>>,
     method: Method,
     headers: HeaderMap,
     path: Path<String>,
     body: Body,
 ) -> Response {
-    let url = format!("{}/kronk/v1/{}", state.proxy_base_url, path.0);
+    let url = format!("{}/koji/v1/{}", state.proxy_base_url, path.0);
     // Cap at 16 MiB — same as MAX_REQUEST_BODY_SIZE in kronk-core — to prevent memory exhaustion.
     let body_bytes = axum::body::to_bytes(body, 16 * 1024 * 1024)
         .await
@@ -104,7 +104,7 @@ async fn proxy_kronk(
         }
         Err(e) => (
             StatusCode::BAD_GATEWAY,
-            format!("Failed to reach Kronk proxy: {e}"),
+            format!("Failed to reach Koji proxy: {e}"),
         )
             .into_response(),
     }
@@ -127,7 +127,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                 .delete(api::delete_model),
         )
         .route("/api/models/:id/rename", post(api::rename_model))
-        .route("/kronk/v1/*path", any(proxy_kronk))
+        .route("/koji/v1/*path", any(proxy_koji))
         .route("/", get(serve_index))
         .route(
             "/*path",

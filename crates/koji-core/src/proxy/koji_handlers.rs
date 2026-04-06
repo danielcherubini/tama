@@ -81,7 +81,7 @@ pub struct RestartResponse {
     pub message: String,
 }
 
-/// Handle listing all configured models (Kronk management API).
+/// Handle listing all configured models (Koji management API).
 pub async fn handle_koji_list_models(state: State<Arc<ProxyState>>) -> Json<serde_json::Value> {
     let models = state.build_status_response().await;
     let models_obj = models.get("models").and_then(|v| v.as_object());
@@ -105,7 +105,7 @@ pub async fn handle_koji_list_models(state: State<Arc<ProxyState>>) -> Json<serd
     }))
 }
 
-/// Handle getting a single model's state (Kronk management API).
+/// Handle getting a single model's state (Koji management API).
 pub async fn handle_koji_get_model(
     state: State<Arc<ProxyState>>,
     Path(model_id): Path<String>,
@@ -160,7 +160,7 @@ pub async fn handle_koji_get_model(
         .into_response()
 }
 
-/// Handle loading a model (Kronk management API).
+/// Handle loading a model (Koji management API).
 pub async fn handle_koji_load_model(
     state: State<Arc<ProxyState>>,
     Path(model_id): Path<String>,
@@ -205,7 +205,7 @@ pub async fn handle_koji_load_model(
     }
 }
 
-/// Handle unloading a model (Kronk management API).
+/// Handle unloading a model (Koji management API).
 pub async fn handle_koji_unload_model(
     state: State<Arc<ProxyState>>,
     Path(model_id): Path<String>,
@@ -440,7 +440,7 @@ fn spawn_download_job(
     });
 }
 
-/// Handle starting a pull job (Kronk management API).
+/// Handle starting a pull job (Koji management API).
 pub async fn handle_koji_pull_model(
     state: State<Arc<ProxyState>>,
     Json(request): Json<PullRequest>,
@@ -685,7 +685,7 @@ pub async fn handle_koji_pull_model(
     .into_response()
 }
 
-/// Handle getting pull job status (Kronk management API).
+/// Handle getting pull job status (Koji management API).
 pub async fn handle_koji_get_pull_job(
     state: State<Arc<ProxyState>>,
     Path(job_id): Path<String>,
@@ -732,7 +732,7 @@ pub async fn handle_koji_get_pull_job(
 /// - `progress`: emitted while the job is pending or running
 /// - `done`: emitted once when the job completes or fails, then the stream closes
 ///
-/// Registered as `GET /kronk/v1/pulls/:job_id/stream`.
+/// Registered as `GET /koji/v1/pulls/:job_id/stream`.
 pub async fn handle_pull_job_stream(
     state: State<Arc<ProxyState>>,
     Path(job_id): Path<String>,
@@ -787,7 +787,7 @@ pub struct SystemHealthResponse {
     pub vram: Option<VramInfo>,
 }
 
-/// Handle system health check (Kronk management API).
+/// Handle system health check (Koji management API).
 pub async fn handle_koji_system_health(
     state: State<Arc<ProxyState>>,
 ) -> Json<SystemHealthResponse> {
@@ -806,10 +806,10 @@ pub async fn handle_koji_system_health(
     })
 }
 
-/// Handle listing available GGUF quants for a HuggingFace repo (Kronk management API).
+/// Handle listing available GGUF quants for a HuggingFace repo (Koji management API).
 ///
 /// `repo_id` is captured as a wildcard path segment (e.g. `bartowski/Qwen3-8B-GGUF`)
-/// because HF repo IDs contain a `/`. Registered as `GET /kronk/v1/hf/*repo_id`.
+/// because HF repo IDs contain a `/`. Registered as `GET /koji/v1/hf/*repo_id`.
 pub async fn handle_hf_list_quants(Path(repo_id): Path<String>) -> Response {
     // Reject repo_id segments containing traversal sequences or null bytes (SSRF mitigation).
     if !repo_id.split('/').all(is_safe_path_component) {
@@ -962,7 +962,7 @@ async fn setup_model_after_pull(
     // config write guard also dropped here, making the new model entry visible immediately
 }
 
-/// Handle system restart (Kronk management API).
+/// Handle system restart (Koji management API).
 /// TODO: Implement actual restart logic using ProxyState methods
 pub async fn handle_koji_system_restart(_state: State<Arc<ProxyState>>) -> Response {
     Json(serde_json::json!({

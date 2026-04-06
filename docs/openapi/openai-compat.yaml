@@ -1,21 +1,21 @@
 openapi: 3.1.0
 
 info:
-  title: Kronk — OpenAI-Compatible API & Root Endpoints
+  title: Koji — OpenAI-Compatible API & Root Endpoints
   description: |
-    This file documents two groups of endpoints served by Kronk:
+    This file documents two groups of endpoints served by Koji:
 
     1. **OpenAI-compatible `/v1/` routes** — Chat completions and model listing.
        These follow the OpenAI API spec closely so that any client written for
-       OpenAI can be pointed at Kronk with minimal changes.
+       OpenAI can be pointed at Koji with minimal changes.
 
     2. **Root utility endpoints** — `/health`, `/status`, and `/metrics`.
-       These predate the Kronk management API and are kept as-is for backwards
-       compatibility. For richer system health, use `GET /kronk/v1/system/health`
-       (see `kronk-api.yaml`).
+       These predate the Koji management API and are kept as-is for backwards
+       compatibility. For richer system health, use `GET /koji/v1/system/health`
+       (see `koji-api.yaml`).
 
     **Base URL:** Point your OpenAI client at `http://localhost:8080` and set
-    `OPENAI_API_KEY` to any non-empty string (Kronk does not currently enforce
+    `OPENAI_API_KEY` to any non-empty string (Koji does not currently enforce
     authentication).
   version: 1.0.0
   license:
@@ -23,7 +23,7 @@ info:
 
 servers:
   - url: http://localhost:8080
-    description: Local Kronk instance (default port)
+    description: Local Koji instance (default port)
 
 tags:
   - name: chat
@@ -46,15 +46,15 @@ paths:
       description: |
         Proxies the request to the appropriate backend for the requested model.
 
-        If the model is not currently loaded, Kronk will automatically start its
+        If the model is not currently loaded, Koji will automatically start its
         backend before forwarding the request. Startup time is bounded by
-        `proxy.startup_timeout_secs` in the Kronk config.
+        `proxy.startup_timeout_secs` in the Koji config.
 
         Supports both regular (buffered) and streaming (`"stream": true`) responses.
         For streaming, prefer `POST /v1/chat/completions/stream` to avoid
         buffering the full response body.
 
-        **Model field:** The `model` field must match a key in the Kronk config
+        **Model field:** The `model` field must match a key in the Koji config
         (e.g. `llama3`) or the underlying model name that config entry points to.
       tags: [chat]
       requestBody:
@@ -181,15 +181,15 @@ paths:
       operationId: listModels
       summary: List available models
       description: |
-        Returns all enabled models defined in the Kronk config in the OpenAI
+        Returns all enabled models defined in the Koji config in the OpenAI
         `list` response format.
 
-        Each model entry includes a `ready` field (Kronk extension) indicating
+        Each model entry includes a `ready` field (Koji extension) indicating
         whether the backend is currently running. This field is not part of the
         OpenAI spec but is safe to ignore.
 
         For richer operational data (PIDs, idle time, failure counts), use
-        `GET /kronk/v1/models` instead.
+        `GET /koji/v1/models` instead.
       tags: [models]
       responses:
         "200":
@@ -219,10 +219,10 @@ paths:
       description: |
         Returns a single model object for the given model ID.
 
-        The `model_id` can be either the Kronk config key (e.g. `llama3`) or
+        The `model_id` can be either the Koji config key (e.g. `llama3`) or
         the underlying model name (e.g. `meta-llama/Meta-Llama-3-8B-Instruct`).
 
-        Returns the model's `ready` state (Kronk extension) in addition to
+        Returns the model's `ready` state (Koji extension) in addition to
         standard OpenAI fields.
       tags: [models]
       parameters:
@@ -263,7 +263,7 @@ paths:
         balancers, and container health checks.
 
         For a richer health snapshot including VRAM and loaded model count, use
-        `GET /kronk/v1/system/health`.
+        `GET /koji/v1/system/health`.
       tags: [utility]
       responses:
         "200":
@@ -274,7 +274,7 @@ paths:
                 $ref: "#/components/schemas/HealthResponse"
               example:
                 status: ok
-                service: kronk-proxy
+                service: koji-proxy
 
   /status:
     get:
@@ -435,8 +435,8 @@ components:
         model:
           type: string
           description: |
-            Kronk config key (e.g. `llama3`) or underlying model name.
-            If the model is not loaded, Kronk will start its backend automatically.
+            Koji config key (e.g. `llama3`) or underlying model name.
+            If the model is not loaded, Koji will start its backend automatically.
           example: llama3
         messages:
           type: array
@@ -574,7 +574,7 @@ components:
       properties:
         id:
           type: string
-          description: Model identifier (Kronk config key)
+          description: Model identifier (Koji config key)
           example: llama3
         object:
           type: string
@@ -592,7 +592,7 @@ components:
         ready:
           type: boolean
           description: |
-            **Kronk extension** (not in OpenAI spec). Whether the backend is
+            **Koji extension** (not in OpenAI spec). Whether the backend is
             currently running and accepting requests.
           example: true
 
@@ -623,7 +623,7 @@ components:
           example: ok
         service:
           type: string
-          example: kronk-proxy
+          example: koji-proxy
 
     VramInfo:
       type: object

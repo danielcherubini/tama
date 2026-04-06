@@ -23,7 +23,7 @@ struct JobProgress {
     error: Option<String>,
 }
 
-/// Returned by `POST /kronk/v1/pulls` (each element of the array)
+/// Returned by `POST /koji/v1/pulls` (each element of the array)
 #[derive(Deserialize, Clone)]
 struct PullJobEntry {
     job_id: String,
@@ -178,7 +178,7 @@ pub fn Pull() -> impl IntoView {
                                 available_quants.set(Vec::new());
                                 wizard_step.set(WizardStep::LoadingQuants);
                                 wasm_bindgen_futures::spawn_local(async move {
-                                    let url = format!("/kronk/v1/hf/{}", rid);
+                                    let url = format!("/koji/v1/hf/{}", rid);
                                     match gloo_net::http::Request::get(&url).send().await {
                                         Ok(resp) => {
                                             match resp.json::<Vec<QuantEntry>>().await {
@@ -397,7 +397,7 @@ pub fn Pull() -> impl IntoView {
                             let body = PullRequest { repo_id: rid, quants };
 
                             wasm_bindgen_futures::spawn_local(async move {
-                                let build_result = gloo_net::http::Request::post("/kronk/v1/pulls")
+                                let build_result = gloo_net::http::Request::post("/koji/v1/pulls")
                                     .json(&body);
                                 let resp = match build_result {
                                     Ok(req) => req.send().await,
@@ -430,7 +430,7 @@ pub fn Pull() -> impl IntoView {
                                                     let dj = download_jobs;
                                                     let ws = wizard_step;
                                                     wasm_bindgen_futures::spawn_local(async move {
-                                        let url = format!("/kronk/v1/pulls/{}/stream", job_id_str);
+                                        let url = format!("/koji/v1/pulls/{}/stream", job_id_str);
                                         // Helper: check if all jobs have finished and advance wizard.
                                         let advance_if_done = |dj: RwSignal<Vec<JobProgress>>, ws: RwSignal<WizardStep>| {
                                             let jobs = dj.get();
