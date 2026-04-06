@@ -16,7 +16,7 @@ pub struct OpenResult {
     pub needs_backfill: bool,
 }
 
-/// Open (or create) the SQLite database at `config_dir/kronk.db`
+/// Open (or create) the SQLite database at `config_dir/koji.db`
 ///
 /// Sets up the database with:
 /// - WAL mode enabled
@@ -27,7 +27,7 @@ pub struct OpenResult {
 pub fn open(config_dir: &Path) -> anyhow::Result<OpenResult> {
     // Ensure the config directory exists before SQLite tries to create the file.
     std::fs::create_dir_all(config_dir)?;
-    let db_path = config_dir.join("kronk.db");
+    let db_path = config_dir.join("koji.db");
     let conn = Connection::open(&db_path)?;
 
     conn.execute_batch("PRAGMA journal_mode=WAL;")?;

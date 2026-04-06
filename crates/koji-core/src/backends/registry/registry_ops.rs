@@ -48,7 +48,7 @@ pub struct BackendRegistry {
 }
 
 impl BackendRegistry {
-    /// Open a BackendRegistry backed by SQLite at `<config_dir>/kronk.db`.
+    /// Open a BackendRegistry backed by SQLite at `<config_dir>/koji.db`.
     pub fn open(config_dir: &Path) -> Result<Self> {
         let open_result = crate::db::open(config_dir)?;
         Ok(Self {
