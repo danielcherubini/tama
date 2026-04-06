@@ -459,10 +459,12 @@ This mirrors the existing `handle_pull_job_stream` in `crates/koji-core/src/prox
        let stream = async_stream::stream! {
            loop {
                match rx.recv().await {
-                   Ok(sample) => {
-                       let data = serde_json::to_string(&sample).unwrap_or_default();
-                       yield Ok(Event::default().event("sample").data(data));
-                   }
+Ok(sample) => {
+                        match serde_json::to_string(&sample) {
+                            Ok(data) => yield Ok(Event::default().event("sample").data(data)),
+                            Err(e) => tracing::warn!("failed to serialize MetricSample: {}", e),
+                        }
+                    }
                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                        let data = format!("{{\"missed\":{}}}", n);
                        yield Ok(Event::default().event("lagged").data(data));
