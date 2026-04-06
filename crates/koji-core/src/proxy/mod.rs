@@ -21,6 +21,8 @@ pub use types::{ModelState, ProxyMetrics, ProxyState};
 
 #[cfg(test)]
 mod tests {
+    mod restart_test;
+
     use super::*;
     use crate::config::Config;
     use crate::proxy::pull_jobs::PullJob;
