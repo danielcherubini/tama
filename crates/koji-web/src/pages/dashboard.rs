@@ -87,11 +87,17 @@ pub fn Dashboard() -> impl IntoView {
         <div class="page-header">
             <h1>"Dashboard"</h1>
             {move || {
-                history.get().last().cloned().map(|_h| view! {
-                    <div class="flex-between gap-1">
-                        <span class="badge badge-success">"ok"</span>
-                        <button class="btn btn-secondary btn-sm" on:click=move |_| { restart.dispatch(()); }>"Restart"</button>
-                    </div>
+                history.get().last().cloned().map(|_h| {
+                    let badge_class = if fetch_failed.get() { "badge badge-danger" } else { "badge badge-success" };
+                    let badge_text = if fetch_failed.get() { "error" } else { "ok" };
+                    view! {
+                        <div class="flex-between gap-1">
+                            <span class={badge_class}>{badge_text}</span>
+                            <button class="btn btn-secondary btn-sm" on:click=move |_| { restart.dispatch(()); }>
+                                "Restart"
+                            </button>
+                        </div>
+                    }
                 })
             }}
         </div>
