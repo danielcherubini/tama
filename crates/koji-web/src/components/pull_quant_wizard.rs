@@ -11,6 +11,7 @@ struct QuantEntry {
     filename: String,
     quant: Option<String>,
     size_bytes: Option<i64>,
+    is_mmproj: bool, // true if filename matches mmproj*.gguf pattern
 }
 
 #[derive(Clone, Debug)]

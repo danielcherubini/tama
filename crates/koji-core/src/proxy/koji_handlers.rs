@@ -868,6 +868,7 @@ async fn _setup_model_after_pull_with_config(
                 source: repo_id.to_string(),
                 default_context_length: None,
                 default_gpu_layers: None,
+                mmproj: None,
             },
             sampling: std::collections::HashMap::new(),
             quants: std::collections::HashMap::new(),
