@@ -189,7 +189,7 @@ pub fn migrate_cards_to_unified_config(config: &mut Config) -> anyhow::Result<()
 pub fn cleanup_stale_mmproj_args(config: &mut Config) -> bool {
     let mut changed = false;
 
-    for model_config in config.models.values_mut() {
+    for (model_config_id, model_config) in config.models.iter_mut() {
         let mut i = 0;
         while i < model_config.args.len() {
             // Match three forms:
@@ -197,6 +197,12 @@ pub fn cleanup_stale_mmproj_args(config: &mut Config) -> bool {
             //   2. "--mmproj=<path>"             (inline equals)
             //   3. "--mmproj" then "<path>"      (two separate tokens)
             let arg = &model_config.args[i];
+            tracing::debug!(
+                "Checking model '{}' arg[{}]: {:?}",
+                model_config_id,
+                i,
+                &model_config.args[i]
+            );
 
             let stripped_path: Option<String> = if let Some(rest) = arg.strip_prefix("--mmproj ") {
                 Some(rest.to_string())
@@ -224,13 +230,25 @@ pub fn cleanup_stale_mmproj_args(config: &mut Config) -> bool {
                     .unwrap_or("")
                     .to_string();
                 if !filename.is_empty() {
-                    if let Some((key, _)) =
+                    tracing::debug!(
+                        "Extracted filename '{}' from --mmproj path for model '{}'",
+                        filename,
+                        model_config_id
+                    );
+                    if let Some((key, q)) =
                         model_config.quants.iter().find(|(_, q)| q.file == filename)
                     {
                         model_config.mmproj = Some(key.clone());
                         tracing::info!(
-                            "Recovered mmproj selection '{}' from stale --mmproj arg",
-                            key
+                            "Recovered mmproj selection '{}' (file={:?}) from stale --mmproj arg",
+                            key,
+                            q.file
+                        );
+                    } else {
+                        tracing::warn!(
+                            "Could not find mmproj entry with file '{}' in model '{}' quants map",
+                            filename,
+                            model_config_id
                         );
                     }
                 }
