@@ -1,6 +1,6 @@
 # Pull Quant from HuggingFace on the Model Editor — Spec
 
-**Status:** Draft (rev 3 — incorporates two rounds of reviewer feedback)
+**Status:** Draft (rev 4 — sync with plan)
 **Date:** 2026-04-07
 **Branch:** `feature/pull-quant-from-model-editor`
 
@@ -246,10 +246,15 @@ RepoInput → LoadingQuants → SelectQuants → SetContext → Downloading → 
    This guard ensures the callback fires exactly once per session and never on
    spurious re-renders.
 
-6. **The `Done`-step rendering** branches on `on_complete.is_some()`:
+6. **The `Done`-step rendering** branches on `on_close.is_some()`:
    - When set (modal host): render a "Close" button that calls `on_close`.
    - When unset (`/pull` page): render the existing "View Models →" link
      unchanged.
+
+   (Rev 4: changed from `on_complete.is_some()` to `on_close.is_some()` — the
+   Close button itself calls `on_close`, so checking for `on_close` is the
+   correct invariant. Both real call sites pass either neither callback or
+   both, so the user-visible behaviour is identical.)
 
 7. **The wizard does NOT render `form-card` chrome.** It renders the
    `wizard-steps` indicator and the per-step body, but the host page is
