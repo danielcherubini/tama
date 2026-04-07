@@ -732,7 +732,7 @@ pub fn PullQuantWizard(
                                     Some(QuantRequest {
                                         filename: fname.clone(),
                                         quant: entry.quant.clone(),
-                                        context_length: 0,  // mmprojs don't need context length
+                                        context_length: 32768,  // mmprojs don't need context length, use default
                                     })
                                 })
                                 .collect();
