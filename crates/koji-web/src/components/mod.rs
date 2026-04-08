@@ -1,3 +1,4 @@
+pub mod config_nav;
 pub mod form_validation;
 pub mod modal;
 pub mod nav;
