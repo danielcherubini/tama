@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+// Use std::process::kill for Unix, taskkill for Windows
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -43,6 +44,7 @@ pub struct Job {
     pub log_tail: RwLock<VecDeque<String>>,
     pub log_dropped: AtomicU64,
     pub log_tx: broadcast::Sender<JobEvent>,
+    pub child_pids: RwLock<Vec<u32>>,
 }
 
 pub const LOG_HEAD_CAP: usize = 100;
@@ -110,6 +112,7 @@ impl JobManager {
             log_tail: RwLock::new(VecDeque::new()),
             log_dropped: AtomicU64::new(0),
             log_tx: broadcast::channel(LOG_BROADCAST_CAP).0,
+            child_pids: RwLock::new(Vec::new()),
         });
 
         // Set active and insert into jobs
@@ -135,6 +138,18 @@ impl JobManager {
     /// Append a log line to the job: writes to head if not full, else tail (with eviction),
     /// increments log_dropped if a line falls between head and tail, and broadcasts on log_tx.
     pub async fn append_log(&self, job: &Job, line: String) {
+        // Register child PIDs if this is a spawn command
+        if line.contains("pid=") {
+            if let Some(start) = line.find("pid=") {
+                let pid_str = &line[start + 4..];
+                if let Some(end) = pid_str.find(|c: char| !c.is_ascii_digit()) {
+                    if let Ok(pid) = pid_str[..end].parse::<u32>() {
+                        self.register_child(job, pid).await;
+                    }
+                }
+            }
+        }
+
         let mut head = job.log_head.write().await;
 
         if head.len() < LOG_HEAD_CAP {
@@ -160,6 +175,25 @@ impl JobManager {
 
         // Broadcast the log event
         let _ = job.log_tx.send(JobEvent::Log(line));
+    }
+
+    /// Register a child process PID for this job.
+    pub async fn register_child(&self, job: &Job, pid: u32) {
+        let mut pids = job.child_pids.write().await;
+        if !pids.contains(&pid) {
+            pids.push(pid);
+        }
+    }
+
+    /// Kill all child processes for a job.
+    pub async fn kill_children(&self, job: &Job) {
+        let pids = job.child_pids.read().await;
+        for &pid in pids.iter() {
+            // TODO: Implement process killing using platform-specific APIs
+            // Unix: use nix::unistd::kill or std::os::unix::process::CommandExt
+            // Windows: use winapi or taskkill
+            tracing::warn!("Would kill child process {} (not yet implemented)", pid);
+        }
     }
 
     /// Mark the job terminal, broadcast the status event, release the active slot,
@@ -362,5 +396,38 @@ mod tests {
                 panic!("Expected JobEvent::Log, got {:?}", event);
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_register_child_appends_pid() {
+        let manager = JobManager::new();
+        let job = manager
+            .submit(JobKind::Install, koji_core::backends::BackendType::LlamaCpp)
+            .await
+            .expect("submit should succeed");
+
+        // Register a child PID
+        manager.register_child(&job, 12345).await;
+
+        // Verify PID was added
+        let pids = job.child_pids.read().await; // Placeholder for future implementation
+        assert!(pids.contains(&12345));
+    }
+
+    #[tokio::test]
+    async fn test_kill_children() {
+        let manager = JobManager::new();
+        let job = manager
+            .submit(JobKind::Install, koji_core::backends::BackendType::LlamaCpp)
+            .await
+            .expect("submit should succeed");
+
+        // Register some child PIDs
+        manager.register_child(&job, 12345).await;
+        manager.register_child(&job, 67890).await;
+
+        // Kill children - this won't actually kill real processes in tests
+        // but it should not panic
+        manager.kill_children(&job).await;
     }
 }
