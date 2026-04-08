@@ -15,6 +15,6 @@ pub mod supervisor_section;
 #[cfg(feature = "ssr")]
 pub use backend_card::BackendCard;
 #[cfg(feature = "ssr")]
-pub use install_modal::InstallModal;
+pub use install_modal::{InstallModal, InstallRequest, GpuTypeDto, CapabilitiesDto};
 #[cfg(feature = "ssr")]
 pub use job_log_panel::JobLogPanel;
