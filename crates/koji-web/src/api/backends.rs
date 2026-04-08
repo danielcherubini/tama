@@ -1,6 +1,17 @@
-use axum::{extract::Path, extract::State, http::StatusCode, response::IntoResponse, Json};
+use async_stream::stream;
+use axum::response::sse::{Event, KeepAlive};
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    response::{IntoResponse, Sse},
+    Json,
+};
+use futures_util::Stream;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use tokio::sync::broadcast;
 use tokio::time::Duration;
 
 use crate::jobs::JobManager;
@@ -1199,4 +1210,156 @@ pub async fn check_backend_updates(State(state): State<Arc<AppState>>) -> impl I
         custom,
     })
     .into_response()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Job snapshot and SSE handlers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Job snapshot DTO
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
+pub struct JobSnapshotDto {
+    pub id: String,
+    pub kind: String,
+    pub status: crate::jobs::JobStatus,
+    pub backend_type: String,
+    pub started_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub log: Vec<String>,
+}
+
+/// GET /api/backends/jobs/:id
+#[allow(dead_code)]
+pub async fn get_job(
+    State(state): State<Arc<AppState>>,
+    Path(job_id): Path<String>,
+) -> Result<Json<JobSnapshotDto>, StatusCode> {
+    let jobs = state
+        .jobs
+        .as_ref()
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+    let job = jobs.get(&job_id).await.ok_or(StatusCode::NOT_FOUND)?;
+
+    let (state, log_head, log_tail, dropped) = tokio::join!(
+        job.state.read(),
+        job.log_head.read(),
+        job.log_tail.read(),
+        async { job.log_dropped.load(Ordering::Relaxed) }
+    );
+
+    let mut log: Vec<String> = log_head.iter().cloned().collect();
+    if dropped > 0 && !log_tail.is_empty() {
+        log.push(format!("[... {} lines skipped ...]", dropped));
+    }
+    log.extend(log_tail.iter().cloned());
+
+    Ok(Json(JobSnapshotDto {
+        id: job.id.clone(),
+        kind: match job.kind {
+            crate::jobs::JobKind::Install => "install".to_string(),
+            crate::jobs::JobKind::Update => "update".to_string(),
+        },
+        status: state.status,
+        backend_type: format!("{}", job.backend_type),
+        started_at: state.started_at,
+        finished_at: state.finished_at,
+        error: state.error.clone(),
+        log,
+    }))
+}
+
+/// GET /api/backends/jobs/:id/events
+#[allow(dead_code)]
+pub async fn job_events_sse(
+    State(state): State<Arc<AppState>>,
+    Path(job_id): Path<String>,
+) -> Result<Sse<impl Stream<Item = Result<Event, axum::Error>>>, StatusCode> {
+    let jobs = state
+        .jobs
+        .as_ref()
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+    let job = jobs.get(&job_id).await.ok_or(StatusCode::NOT_FOUND)?;
+
+    let mut rx = job.log_tx.subscribe();
+
+    // Snapshot + subscribe: take both under the same lock to avoid race
+    let (head, tail, dropped, status, _finished_at, error) = {
+        let state = job.state.read().await;
+        let log_head = job.log_head.read().await;
+        let log_tail = job.log_tail.read().await;
+        (
+            log_head.iter().cloned().collect::<Vec<_>>(),
+            log_tail.iter().cloned().collect::<Vec<_>>(),
+            job.log_dropped.load(Ordering::Relaxed),
+            state.status,
+            state.finished_at,
+            state.error.clone(),
+        )
+    };
+
+    let stream = stream! {
+        // Replay head
+        for line in head {
+            yield Ok(Event::default().event("log").json_data(json!({ "line": line}))?);
+        }
+
+        // Emit skipped marker if dropped > 0
+        if dropped > 0 && !tail.is_empty() {
+            yield Ok(Event::default().event("log")
+                .json_data(json!({ "line": format!("[... {} lines skipped ...]", dropped)}))?);
+        }
+
+        // Replay tail
+        for line in tail {
+            yield Ok(Event::default().event("log").json_data(json!({ "line": line}))?);
+        }
+
+        // Emit final status if terminal
+        if status != crate::jobs::JobStatus::Running {
+            yield Ok(Event::default().event("status")
+                .json_data(json!({ "status": status}))?);
+            if let Some(err) = error {
+                yield Ok(Event::default().event("error")
+                    .json_data(json!({ "error": err}))?);
+            }
+            return; // Close after terminal job
+        }
+
+        // Live stream
+        loop {
+            tokio::select! {
+                event = rx.recv() => {
+                    match event {
+                        Ok(crate::jobs::JobEvent::Log(line)) => {
+                            yield Ok(Event::default().event("log")
+                                .json_data(json!({ "line": line}))?);
+                        }
+                        Ok(crate::jobs::JobEvent::Status(s)) => {
+                            yield Ok(Event::default().event("status")
+                                .json_data(json!({ "status": s}))?);
+                            if s != crate::jobs::JobStatus::Running {
+                                return; // Close on terminal status
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            // Emit dropped marker
+                            yield Ok(Event::default().event("log")
+                                .json_data(json!({ "line": format!("[{} lines dropped]", n)}))?);
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
