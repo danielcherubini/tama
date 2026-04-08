@@ -5,5 +5,6 @@ pub mod general_section;
 pub mod modal;
 pub mod nav;
 pub mod pull_quant_wizard;
+pub mod sampling_templates_section;
 pub mod sparkline;
 pub mod supervisor_section;
