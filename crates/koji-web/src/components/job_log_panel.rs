@@ -29,6 +29,14 @@ pub fn JobLogPanel(
     let status = RwSignal::new(String::from("running"));
     let connection_error = RwSignal::new(Option::<String>::None);
 
+    // Cancel flag: flipped on component unmount. The spawned async task checks
+    // this each iteration and breaks out cleanly, closing the EventSource.
+    // RwSignal is Send+Sync so it satisfies on_cleanup's bounds.
+    let cancelled = RwSignal::new(false);
+    on_cleanup(move || {
+        cancelled.set(true);
+    });
+
     let job_id_for_effect = job_id.clone();
     Effect::new(move |_| {
         let job_id = job_id_for_effect.clone();
@@ -66,6 +74,12 @@ pub fn JobLogPanel(
             };
 
             loop {
+                // Cooperative cancellation: if the component has unmounted,
+                // break out so we can close the EventSource below.
+                if cancelled.get_untracked() {
+                    break;
+                }
+
                 let next_log = log_stream.next();
                 let next_status = status_stream.next();
                 futures_util::pin_mut!(next_log, next_status);
