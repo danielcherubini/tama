@@ -1695,6 +1695,7 @@ name = "koji-web"
 version = "1.16.1"
 dependencies = [
  "anyhow",
+ "async-stream",
  "axum",
  "futures-util",
  "gloo-net",
