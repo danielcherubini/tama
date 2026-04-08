@@ -19,7 +19,7 @@ This spec surfaces that flow in the web UI so users never have to drop to the te
 ## 2. Goals
 
 - Surface the two known backends (`llama_cpp`, `ik_llama`) as cards in the existing Backends section.
-- Reflect live install state from the `BackendRegistry` (sled DB) in each card.
+- Reflect live install state from the `BackendRegistry` (SQLite-backed, see §4) in each card.
 - Provide Install, Update, Uninstall, and Release-notes actions per card.
 - Show live build/download logs during install and update jobs via SSE.
 - Reuse the existing `config.backends` TOML editing for `default_args`, `health_check_url`, `version` pin, and (optional) custom path — moved under an "Advanced" disclosure on each card.
@@ -88,7 +88,7 @@ All new routes live under `/api/backends` and `/api/system`. Errors follow the e
   "detected_cuda_version": "12.4"
 }
 ```
-Backed by `koji_core::gpu::detect_build_prerequisites()` + `detect_cuda_version()`. ROCm detection does not exist in `koji_core::gpu` today and is intentionally omitted from the response — the UI defaults ROCm to the hardcoded version used by `urls.rs` (`7.2`).
+Backed by `koji_core::gpu::detect_build_prerequisites()` + `detect_cuda_version()`. Both use blocking `std::process::Command` to probe `cmake`, `git`, `g++`/`vswhere`, `nvcc`, and `nvidia-smi`, so the handler must wrap the cold-cache miss in `tokio::task::spawn_blocking` to avoid stalling the runtime. ROCm detection does not exist in `koji_core::gpu` today and is intentionally omitted from the response — the UI defaults ROCm to the hardcoded version used by `urls.rs` (`7.2`).
 
 Each call spawns up to ~6 subprocesses (`cmake --version`, `git --version`, compiler probe, `nvcc`, `nvidia-smi`, `vswhere` on Windows). Wrap the handler in a **5-second in-process TTL cache** (`Arc<Mutex<Option<(Instant, Capabilities)>>>`) to avoid hammering on rapid modal reopens.
 
@@ -251,8 +251,10 @@ pub struct Job {
     pub kind: JobKind,                 // Install | Update
     pub backend_type: BackendType,
     pub state: RwLock<JobState>,
-    pub log_buffer: RwLock<VecDeque<String>>,  // bounded, 500 lines
-    pub log_tx: broadcast::Sender<JobEvent>,    // capacity ~256
+    pub log_head: RwLock<VecDeque<String>>,  // first 100 lines, never evicted once filled
+    pub log_tail: RwLock<VecDeque<String>>,  // last 400 lines, FIFO on overflow
+    pub log_dropped: AtomicU64,              // count of lines skipped between head and tail
+    pub log_tx: broadcast::Sender<JobEvent>, // capacity 1024
 }
 
 pub struct JobState {
@@ -358,14 +360,23 @@ async fn job_events_sse(
 ) -> Result<Sse<...>, StatusCode> {
     let job = state.jobs.get(&id).ok_or(StatusCode::NOT_FOUND)?;
     let mut rx = job.log_tx.subscribe();
-    let buffered: Vec<String> = job.log_buffer.read().await.iter().cloned().collect();
+    let head: Vec<String> = job.log_head.read().await.iter().cloned().collect();
+    let dropped = job.log_dropped.load(Ordering::Relaxed);
+    let tail: Vec<String> = job.log_tail.read().await.iter().cloned().collect();
     let terminal_at_connect = {
         let s = job.state.read().await;
         matches!(s.status, JobStatus::Succeeded | JobStatus::Failed).then_some(s.status)
     };
 
     let stream = async_stream::stream! {
-        for line in buffered {
+        for line in head {
+            yield Ok(Event::default().event("log").json_data(json!({ "line": line }))?);
+        }
+        if dropped > 0 {
+            yield Ok(Event::default().event("log")
+                .json_data(json!({ "line": format!("[... {dropped} lines skipped ...]") }))?);
+        }
+        for line in tail {
             yield Ok(Event::default().event("log").json_data(json!({ "line": line }))?);
         }
         if let Some(status) = terminal_at_connect {
@@ -381,7 +392,12 @@ async fn job_events_sse(
                     yield Ok(Event::default().event("status").json_data(json!({ "status": status }))?);
                     if matches!(status, JobStatus::Succeeded | JobStatus::Failed) { return; }
                 }
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    // Surface the gap to the client so the UI shows dropped lines.
+                    yield Ok(Event::default().event("log")
+                        .json_data(json!({ "line": format!("[{n} lines dropped]") }))?);
+                    continue;
+                }
                 Err(broadcast::error::RecvError::Closed) => return,
             }
         }
@@ -515,7 +531,7 @@ Top-right of the Backends section. POSTs `/api/backends/check-updates`, populate
 
 ## 7a. Security & threat model
 
-The existing web API is configured with `CorsLayer::permissive()` (`server.rs:141`) and has no authentication. The default proxy host in `types/config.rs:208` is `0.0.0.0`.
+The existing web API is configured with `CorsLayer::permissive()` (`server.rs:141`) and has no authentication. The default proxy host in `crates/koji-core/src/config/types.rs` is `0.0.0.0`.
 
 The new endpoints materially expand the blast radius over "edit a TOML file":
 - `POST /api/backends/install` runs `git clone`, `cmake`, `make`, arbitrary network downloads from GitHub, and writes binaries into the user's home directory.
@@ -607,7 +623,7 @@ Full authentication (API tokens, session cookies, etc.) is explicitly out of sco
 ### 8.4 Cargo deps
 
 - `axum::response::sse::Sse` — already available via existing `axum`. No new dep.
-- `async-stream` — add under `koji-web` if not already transitively present. Fallback: a hand-rolled `Stream` impl.
+- `async-stream` — already present transitively via `koji-core` (confirmed in `Cargo.lock`). Declare it **explicitly** in `crates/koji-web/Cargo.toml` under `[dependencies]` gated to the `ssr` feature so `koji-web` does not rely on a transitive edge.
 - `tokio::sync::broadcast` — already in scope via `tokio`.
 
 ---
@@ -625,47 +641,49 @@ Full authentication (API tokens, session cookies, etc.) is explicitly out of sco
 
 ### 9.2 `koji-web` job manager unit tests
 
-4. `JobManager::submit` creates a job; state transitions `Running → Succeeded` on a fake worker.
-5. Concurrent `submit` while a job is running returns `JobError::AlreadyRunning(existing_id)`.
-6. FIFO eviction: after finishing 9 jobs, the oldest is evicted; at most 8 finished jobs retained.
-7. `Job::log_buffer` is bounded at 500 lines; the 501st line evicts the 1st.
-8. Broadcast channel delivers live events to active subscribers; `Lagged` errors are skipped gracefully.
+7. `JobManager::submit` creates a job; state transitions `Running → Succeeded` on a fake worker.
+8. Concurrent `submit` while a job is running returns `JobError::AlreadyRunning(existing_id)`.
+9. FIFO eviction: after finishing 9 jobs, the oldest is evicted; at most 8 finished jobs retained.
+10. **Head buffer invariant**: emitting 150 lines fills `log_head` with the first 100 and never evicts them; `log_head.len() == 100` and `log_head.front()` is the 1st line.
+11. **Tail buffer invariant**: after 1000 emitted lines, `log_tail.len() == 400` and `log_tail.front()` is the 601st line; `log_dropped == 500`.
+12. **Replay order on connect**: a subscriber that attaches after 1000 lines have been emitted receives, in order: `log_head` (100 lines), one synthesized `[... 500 lines skipped ...]` marker, `log_tail` (400 lines), then any live lines.
+13. Broadcast channel delivers live events to active subscribers.
 
 ### 9.3 `koji-web` API integration tests
 
-9. `GET /api/system/capabilities` returns the expected shape and includes `supported_cuda_versions`.
-10. **JSON snapshot test** against a fixture file: `GET /api/backends` with a seeded registry returns exactly the documented wire shape (catches serde drift from §4.1).
-11. `GET /api/backends` with empty registry → both known backends with `installed: false`, `custom: []`.
-12. `GET /api/backends` with a fake registry entry → `installed: true` + populated `info`.
-13. `GET /api/backends` with a `BackendType::Custom` entry → custom row appears in `custom`, not in the two known cards.
-14. `POST /api/backends/install` returns 202 + `job_id`; second call while running → 409 with existing `job_id`.
-15. `POST /api/backends/install` for `ik_llama` with `build_from_source: false` → server upgrades to source build and includes a notice.
-16. `POST /api/backends/install` for `llama_cpp` with `os=linux, gpu=cuda, build_from_source: false` → server upgrades to source build and includes a notice.
-17. `POST /api/backends/install` with source build requested and `cmake_available: false` → 400 with a clear error, no job started.
-18. `POST /api/backends/check-updates` populates `update` for installed backends only.
-19. `DELETE /api/backends/:name` → 404 on unknown; 200 + `{ "removed": true }` on known.
-20. **Path-traversal guard**: `DELETE /api/backends/:name` where the registry-stored `path` points outside `backends_dir()` (e.g. `/usr/local/bin/llama-server`) → 409, no filesystem mutation.
-21. **DELETE while running**: `DELETE /api/backends/:name` while a `Running` job targets the same backend → 409.
-22. **Origin-header enforcement**: `POST /api/backends/install` with `Origin: http://evil.example` and `Host: 127.0.0.1:8080` → 403.
-23. `GET /api/backends/jobs/:id/events` SSE — connect after a job has completed → receives buffered head + tail + final status, then closes. Connect mid-job → receives buffered logs + live logs.
-24. **SSE disconnect**: client disconnects mid-stream; the worker task continues to completion and the job ends in `Succeeded` (verified via `GET /api/backends/jobs/:id`).
-25. **SSE lagged marker**: force a slow subscriber; verify a `[N lines dropped]` event is observable.
+14. `GET /api/system/capabilities` returns the expected shape and includes `supported_cuda_versions`.
+15. **JSON snapshot test** against a fixture file: `GET /api/backends` with a seeded registry returns exactly the documented wire shape (catches serde drift from §4.1).
+16. `GET /api/backends` with empty registry → both known backends with `installed: false`, `custom: []`.
+17. `GET /api/backends` with a fake registry entry → `installed: true` + populated `info`.
+18. `GET /api/backends` with a `BackendType::Custom` entry → custom row appears in `custom`, not in the two known cards.
+19. `POST /api/backends/install` returns 202 + `job_id`; second call while running → 409 with existing `job_id`.
+20. `POST /api/backends/install` for `ik_llama` with `build_from_source: false` → server upgrades to source build and includes a notice.
+21. `POST /api/backends/install` for `llama_cpp` with `os=linux, gpu=cuda, build_from_source: false` → server upgrades to source build and includes a notice.
+22. `POST /api/backends/install` with source build requested and `cmake_available: false` → 400 with a clear error, no job started.
+23. `POST /api/backends/check-updates` populates `update` for installed backends only.
+24. `DELETE /api/backends/:name` → 404 on unknown; 200 + `{ "removed": true }` on known.
+25. **Path-traversal guard**: `DELETE /api/backends/:name` where the registry-stored `path` points outside `backends_dir()` (e.g. `/usr/local/bin/llama-server`) → 409, no filesystem mutation.
+26. **DELETE while running**: `DELETE /api/backends/:name` while a `Running` job targets the same backend → 409.
+27. **Origin-header enforcement**: `POST /api/backends/install` with `Origin: http://evil.example` and `Host: 127.0.0.1:8080` → 403.
+28. `GET /api/backends/jobs/:id/events` SSE — connect after a job has completed → receives buffered head + (optional marker) + tail + final status, then closes. Connect mid-job → receives buffered logs + live logs.
+29. **SSE disconnect**: client disconnects mid-stream; the worker task continues to completion and the job ends in `Succeeded` (verified via `GET /api/backends/jobs/:id`).
+30. **SSE lagged marker**: force a slow subscriber until the broadcast channel laps; verify a `[N lines dropped]` event is visible to the client.
 
 ### 9.4 `koji-web` component tests
 
-16. `BackendCard` renders correctly in each of the 6 states.
-17. `InstallModal` builds the correct request body for each GPU type / source selection.
-18. `InstallModal` for `ik_llama` disables the source toggle (forced on) and hides the version field.
-19. `InstallModal` displays the cmake-missing warning when capabilities report it and source build is selected.
+31. `BackendCard` renders correctly in each of the 6 states.
+32. `InstallModal` builds the correct request body for each GPU type / source selection.
+33. `InstallModal` for `ik_llama` disables the source toggle (forced on) and hides the version field.
+34. `InstallModal` displays the cmake-missing warning when capabilities report it and source build is selected.
 
 ### 9.5 Manual smoke tests
 
-20. Install `llama.cpp` prebuilt CUDA from a fresh registry — observe live logs, completion, card state transition.
-21. Install `ik_llama` from source — observe build logs and final success.
-22. Trigger update on an installed backend — observe version bump.
-23. Trigger uninstall — verify files removed under `backends_dir()` and card returns to "Not installed".
-24. Reload the page mid-install — confirm card rehydrates with running job and re-attaches the log stream.
-25. Force a failure (disconnect network during prebuilt download) — confirm Failed state + Retry button.
+35. Install `llama.cpp` prebuilt CUDA from a fresh registry — observe live logs, completion, card state transition.
+36. Install `ik_llama` from source — observe build logs and final success.
+37. Trigger update on an installed backend — observe version bump.
+38. Trigger uninstall — verify files removed under `backends_dir()` and card returns to "Not installed".
+39. Reload the page mid-install — confirm card rehydrates with running job and re-attaches the log stream.
+40. Force a failure (disconnect network during prebuilt download) — confirm Failed state + Retry button.
 
 ---
 
