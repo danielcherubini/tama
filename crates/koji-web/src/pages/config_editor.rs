@@ -591,12 +591,17 @@ fn BackendsForm(config: RwSignal<Option<Config>>) -> impl IntoView {
     let on_check_updates_click = Callback::new(move |_backend_type: String| {
         action_error.set(None);
         wasm_bindgen_futures::spawn_local(async move {
-            let url = "/api/backends/check-updates".to_string();
-            match gloo_net::http::Request::post(&url).send().await {
+            match gloo_net::http::Request::post("/api/backends/check-updates")
+                .send()
+                .await
+            {
                 Ok(resp) => {
                     if resp.ok() {
-                        // Success - refresh the list to show updated status
-                        refresh_tick.update(|n| *n += 1);
+                        // check-updates returns a full BackendListResponse with update statuses
+                        // populated. Set backends_list directly so the UI reflects them.
+                        if let Ok(list) = resp.json::<BackendListResponse>().await {
+                            backends_list.set(list);
+                        }
                     } else {
                         let text = resp.text().await.unwrap_or_default();
                         action_error.set(Some(format!("Check updates failed: {text}")));
