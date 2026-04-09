@@ -1,7 +1,7 @@
 use super::migrate::{
     cleanup_stale_mmproj_args, migrate_cards_to_unified_config, rename_legacy_directories,
 };
-use super::types::{BackendConfig, Config, General, ProxyConfig, Supervisor};
+use super::types::{BackendConfig, Config, General, ModelConfig, ProxyConfig, Supervisor};
 use crate::profiles::Profile;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
@@ -208,7 +208,17 @@ impl Default for Config {
             },
         );
 
-        let models = HashMap::new();
+        let mut models = HashMap::new();
+        // Add a default model for testing
+        models.insert(
+            "default".to_string(),
+            ModelConfig {
+                backend: "llama_cpp".to_string(),
+                model: Some("default/model".to_string()),
+                enabled: true,
+                ..Default::default()
+            },
+        );
 
         // Built-in sampling templates for all profiles
         let mut sampling_templates = HashMap::new();

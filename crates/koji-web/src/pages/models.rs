@@ -406,7 +406,7 @@ mod tests {
             ModelEntry {
                 id: "model-1".to_string(),
                 backend: "llama.cpp".to_string(),
-                model: "llama2".to_string(),
+                model: Some("llama2".to_string()),
                 quant: None,
                 enabled: true,
                 loaded: true,
@@ -414,7 +414,7 @@ mod tests {
             ModelEntry {
                 id: "model-2".to_string(),
                 backend: "llama.cpp".to_string(),
-                model: "llama3".to_string(),
+                model: Some("llama3".to_string()),
                 quant: None,
                 enabled: true,
                 loaded: true,
@@ -431,7 +431,7 @@ mod tests {
             ModelEntry {
                 id: "model-1".to_string(),
                 backend: "llama.cpp".to_string(),
-                model: "llama2".to_string(),
+                model: Some("llama2".to_string()),
                 quant: None,
                 enabled: true,
                 loaded: false,
@@ -439,7 +439,7 @@ mod tests {
             ModelEntry {
                 id: "model-2".to_string(),
                 backend: "llama.cpp".to_string(),
-                model: "llama3".to_string(),
+                model: Some("llama3".to_string()),
                 quant: None,
                 enabled: true,
                 loaded: false,
@@ -456,7 +456,7 @@ mod tests {
             ModelEntry {
                 id: "model-1".to_string(),
                 backend: "llama.cpp".to_string(),
-                model: "llama2".to_string(),
+                model: Some("llama2".to_string()),
                 quant: None,
                 enabled: true,
                 loaded: true,
@@ -464,7 +464,7 @@ mod tests {
             ModelEntry {
                 id: "model-2".to_string(),
                 backend: "llama.cpp".to_string(),
-                model: "llama3".to_string(),
+                model: Some("llama3".to_string()),
                 quant: None,
                 enabled: true,
                 loaded: false,
@@ -472,7 +472,7 @@ mod tests {
             ModelEntry {
                 id: "model-3".to_string(),
                 backend: "llama.cpp".to_string(),
-                model: "llama4".to_string(),
+                model: Some("llama4".to_string()),
                 quant: None,
                 enabled: true,
                 loaded: true,
@@ -497,7 +497,7 @@ mod tests {
             ModelEntry {
                 id: "model-2".to_string(),
                 backend: "llama.cpp".to_string(),
-                model: "llama3".to_string(),
+                model: Some("llama3".to_string()),
                 quant: None,
                 enabled: true,
                 loaded: true,
@@ -505,7 +505,7 @@ mod tests {
             ModelEntry {
                 id: "model-1".to_string(),
                 backend: "llama.cpp".to_string(),
-                model: "llama2".to_string(),
+                model: Some("llama2".to_string()),
                 quant: None,
                 enabled: true,
                 loaded: true,
@@ -513,7 +513,7 @@ mod tests {
             ModelEntry {
                 id: "model-4".to_string(),
                 backend: "llama.cpp".to_string(),
-                model: "llama5".to_string(),
+                model: Some("llama5".to_string()),
                 quant: None,
                 enabled: true,
                 loaded: false,
@@ -521,7 +521,7 @@ mod tests {
             ModelEntry {
                 id: "model-3".to_string(),
                 backend: "llama.cpp".to_string(),
-                model: "llama4".to_string(),
+                model: Some("llama4".to_string()),
                 quant: None,
                 enabled: true,
                 loaded: false,

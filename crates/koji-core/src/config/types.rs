@@ -158,7 +158,7 @@ pub struct HealthCheck {
     pub timeout_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModelConfig {
     pub backend: String,
     #[serde(default)]
