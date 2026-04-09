@@ -1,3 +1,5 @@
+#![allow(clippy::unnecessary_to_owned)]
+
 use async_stream::stream;
 use axum::response::sse::{Event, KeepAlive};
 use axum::{
