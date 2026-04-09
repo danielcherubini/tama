@@ -85,13 +85,7 @@ impl ProxyState {
         );
 
         let mut child = tokio::process::Command::new(&backend_path);
-        // Set working directory to the backend's parent dir so Windows can find
-        // companion DLLs (ggml-cuda.dll, ggml.dll, etc.) alongside the binary.
-        if let Some(parent) = backend_path.parent() {
-            if parent.is_dir() {
-                child.current_dir(parent);
-            }
-        }
+        crate::process::configure_backend_command(&mut child, &backend_path);
         child.args(&args).env("MODEL_NAME", model_name);
 
         info!(

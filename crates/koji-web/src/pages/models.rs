@@ -9,7 +9,7 @@ use crate::components::pull_quant_wizard::{CompletedQuant, PullQuantWizard};
 struct ModelEntry {
     id: String,
     backend: String,
-    model: String,
+    model: Option<String>,
     quant: Option<String>,
     enabled: bool,
     loaded: bool,
@@ -229,10 +229,12 @@ pub fn Models() -> impl IntoView {
                                                                         <span class="model-card__label">"Backend"</span>
                                                                         <span class="model-card__value text-mono">{m.backend}</span>
                                                                     </div>
-                                                                    <div class="model-card__field">
-                                                                        <span class="model-card__label">"Model"</span>
-                                                                        <span class="model-card__value text-mono">{m.model}</span>
-                                                                    </div>
+                                                                    {m.model.map(|repo| view! {
+                                                                        <div class="model-card__field">
+                                                                            <span class="model-card__label">"Model"</span>
+                                                                            <span class="model-card__value text-mono">{repo}</span>
+                                                                        </div>
+                                                                    })}
                                                                     {m.quant.map(|q| view! {
                                                                         <div class="model-card__field">
                                                                             <span class="model-card__label">"Quant"</span>
@@ -309,10 +311,12 @@ pub fn Models() -> impl IntoView {
                                                                         <span class="model-card__label">"Backend"</span>
                                                                         <span class="model-card__value text-mono">{m.backend}</span>
                                                                     </div>
-                                                                    <div class="model-card__field">
-                                                                        <span class="model-card__label">"Model"</span>
-                                                                        <span class="model-card__value text-mono">{m.model}</span>
-                                                                    </div>
+                                                                    {m.model.map(|repo| view! {
+                                                                        <div class="model-card__field">
+                                                                            <span class="model-card__label">"Model"</span>
+                                                                            <span class="model-card__value text-mono">{repo}</span>
+                                                                        </div>
+                                                                    })}
                                                                     {m.quant.map(|q| view! {
                                                                         <div class="model-card__field">
                                                                             <span class="model-card__label">"Quant"</span>

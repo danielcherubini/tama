@@ -135,7 +135,6 @@ pub struct SamplingParams {
 enum Section {
     General,
     Proxy,
-    Backends,
     Supervisor,
     Sampling,
 }
@@ -145,7 +144,6 @@ impl Section {
         match self {
             Section::General => "General",
             Section::Proxy => "Proxy",
-            Section::Backends => "Backends",
             Section::Supervisor => "Supervisor",
             Section::Sampling => "Sampling Templates",
         }
@@ -154,7 +152,6 @@ impl Section {
         match self {
             Section::General => "⚙️",
             Section::Proxy => "🌐",
-            Section::Backends => "🖥️",
             Section::Supervisor => "👀",
             Section::Sampling => "🎲",
         }
@@ -247,7 +244,7 @@ pub fn ConfigEditor() -> impl IntoView {
                         // Side nav
                         <nav class="card" style="width:220px;flex-shrink:0;padding:0.75rem;">
                             <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:0.25rem;">
-                                {[Section::General, Section::Proxy, Section::Backends, Section::Supervisor, Section::Sampling]
+                                {[Section::General, Section::Proxy, Section::Supervisor, Section::Sampling]
                                     .into_iter().map(|s| {
                                         let active = move || current.get() == s;
                                         view! {
@@ -273,7 +270,6 @@ pub fn ConfigEditor() -> impl IntoView {
                             {move || match current.get() {
                                 Section::General => view! { <GeneralForm config=config /> }.into_any(),
                                 Section::Proxy => view! { <ProxyForm config=config /> }.into_any(),
-                                Section::Backends => view! { <BackendsForm config=config /> }.into_any(),
                                 Section::Supervisor => view! { <SupervisorForm config=config /> }.into_any(),
                                 Section::Sampling => view! { <SamplingForm config=config /> }.into_any(),
                             }}
@@ -483,367 +479,6 @@ fn ProxyForm(config: RwSignal<Option<Config>>) -> impl IntoView {
                     />
                 </div>
             </div>
-        </div>
-    }
-}
-
-// ─── Backends Form ────────────────────────────────────────────────────────
-
-use crate::components::backend_card::{BackendCard, BackendCardDto};
-use crate::components::install_modal::{CapabilitiesDto, InstallModal, InstallRequest};
-use crate::components::job_log_panel::JobLogPanel;
-
-#[derive(Debug, Clone, Deserialize, Default)]
-struct BackendListResponse {
-    #[serde(default)]
-    backends: Vec<BackendCardDto>,
-    #[serde(default)]
-    custom: Vec<BackendCardDto>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct InstallResponse {
-    job_id: String,
-}
-
-#[component]
-fn BackendsForm(config: RwSignal<Option<Config>>) -> impl IntoView {
-    let backend_keys = move || {
-        config
-            .get()
-            .map(|c| c.backends.keys().cloned().collect::<Vec<_>>())
-            .unwrap_or_default()
-    };
-
-    // ── State for install/update flow ────────────────────────────────────
-    let backends_list = RwSignal::new(BackendListResponse::default());
-    let capabilities = RwSignal::new(CapabilitiesDto::default());
-    let install_modal_for = RwSignal::new(Option::<String>::None);
-    let active_job_id = RwSignal::new(Option::<String>::None);
-    let action_error = RwSignal::new(Option::<String>::None);
-    let refresh_tick = RwSignal::new(0u32);
-
-    // ── Fetch backends list ──────────────────────────────────────────────
-    Effect::new(move |_| {
-        let _ = refresh_tick.get();
-        wasm_bindgen_futures::spawn_local(async move {
-            match gloo_net::http::Request::get("/api/backends").send().await {
-                Ok(resp) => {
-                    if let Ok(list) = resp.json::<BackendListResponse>().await {
-                        backends_list.set(list);
-                    }
-                }
-                Err(e) => {
-                    leptos::logging::warn!("Failed to fetch backends: {e:?}");
-                }
-            }
-        });
-    });
-
-    // ── Fetch capabilities once ──────────────────────────────────────────
-    Effect::new(move |prev: Option<()>| {
-        if prev.is_some() {
-            return;
-        }
-        wasm_bindgen_futures::spawn_local(async move {
-            match gloo_net::http::Request::get("/api/system/capabilities")
-                .send()
-                .await
-            {
-                Ok(resp) => {
-                    if let Ok(caps) = resp.json::<CapabilitiesDto>().await {
-                        capabilities.set(caps);
-                    }
-                }
-                Err(e) => {
-                    leptos::logging::warn!("Failed to fetch capabilities: {e:?}");
-                }
-            }
-        });
-    });
-
-    // ── Action callbacks ─────────────────────────────────────────────────
-    let on_install_click = Callback::new(move |backend_type: String| {
-        action_error.set(None);
-        install_modal_for.set(Some(backend_type));
-    });
-
-    let on_update_click = Callback::new(move |backend_type: String| {
-        action_error.set(None);
-        wasm_bindgen_futures::spawn_local(async move {
-            let url = format!("/api/backends/{backend_type}/update");
-            match gloo_net::http::Request::post(&url).send().await {
-                Ok(resp) => {
-                    if resp.ok() {
-                        if let Ok(r) = resp.json::<InstallResponse>().await {
-                            active_job_id.set(Some(r.job_id));
-                        }
-                    } else {
-                        let text = resp.text().await.unwrap_or_default();
-                        action_error.set(Some(format!("Update failed: {text}")));
-                    }
-                }
-                Err(e) => action_error.set(Some(format!("Update request failed: {e}"))),
-            }
-        });
-    });
-
-    let on_check_updates_click = Callback::new(move |_backend_type: String| {
-        action_error.set(None);
-        wasm_bindgen_futures::spawn_local(async move {
-            match gloo_net::http::Request::post("/api/backends/check-updates")
-                .send()
-                .await
-            {
-                Ok(resp) => {
-                    if resp.ok() {
-                        // check-updates returns a full BackendListResponse with update statuses
-                        // populated. Set backends_list directly so the UI reflects them.
-                        if let Ok(list) = resp.json::<BackendListResponse>().await {
-                            backends_list.set(list);
-                        }
-                    } else {
-                        let text = resp.text().await.unwrap_or_default();
-                        action_error.set(Some(format!("Check updates failed: {text}")));
-                    }
-                }
-                Err(e) => action_error.set(Some(format!("Check updates request failed: {e}"))),
-            }
-        });
-    });
-
-    let on_delete_click = Callback::new(move |backend_type: String| {
-        action_error.set(None);
-        wasm_bindgen_futures::spawn_local(async move {
-            let url = format!("/api/backends/{backend_type}");
-            match gloo_net::http::Request::delete(&url).send().await {
-                Ok(resp) => {
-                    if resp.ok() {
-                        refresh_tick.update(|n| *n += 1);
-                    } else {
-                        let text = resp.text().await.unwrap_or_default();
-                        action_error.set(Some(format!("Uninstall failed: {text}")));
-                    }
-                }
-                Err(e) => action_error.set(Some(format!("Uninstall request failed: {e}"))),
-            }
-        });
-    });
-
-    let on_install_submit = Callback::new(move |req: InstallRequest| {
-        install_modal_for.set(None);
-        action_error.set(None);
-        wasm_bindgen_futures::spawn_local(async move {
-            let request = match gloo_net::http::Request::post("/api/backends/install").json(&req) {
-                Ok(r) => r,
-                Err(e) => {
-                    action_error.set(Some(format!("Failed to encode install request: {e}")));
-                    return;
-                }
-            };
-            match request.send().await {
-                Ok(resp) => {
-                    if resp.ok() {
-                        if let Ok(r) = resp.json::<InstallResponse>().await {
-                            active_job_id.set(Some(r.job_id));
-                        }
-                    } else {
-                        let text = resp.text().await.unwrap_or_default();
-                        action_error.set(Some(format!("Install failed: {text}")));
-                    }
-                }
-                Err(e) => action_error.set(Some(format!("Install request failed: {e}"))),
-            }
-        });
-    });
-
-    let on_install_cancel = Callback::new(move |_: ()| {
-        install_modal_for.set(None);
-    });
-
-    let on_job_close = Callback::new(move |_: ()| {
-        active_job_id.set(None);
-        refresh_tick.update(|n| *n += 1);
-    });
-
-    view! {
-        <div class="card">
-            <h2>"Backends"</h2>
-            <p class="text-muted">"Manage inference backend installations."</p>
-
-            {/* Error banner */}
-            {move || {
-                if let Some(err) = action_error.get() {
-                    view! {
-                        <div style="background:#fee2e2;border:1px solid #ef4444;color:#b91c1c;padding:0.75rem;border-radius:4px;margin-bottom:1rem;font-size:0.875rem;">
-                            {err}
-                        </div>
-                    }.into_any()
-                } else {
-                    view! { <span/> }.into_any()
-                }
-            }}
-
-            {/* Active job log panel */}
-            {move || {
-                if let Some(jid) = active_job_id.get() {
-                    view! {
-                        <JobLogPanel
-                            job_id=jid
-                            on_close=on_job_close
-                        />
-                    }.into_any()
-                } else {
-                    view! { <span/> }.into_any()
-                }
-            }}
-
-            {/* Backend cards */}
-            <div style="display:flex;flex-direction:column;gap:1rem;margin-top:1rem;">
-                {move || {
-                    let list = backends_list.get();
-                    let mut cards = Vec::new();
-                    for backend in list.backends.into_iter().chain(list.custom.into_iter()) {
-                        cards.push(view! {
-                            <BackendCard
-                                backend=backend
-                                on_install=on_install_click
-                                on_update=on_update_click
-                                on_check_updates=on_check_updates_click
-                                on_delete=on_delete_click
-                            />
-                        }.into_any());
-                    }
-                    cards
-                }}
-            </div>
-
-            {/* Install modal */}
-            {move || {
-                if let Some(bt) = install_modal_for.get() {
-                    let caps = capabilities.get();
-                    view! {
-                        <InstallModal
-                            backend_type=bt
-                            capabilities=caps
-                            on_submit=on_install_submit
-                            on_cancel=on_install_cancel
-                        />
-                    }.into_any()
-                } else {
-                    view! { <span/> }.into_any()
-                }
-            }}
-
-            {/* Advanced: existing config-side fields */}
-            <details style="margin-top:1.5rem;">
-                <summary style="cursor:pointer;font-weight:600;padding:0.5rem 0;">
-                    "Advanced configuration (config.toml)"
-                </summary>
-                {move || {
-                    let keys = backend_keys();
-                    if keys.is_empty() {
-                        view! { <p class="text-muted">"No backends configured."</p> }.into_any()
-                    } else {
-                        view! {
-                            <div style="display:flex;flex-direction:column;gap:1.5rem;margin-top:1rem;">
-                                {keys.into_iter().map(|key| {
-                                    let k_path_g = key.clone();
-                                    let k_path_s = key.clone();
-                                    let k_args_g = key.clone();
-                                    let k_args_s = key.clone();
-                                    let k_hc_g = key.clone();
-                                    let k_hc_s = key.clone();
-                                    let k_ver_g = key.clone();
-                                    let k_ver_s = key.clone();
-                                    view! {
-                                        <fieldset style="border:1px solid var(--border,#ccc);padding:1rem;border-radius:6px;">
-                                            <legend style="font-weight:600;">{key.clone()}</legend>
-                                            <div style="display:flex;flex-direction:column;gap:0.75rem;">
-                                                <div>
-                                                    <label>"Path"</label>
-                                                    <input
-                                                        type="text"
-                                                        placeholder="/path/to/binary"
-                                                        prop:value=move || config.get()
-                                                            .and_then(|c| c.backends.get(&k_path_g).and_then(|b| b.path.clone()))
-                                                            .unwrap_or_default()
-                                                        on:input=move |ev| {
-                                                            let v = target_value(&ev);
-                                                            let k = k_path_s.clone();
-                                                            config.update(|c| if let Some(c) = c {
-                                                                if let Some(b) = c.backends.get_mut(&k) {
-                                                                    b.path = if v.is_empty() { None } else { Some(v) };
-                                                                }
-                                                            });
-                                                        }
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label>"Default Args (space-separated)"</label>
-                                                    <input
-                                                        type="text"
-                                                        prop:value=move || config.get()
-                                                            .and_then(|c| c.backends.get(&k_args_g).map(|b| b.default_args.join(" ")))
-                                                            .unwrap_or_default()
-                                                        on:input=move |ev| {
-                                                            let v = target_value(&ev);
-                                                            let k = k_args_s.clone();
-                                                            let parts: Vec<String> = v.split_whitespace().map(String::from).collect();
-                                                            config.update(|c| if let Some(c) = c {
-                                                                if let Some(b) = c.backends.get_mut(&k) {
-                                                                    b.default_args = parts;
-                                                                }
-                                                            });
-                                                        }
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label>"Health Check URL"</label>
-                                                    <input
-                                                        type="text"
-                                                        placeholder="http://127.0.0.1:8080/health"
-                                                        prop:value=move || config.get()
-                                                            .and_then(|c| c.backends.get(&k_hc_g).and_then(|b| b.health_check_url.clone()))
-                                                            .unwrap_or_default()
-                                                        on:input=move |ev| {
-                                                            let v = target_value(&ev);
-                                                            let k = k_hc_s.clone();
-                                                            config.update(|c| if let Some(c) = c {
-                                                                if let Some(b) = c.backends.get_mut(&k) {
-                                                                    b.health_check_url = if v.is_empty() { None } else { Some(v) };
-                                                                }
-                                                            });
-                                                        }
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label>"Version"</label>
-                                                    <input
-                                                        type="text"
-                                                        prop:value=move || config.get()
-                                                            .and_then(|c| c.backends.get(&k_ver_g).and_then(|b| b.version.clone()))
-                                                            .unwrap_or_default()
-                                                        on:input=move |ev| {
-                                                            let v = target_value(&ev);
-                                                            let k = k_ver_s.clone();
-                                                            config.update(|c| if let Some(c) = c {
-                                                                if let Some(b) = c.backends.get_mut(&k) {
-                                                                    b.version = if v.is_empty() { None } else { Some(v) };
-                                                                }
-                                                            });
-                                                        }
-                                                    />
-                                                </div>
-                                            </div>
-                                        </fieldset>
-                                    }.into_any()
-                                }).collect::<Vec<_>>()}
-                            </div>
-                        }.into_any()
-                    }
-                }}
-            </details>
         </div>
     }
 }

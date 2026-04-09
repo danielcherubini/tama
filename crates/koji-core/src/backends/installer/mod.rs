@@ -16,6 +16,8 @@ use super::registry::{BackendSource, BackendType};
 use super::ProgressSink;
 use crate::gpu::GpuType;
 
+
+
 #[derive(Debug, Clone)]
 pub struct InstallOptions {
     pub backend_type: BackendType,
@@ -48,7 +50,25 @@ pub async fn install_backend_with_progress(
     let source = options.source.clone();
     match source {
         BackendSource::Prebuilt { version } => {
-            prebuilt::install_prebuilt(&options, &version, progress.as_ref()).await
+            // Resolve "latest" to an actual release tag before constructing the download URL.
+            // GitHub releases do not support "latest" as a path segment in asset URLs.
+            let resolved = if version.eq_ignore_ascii_case("latest") {
+                tracing::info!(
+                    target: "koji_core::backends::installer",
+                    "Resolving 'latest' version tag for {:?}",
+                    options.backend_type
+                );
+                let tag = crate::backends::updater::check_latest_version(&options.backend_type).await?;
+                tracing::info!(
+                    target: "koji_core::backends::installer",
+                    "Resolved 'latest' -> {}",
+                    tag
+                );
+                tag
+            } else {
+                version
+            };
+            prebuilt::install_prebuilt(&options, &resolved, progress.as_ref()).await
         }
         BackendSource::SourceCode {
             version,

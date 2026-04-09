@@ -39,10 +39,27 @@ pub async fn main() -> Result<()> {
         }
     }
 
-    koji_core::logging::init();
-
     let args = Args::parse();
     let config = Config::load()?;
+
+    // For serve/service-run --proxy, use file logging. Otherwise use stdout.
+    let use_file_logging = matches!(
+        args.command,
+        Commands::Serve { .. } | Commands::ServiceRun { proxy: true, .. }
+    );
+    
+    if use_file_logging {
+        if let Ok(logs_dir) = config.logs_dir() {
+            if let Err(e) = koji_core::logging::init_with_file(&logs_dir) {
+                eprintln!("Failed to initialize file logging: {}", e);
+                koji_core::logging::init(); // Fallback to stdout
+            }
+        } else {
+            koji_core::logging::init();
+        }
+    } else {
+        koji_core::logging::init();
+    }
 
     match args.command {
         Commands::Run { name, ctx } => run::cmd_run(&config, &name, ctx).await,
