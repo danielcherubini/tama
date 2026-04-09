@@ -6,6 +6,16 @@ use std::path::PathBuf;
 
 /// Migrates model card data into the unified ModelConfig.
 pub fn migrate_cards_to_unified_config(config: &mut Config) -> anyhow::Result<()> {
+    // Derive api_name from model field (HF repo ID) for ALL models, even if configs/ dir is missing
+    // This ensures api_name is always populated for models with a model field
+    for model_config in config.models.values_mut() {
+        if model_config.api_name.is_none() {
+            if let Some(repo_id) = &model_config.model {
+                model_config.api_name = Some(repo_id.clone());
+            }
+        }
+    }
+
     let configs_dir = config.configs_dir()?;
     if !configs_dir.exists() {
         return Ok(());
@@ -42,14 +52,6 @@ pub fn migrate_cards_to_unified_config(config: &mut Config) -> anyhow::Result<()
     // 4. For each (key, model_config) in config.models
     let mut migrated_count = 0;
     for model_config in config.models.values_mut() {
-        // Derive api_name from model field (HF repo ID) if not set
-        // This applies to ALL models, not just those with card files
-        if model_config.api_name.is_none() {
-            if let Some(repo_id) = &model_config.model {
-                model_config.api_name = Some(repo_id.clone());
-            }
-        }
-
         // First, handle sampling resolution for ALL models (with or without model field)
         if model_config.sampling.is_none() {
             if let Some(profile_name) = &model_config.profile {

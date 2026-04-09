@@ -284,10 +284,8 @@ pub async fn forward_request(
                                 }
                             }
 
-                            // Handle any remaining partial line (chunk ended mid-line)
-                            if !buffer.is_empty() {
-                                result.push_str(&buffer);
-                            }
+                            // Do not emit partial lines yet - they will be completed in the next chunk
+                            // Only emit fully-formed lines (those ending with \n)
 
                             Ok(Bytes::from(result.into_bytes()))
                         }
@@ -298,12 +296,15 @@ pub async fn forward_request(
             } else {
                 // Non-streaming response - parse, rewrite, and re-serialize
                 let body_bytes = response.bytes().await.unwrap_or_default();
-                let mut parsed: JsonValue =
-                    serde_json::from_slice(&body_bytes).unwrap_or(JsonValue::Null);
-                if parsed != JsonValue::Null {
-                    parsed["model"] = JsonValue::String(model_name.to_string());
-                }
-                let new_body = serde_json::to_vec(&parsed).unwrap_or_else(|_| body_bytes.to_vec());
+                // Only attempt JSON rewrite if content is valid JSON
+                let new_body =
+                    if let Ok(mut parsed) = serde_json::from_slice::<JsonValue>(&body_bytes) {
+                        parsed["model"] = JsonValue::String(model_name.to_string());
+                        serde_json::to_vec(&parsed).unwrap_or(body_bytes.to_vec())
+                    } else {
+                        // Not JSON, pass through unchanged
+                        body_bytes.to_vec()
+                    };
                 Body::from(new_body)
             };
 

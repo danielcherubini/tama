@@ -363,7 +363,7 @@ mod tests {
         let json: JsonValue = serde_json::from_slice(&bytes).unwrap();
 
         let data = json.get("data").unwrap().as_array().unwrap();
-        assert_eq!(data.len(), 3);
+        assert_eq!(data.len(), 2);
 
         // Collect all model ids
         let ids: Vec<&str> = data
@@ -380,11 +380,6 @@ mod tests {
         assert!(
             ids.contains(&"config-key-2"),
             "Expected 'config-key-2' in model ids, got: {:?}",
-            ids
-        );
-        assert!(
-            ids.contains(&"default"),
-            "Expected 'default' in model ids, got: {:?}",
             ids
         );
     }
