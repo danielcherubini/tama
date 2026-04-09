@@ -989,3 +989,156 @@ pub async fn verify_model_files(
             .into_response(),
     }
 }
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use koji_core::config::{ModelConfig, QuantEntry, QuantKind};
+    use std::collections::BTreeMap;
+
+    fn body_with_quants(quants: BTreeMap<String, QuantEntry>) -> ModelBody {
+        ModelBody {
+            backend: "llama".to_string(),
+            model: Some("org/repo".to_string()),
+            quant: Some("Q4_K_M".to_string()),
+            mmproj: None,
+            args: vec![],
+            sampling: None,
+            enabled: Some(true),
+            context_length: None,
+            port: None,
+            display_name: None,
+            gpu_layers: None,
+            quants: Some(quants),
+        }
+    }
+
+    fn existing_with_size(name: &str, file: &str, size: Option<u64>) -> ModelConfig {
+        let mut quants = BTreeMap::new();
+        quants.insert(
+            name.to_string(),
+            QuantEntry {
+                file: file.to_string(),
+                kind: QuantKind::Model,
+                size_bytes: size,
+                context_length: Some(4096),
+            },
+        );
+        ModelConfig {
+            backend: "llama".into(),
+            args: vec![],
+            sampling: None,
+            model: Some("org/repo".into()),
+            quant: Some("Q4_K_M".into()),
+            mmproj: None,
+            port: None,
+            health_check: None,
+            enabled: true,
+            context_length: None,
+            profile: None,
+            display_name: None,
+            gpu_layers: None,
+            quants,
+        }
+    }
+
+    /// When an existing entry has a stored `size_bytes`, a PUT that tries to
+    /// change it must be silently ignored — the server-side value wins.
+    #[test]
+    fn apply_model_body_preserves_existing_size_bytes() {
+        let existing = existing_with_size("Q4_K_M", "Model-Q4_K_M.gguf", Some(1_234_567));
+
+        let mut attacker_quants = BTreeMap::new();
+        attacker_quants.insert(
+            "Q4_K_M".to_string(),
+            QuantEntry {
+                file: "Model-Q4_K_M.gguf".to_string(),
+                kind: QuantKind::Model,
+                size_bytes: Some(42), // malicious / stale
+                context_length: Some(8192),
+            },
+        );
+
+        let result = apply_model_body(body_with_quants(attacker_quants), Some(existing));
+        let q = result.quants.get("Q4_K_M").unwrap();
+        assert_eq!(
+            q.size_bytes,
+            Some(1_234_567),
+            "existing size_bytes must be preserved against client override"
+        );
+        assert_eq!(q.context_length, Some(8192));
+    }
+
+    /// When an existing entry has no stored size, we still accept the client
+    /// value to avoid regressing fresh creates that haven't been verified yet.
+    #[test]
+    fn apply_model_body_accepts_client_size_when_none_stored() {
+        let existing = existing_with_size("Q4_K_M", "Model-Q4_K_M.gguf", None);
+
+        let mut incoming = BTreeMap::new();
+        incoming.insert(
+            "Q4_K_M".to_string(),
+            QuantEntry {
+                file: "Model-Q4_K_M.gguf".to_string(),
+                kind: QuantKind::Model,
+                size_bytes: Some(9_999),
+                context_length: Some(4096),
+            },
+        );
+
+        let result = apply_model_body(body_with_quants(incoming), Some(existing));
+        assert_eq!(result.quants.get("Q4_K_M").unwrap().size_bytes, Some(9_999));
+    }
+
+    /// A brand-new model (no existing config) still honours whatever size the
+    /// client supplies, so create flows aren't broken.
+    #[test]
+    fn apply_model_body_accepts_client_size_for_new_model() {
+        let mut incoming = BTreeMap::new();
+        incoming.insert(
+            "Q4_K_M".to_string(),
+            QuantEntry {
+                file: "Model-Q4_K_M.gguf".to_string(),
+                kind: QuantKind::Model,
+                size_bytes: Some(5_000),
+                context_length: None,
+            },
+        );
+
+        let result = apply_model_body(body_with_quants(incoming), None);
+        assert_eq!(result.quants.get("Q4_K_M").unwrap().size_bytes, Some(5_000));
+    }
+
+    /// A new quant key (not in the existing config) on an existing model still
+    /// accepts the client value — preservation is per-key.
+    #[test]
+    fn apply_model_body_accepts_client_size_for_new_quant_key() {
+        let existing = existing_with_size("Q4_K_M", "Model-Q4_K_M.gguf", Some(1_000));
+
+        let mut incoming = BTreeMap::new();
+        incoming.insert(
+            "Q4_K_M".to_string(),
+            QuantEntry {
+                file: "Model-Q4_K_M.gguf".to_string(),
+                kind: QuantKind::Model,
+                size_bytes: Some(7),
+                context_length: None,
+            },
+        );
+        incoming.insert(
+            "Q8_0".to_string(),
+            QuantEntry {
+                file: "Model-Q8_0.gguf".to_string(),
+                kind: QuantKind::Model,
+                size_bytes: Some(2_000),
+                context_length: None,
+            },
+        );
+
+        let result = apply_model_body(body_with_quants(incoming), Some(existing));
+        assert_eq!(result.quants.get("Q4_K_M").unwrap().size_bytes, Some(1_000));
+        assert_eq!(result.quants.get("Q8_0").unwrap().size_bytes, Some(2_000));
+    }
+}
