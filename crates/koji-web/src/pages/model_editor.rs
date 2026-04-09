@@ -948,9 +948,9 @@ pub fn ModelEditor() -> impl IntoView {
                                     }).collect::<Vec<_>>()}
                                 </select>
 
-                                <label class="form-label" for="field-display-name">"Display Name"</label>
+                                <label class="form-label" for="field-api-name">"API Name"</label>
                                 <input
-                                    id="field-display-name"
+                                    id="field-api-name"
                                     class="form-input"
                                     type="text"
                                     placeholder="e.g. My Awesome Model"

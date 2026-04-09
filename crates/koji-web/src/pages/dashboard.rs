@@ -94,6 +94,12 @@ fn model_action_button_label(loaded: bool) -> &'static str {
     }
 }
 
+/// Returns the preferred display name for a model, preferring `api_name` if
+/// available, falling back to the model `id` otherwise.
+fn model_display_name(m: &ModelStatus) -> String {
+    m.api_name.as_deref().unwrap_or(m.id.as_str()).to_string()
+}
+
 /// Partition model statuses into loaded and unloaded vectors, sorted by ID.
 ///
 /// This is extracted to avoid duplicating the partition logic between the
@@ -337,7 +343,7 @@ pub fn Dashboard() -> impl IntoView {
                                                             view! {
                                                                 <div class="model-card card">
                                                                     <div class="model-card__header">
-                                                                        <span class="model-card__id text-mono">{m.id.clone()}</span>
+                                                                        <span class="model-card__id">{model_display_name(&m)}</span>
                                                                         <span class={badge_class}>{badge_label}</span>
                                                                     </div>
                                                                     <div class="model-card__body">
@@ -394,7 +400,7 @@ pub fn Dashboard() -> impl IntoView {
                                                             view! {
                                                                 <div class="model-card card">
                                                                     <div class="model-card__header">
-                                                                        <span class="model-card__id text-mono">{m.id.clone()}</span>
+                                                                        <span class="model-card__id">{model_display_name(&m)}</span>
                                                                         <span class={badge_class}>{badge_label}</span>
                                                                     </div>
                                                                     <div class="model-card__body">
