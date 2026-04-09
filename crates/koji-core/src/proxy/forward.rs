@@ -251,7 +251,8 @@ pub async fn forward_request(
 
                                     // Process complete SSE line
                                     if let Some(data_content) = line.strip_prefix("data: ") {
-                                        if data_content == "[DONE]" {
+                                        let trimmed = data_content.trim_end();
+                                        if trimmed == "[DONE]" {
                                             // Pass through unchanged
                                             result.push_str(&line);
                                         } else {
