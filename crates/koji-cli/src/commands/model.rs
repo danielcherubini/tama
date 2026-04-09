@@ -1168,10 +1168,13 @@ async fn cmd_verify(config: &Config, model_filter: Option<String>) -> Result<()>
 
     for model in &models {
         let repo_id = &model.card.model.source;
-        let model_dir = models_dir.join(repo_id);
+        // Use the registry-resolved directory from the InstalledModel itself
+        // rather than reconstructing the path — legacy/hand-edited cards may
+        // live under a directory that doesn't match `models_dir/repo_id`.
+        let model_dir = &model.dir;
         println!("{}", repo_id);
 
-        let results = match verify::verify_model(&conn, repo_id, &model_dir) {
+        let results = match verify::verify_model(&conn, repo_id, model_dir) {
             Ok(r) => r,
             Err(e) => {
                 println!("  verify error: {}", e);

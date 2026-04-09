@@ -822,7 +822,15 @@ pub fn ModelEditor() -> impl IntoView {
         Action::new_unsync(move |_: &()| async move {
             refresh_busy.set(true);
             refresh_status.set(None);
-            let id = form_id.get();
+            // Use the persisted id, not the editable form_id — otherwise
+            // mid-rename edits would cause the backend to look up a model
+            // that isn't saved yet.
+            let persisted = original_id.get();
+            let id = if persisted.is_empty() {
+                form_id.get()
+            } else {
+                persisted
+            };
             match refresh_model_api(id).await {
                 Ok(resp) => {
                     repo_commit_sha.set(resp.repo_commit_sha.clone());
@@ -845,7 +853,13 @@ pub fn ModelEditor() -> impl IntoView {
         Action::new_unsync(move |_: &()| async move {
             verify_busy.set(true);
             verify_status.set(None);
-            let id = form_id.get();
+            // Same reasoning as refresh_action: target the saved id.
+            let persisted = original_id.get();
+            let id = if persisted.is_empty() {
+                form_id.get()
+            } else {
+                persisted
+            };
             match verify_model_api(id).await {
                 Ok(resp) => {
                     let n = resp.files.len();

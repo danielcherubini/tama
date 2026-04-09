@@ -88,6 +88,19 @@ pub fn Models() -> impl IntoView {
                     return;
                 }
             };
+            // Surface non-2xx HTTP responses instead of silently falling
+            // through to an empty list, which would report "Refreshed 0/0
+            // models successfully" on a real server error.
+            if !resp.ok() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                check_all_status.set(Some((
+                    false,
+                    format!("Failed to list models: HTTP {} {}", status, body),
+                )));
+                check_all_busy.set(false);
+                return;
+            }
             let list = match resp.json::<serde_json::Value>().await {
                 Ok(v) => v,
                 Err(e) => {
