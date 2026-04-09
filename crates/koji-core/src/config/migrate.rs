@@ -86,9 +86,9 @@ pub fn migrate_cards_to_unified_config(config: &mut Config) -> anyhow::Result<()
 
             // If there's a card, migrate card data
             if let Some(card) = card_data.get(&filename) {
-                // Set display_name from card.model.name if display_name is None
-                if model_config.display_name.is_none() {
-                    model_config.display_name = Some(card.model.name.clone());
+                // Set api_name from card.model.name if api_name is None
+                if model_config.api_name.is_none() {
+                    model_config.api_name = Some(card.model.name.clone());
                 }
                 // Set gpu_layers from card.model.default_gpu_layers if gpu_layers is None
                 if model_config.gpu_layers.is_none() {
@@ -532,7 +532,7 @@ top_k = 40
                     enabled: true,
                     context_length: None,
                     profile: None,
-                    display_name: None,
+                    api_name: None,
                     gpu_layers: None,
                     quants: BTreeMap::new(),
                 };
@@ -565,7 +565,7 @@ top_k = 40
 
         // Assertions
         let model_config = config.models.get("test-model").unwrap();
-        assert_eq!(model_config.display_name, Some("TestModel".to_string()));
+        assert_eq!(model_config.api_name, Some("TestModel".to_string()));
         assert_eq!(model_config.gpu_layers, Some(99));
         assert_eq!(model_config.context_length, Some(8192));
         assert_eq!(
@@ -642,7 +642,7 @@ top_k = 40
                     enabled: true,
                     context_length: None,
                     profile: None,
-                    display_name: None,
+                    api_name: None,
                     gpu_layers: None,
                     quants: BTreeMap::new(),
                 };
@@ -675,7 +675,7 @@ top_k = 40
 
         // Verify migration happened
         let model_config = config.models.get("test-model").unwrap();
-        assert_eq!(model_config.display_name, Some("TestModel".to_string()));
+        assert_eq!(model_config.api_name, Some("TestModel".to_string()));
         assert_eq!(model_config.gpu_layers, Some(99));
         assert_eq!(model_config.context_length, Some(8192));
         assert!(!card_path.exists());
@@ -685,7 +685,7 @@ top_k = 40
 
         // Verify nothing changed
         let model_config = config.models.get("test-model").unwrap();
-        assert_eq!(model_config.display_name, Some("TestModel".to_string()));
+        assert_eq!(model_config.api_name, Some("TestModel".to_string()));
         assert_eq!(model_config.gpu_layers, Some(99));
         assert_eq!(model_config.context_length, Some(8192));
     }
@@ -744,7 +744,7 @@ size_bytes = 8000000000
                     enabled: true,
                     context_length: None,
                     profile: None,
-                    display_name: None,
+                    api_name: None,
                     gpu_layers: None,
                     quants: {
                         let mut quants = std::collections::BTreeMap::new();
@@ -785,8 +785,8 @@ size_bytes = 8000000000
             "model-Q8_0.gguf"
         );
 
-        // display_name should be set
-        assert_eq!(model_config.display_name, Some("TestModel".to_string()));
+        // api_name should be set
+        assert_eq!(model_config.api_name, Some("TestModel".to_string()));
     }
 
     /// Helper that builds a minimal `ModelConfig` with a quants map containing
@@ -826,7 +826,7 @@ size_bytes = 8000000000
             enabled: true,
             context_length: None,
             profile: None,
-            display_name: None,
+            api_name: None,
             gpu_layers: None,
             quants,
         }

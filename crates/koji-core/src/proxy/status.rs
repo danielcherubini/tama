@@ -184,7 +184,7 @@ mod tests {
             enabled: true,
             context_length: None,
             profile: None,
-            display_name: None,
+            api_name: None,
             gpu_layers: None,
             quants: BTreeMap::new(),
         }

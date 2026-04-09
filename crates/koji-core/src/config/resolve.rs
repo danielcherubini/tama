@@ -608,7 +608,7 @@ mod tests {
             enabled: true,
             context_length: Some(4096),
             profile: None,
-            display_name: None,
+            api_name: None,
             gpu_layers: Some(99),
             quants,
         };
@@ -684,7 +684,7 @@ mod tests {
             enabled: true,
             context_length: Some(4096),
             profile: None,
-            display_name: None,
+            api_name: None,
             gpu_layers: Some(99),
             quants,
         };
@@ -743,7 +743,7 @@ mod tests {
             enabled: true,
             context_length: None,
             profile: None,
-            display_name: None,
+            api_name: None,
             gpu_layers: Some(99),
             quants,
         };
@@ -786,7 +786,7 @@ mod tests {
             enabled: true,
             context_length: None,
             profile: None,
-            display_name: None,
+            api_name: None,
             gpu_layers: Some(99),
             quants: BTreeMap::new(), // Empty quants map
         };
@@ -836,7 +836,7 @@ mod tests {
             enabled: true,
             context_length: None,
             profile: None,
-            display_name: None,
+            api_name: None,
             gpu_layers: None,
             quants: std::collections::BTreeMap::new(),
         };
@@ -893,7 +893,7 @@ mod tests {
             enabled: true,
             context_length: None,
             profile: None,
-            display_name: None,
+            api_name: None,
             gpu_layers: None,
             quants: std::collections::BTreeMap::new(),
         };
@@ -949,7 +949,7 @@ mod tests {
             enabled: true,
             context_length: Some(4096),
             profile: None,
-            display_name: None,
+            api_name: None,
             gpu_layers: Some(99),
             quants,
         };
@@ -1029,7 +1029,7 @@ mod tests {
             enabled: true,
             context_length: None,
             profile: None,
-            display_name: None,
+            api_name: None,
             gpu_layers: None,
             quants,
         };
