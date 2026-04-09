@@ -73,8 +73,23 @@ pub async fn install_from_source(
     }
     std::fs::create_dir_all(&build_output)?;
 
+    // ik_llama doesn't publish real release tags (only a stale pre-release).
+    // For "latest", always clone main HEAD instead of attempting tag resolution.
+    let use_tag_resolution = !matches!(
+        options.backend_type,
+        super::super::registry::BackendType::IkLlama
+    );
+
     // Clone repository
-    clone_repository(version, git_url, &source_dir, commit, progress).await?;
+    clone_repository(
+        version,
+        git_url,
+        &source_dir,
+        commit,
+        use_tag_resolution,
+        progress,
+    )
+    .await?;
 
     // Configure with CMake
     configure_cmake(options, &source_dir, &build_output, progress).await?;
@@ -101,11 +116,16 @@ pub async fn install_from_source(
 ///
 /// When `commit` is `Some`, clones the `main` branch with a sufficient depth
 /// to reach the target commit, then runs `git checkout <commit>`.
+///
+/// `use_tag_resolution`: when true and `version == "latest"`, try to find the
+/// most recent git tag first. Set to false for backends like ik_llama that do
+/// not publish proper release tags.
 async fn clone_repository(
     version: &str,
     git_url: &str,
     source_dir: &Path,
     commit: Option<&str>,
+    use_tag_resolution: bool,
     progress: Option<&Arc<dyn ProgressSink>>,
 ) -> Result<()> {
     // When a specific commit is requested, do a deeper clone of main then checkout.
@@ -158,8 +178,12 @@ async fn clone_repository(
 
     emit(progress, "Cloning repository (shallow)...");
 
-    // For "latest", resolve the most recent tag first before trying branch clone
-    if version == "latest" && try_clone_latest_tag(git_url, source_dir, progress).await? {
+    // For "latest", resolve the most recent tag first before trying branch clone.
+    // Skip tag resolution for backends that don't publish proper release tags (e.g. ik_llama).
+    if version == "latest"
+        && use_tag_resolution
+        && try_clone_latest_tag(git_url, source_dir, progress).await?
+    {
         return Ok(());
     }
 

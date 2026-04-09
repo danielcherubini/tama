@@ -423,67 +423,81 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
 fn cmd_ls(
     config: &Config,
     model_id_arg: Option<String>,
-    quant_arg: Option<String>,
-    profile_arg: Option<String>,
+    _quant_arg: Option<String>,
+    _profile_arg: Option<String>,
 ) -> Result<()> {
-    let model_id = model_id_arg.context("Model identifier required")?;
     let models_dir = config.models_dir()?;
-    let configs_dir = config.configs_dir()?;
-    let registry = ModelRegistry::new(models_dir.to_path_buf(), configs_dir.to_path_buf());
 
-    let installed = registry.find(&model_id)?.with_context(|| {
-        format!(
-            "Model '{}' not found. Run `koji model ls` to see installed models.",
-            model_id
-        )
-    })?;
+    match model_id_arg {
+        None => {
+            // List all configured models
+            if config.models.is_empty() {
+                println!("No models configured. Run `koji model pull <repo>` to add one.");
+                return Ok(());
+            }
 
-    let quant_name = match quant_arg {
-        Some(q) => {
-            if !installed.card.quants.contains_key(&q) {
-                let available: Vec<&str> =
-                    installed.card.quants.keys().map(|s| s.as_str()).collect();
-                anyhow::bail!(
-                    "Quant '{}' not found. Available: {}",
-                    q,
-                    available.join(", ")
+            let mut entries: Vec<(&String, &koji_core::config::ModelConfig)> =
+                config.models.iter().collect();
+            entries.sort_by_key(|(k, _)| k.as_str());
+
+            println!("Configured models:\n");
+            for (name, mc) in &entries {
+                let repo = mc.model.as_deref().unwrap_or("(raw-args)");
+                let quant = mc.quant.as_deref().unwrap_or("—");
+                let status = if mc.enabled { "enabled" } else { "disabled" };
+
+                // Check whether the GGUF file is present on disk
+                let on_disk = mc
+                    .model
+                    .as_ref()
+                    .and_then(|m| mc.quant.as_ref().map(|q| (m, q)))
+                    .and_then(|(_m, q)| mc.quants.get(q.as_str()))
+                    .map(|qe| models_dir.join(repo).join(&qe.file).exists())
+                    .unwrap_or(false);
+
+                let disk_icon = if on_disk { "✓" } else { "✗" };
+
+                println!(
+                    "  {} {}  repo={} quant={}  backend={}  [{}]",
+                    disk_icon, name, repo, quant, mc.backend, status
                 );
             }
-            q
+            println!();
         }
-        None => {
-            let quant_names: Vec<String> = installed.card.quants.keys().cloned().collect();
-            if quant_names.is_empty() {
-                anyhow::bail!("No quants available for '{}'. Pull some first.", model_id);
+        Some(model_id) => {
+            // Show detail for a specific config entry
+            let mc = config.models.get(&model_id).with_context(|| {
+                format!(
+                    "Model config '{}' not found. Run `koji model ls` to see configured models.",
+                    model_id
+                )
+            })?;
+
+            println!("Config:   {}", model_id);
+            if let Some(ref repo) = mc.model {
+                println!("  Repo:     {}", repo);
             }
-            if quant_names.len() == 1 {
-                quant_names.into_iter().next().unwrap()
-            } else {
-                inquire::Select::new("Select a quant:", quant_names)
-                    .prompt()
-                    .context("Quant selection cancelled")?
+            println!("  Backend:  {}", mc.backend);
+            if let Some(ref q) = mc.quant {
+                println!("  Quant:    {}", q);
+            }
+            if let Some(ref ctx) = mc.context_length {
+                println!("  Context:  {}", ctx);
+            }
+            println!("  Enabled:  {}", mc.enabled);
+
+            if !mc.quants.is_empty() {
+                println!("  Files:");
+                let mut quants: Vec<_> = mc.quants.iter().collect();
+                quants.sort_by_key(|(k, _)| k.as_str());
+                for (qname, qe) in quants {
+                    let repo = mc.model.as_deref().unwrap_or("");
+                    let path = models_dir.join(repo).join(&qe.file);
+                    let present = if path.exists() { "✓" } else { "✗" };
+                    println!("    {} {}  ({})", present, qname, qe.file);
+                }
             }
         }
-    };
-
-    let resolved_profile: Option<koji_core::profiles::Profile> = match profile_arg {
-        Some(p) => Some(
-            p.parse::<koji_core::profiles::Profile>()
-                .map_err(|e| anyhow::anyhow!(e))?,
-        ),
-        None => None,
-    };
-
-    // Verify the GGUF file exists on disk
-    let gguf_path = registry
-        .gguf_path(&model_id, &quant_name)?
-        .with_context(|| format!("GGUF file for quant '{}' not found on disk", quant_name))?;
-
-    println!("Model:     {}", model_id);
-    println!("  Quant:     {}", quant_name);
-    println!("  GGUF:      {}", gguf_path.display());
-    if let Some(p) = &resolved_profile {
-        println!("  Profile:   {}", p);
     }
 
     Ok(())
@@ -1264,27 +1278,51 @@ async fn cmd_verify_existing(
     } = koji_core::db::open(&db_dir)?;
 
     let models_dir = config.models_dir()?;
-    let configs_dir = config.configs_dir()?;
-    let registry = ModelRegistry::new(models_dir.to_path_buf(), configs_dir.to_path_buf());
 
-    let models: Vec<koji_core::models::InstalledModel> = match model_filter {
+    // Collect unique HF repo IDs from cfg.models (same source as the web UI).
+    // Entries without a `model` field (raw-args entries) are skipped.
+    let mut repo_ids: Vec<String> = config
+        .models
+        .values()
+        .filter_map(|mc| mc.model.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    repo_ids.sort();
+
+    let repo_ids: Vec<String> = match model_filter {
         Some(ref id) => {
-            let found = registry
-                .find(id)?
-                .with_context(|| format!("Model '{}' not found.", id))?;
-            vec![found]
+            if repo_ids.contains(id) {
+                vec![id.clone()]
+            } else {
+                anyhow::bail!("Model '{}' not found in config.", id);
+            }
         }
-        None => registry.scan()?,
+        None => repo_ids,
     };
 
-    if models.is_empty() {
-        println!("No installed models found.");
+    // Warn about any entries that have no `model` field
+    let skipped: Vec<&str> = config
+        .models
+        .iter()
+        .filter(|(_, mc)| mc.model.is_none())
+        .map(|(name, _)| name.as_str())
+        .collect();
+    for name in &skipped {
+        println!(
+            "Skipping '{}': no HuggingFace repo ID in config (raw-args entry).",
+            name
+        );
+    }
+
+    if repo_ids.is_empty() {
+        println!("No models with a HuggingFace repo ID found in config.");
         return Ok(());
     }
 
     println!(
         "Verifying {} model(s) and backfilling missing hashes...",
-        models.len()
+        repo_ids.len()
     );
     println!();
 
@@ -1295,13 +1333,9 @@ async fn cmd_verify_existing(
     let mut total_bad: usize = 0;
     let mut total_backfilled: usize = 0;
 
-    for model in &models {
-        let repo_id: &str = if model.card.model.source.is_empty() {
-            &model.id
-        } else {
-            &model.card.model.source
-        };
-        let model_dir = &model.dir;
+    for repo_id in &repo_ids {
+        let repo_id: &str = repo_id.as_str();
+        let model_dir = models_dir.join(repo_id);
 
         println!("Model: {}", repo_id);
 
@@ -1374,7 +1408,7 @@ async fn cmd_verify_existing(
             }
         }
 
-        let results = match verify::verify_model(&conn, repo_id, model_dir) {
+        let results = match verify::verify_model(&conn, repo_id, &model_dir) {
             Ok(r) => r,
             Err(e) => {
                 println!("  verify error: {}", e);

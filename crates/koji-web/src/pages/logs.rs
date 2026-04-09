@@ -58,15 +58,24 @@ pub fn Logs() -> impl IntoView {
                     match result {
                         Some(data) => {
                             let lines = data.lines.clone();
-                            view! {
-                                <div class="log-viewer card">
-                                    {lines.into_iter().map(|line| {
-                                        let level_cls = log_level_class(&line);
-                                        let cls = format!("log-line {}", level_cls);
-                                        view! { <div class=cls>{line}</div> }
-                                    }).collect::<Vec<_>>()}
-                                </div>
-                            }.into_any()
+                            if lines.is_empty() {
+                                view! {
+                                    <div class="alert alert--info mt-2">
+                                        <span class="alert__icon">"ℹ"</span>
+                                        <span>"No logs yet. Logs will appear here after backend processes are started."</span>
+                                    </div>
+                                }.into_any()
+                            } else {
+                                view! {
+                                    <div class="log-viewer card">
+                                        {lines.into_iter().map(|line| {
+                                            let level_cls = log_level_class(&line);
+                                            let cls = format!("log-line {}", level_cls);
+                                            view! { <div class=cls>{line}</div> }
+                                        }).collect::<Vec<_>>()}
+                                    </div>
+                                }.into_any()
+                            }
                         }
                         None => view! {
                             <div class="alert alert--warning mt-2">

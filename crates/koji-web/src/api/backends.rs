@@ -42,6 +42,8 @@ pub struct BackendCardDto {
     pub update: UpdateStatusDto,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub release_notes_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub default_args: Vec<String>,
 }
 
 impl BackendCardDto {
@@ -49,6 +51,7 @@ impl BackendCardDto {
         type_: &str,
         display_name: &str,
         release_notes_url: Option<&str>,
+        default_args: Vec<String>,
     ) -> Self {
         Self {
             r#type: type_.to_string(),
@@ -57,6 +60,7 @@ impl BackendCardDto {
             info: None,
             update: UpdateStatusDto::default(),
             release_notes_url: release_notes_url.map(String::from),
+            default_args,
         }
     }
 }
@@ -425,14 +429,26 @@ pub async fn list_backends(State(state): State<Arc<AppState>>) -> impl IntoRespo
     };
 
     // Open registry (blocking call wrapped in spawn_blocking)
+    let config_dir_clone = config_dir.clone();
     let registry_result: Result<koji_core::backends::BackendRegistry, _> =
         tokio::task::spawn_blocking(move || {
-            let config_dir = config_dir.clone();
-            koji_core::backends::BackendRegistry::open(&config_dir)
+            koji_core::backends::BackendRegistry::open(&config_dir_clone)
         })
         .await
         .map_err(|e| anyhow::anyhow!("spawn error: {}", e))
         .and_then(|r| r);
+
+    // Load config to get default_args
+    let config_result = koji_core::config::Config::load_from(&config_path);
+    let default_args_map: std::collections::HashMap<String, Vec<String>> = config_result
+        .ok()
+        .map(|cfg| {
+            cfg.backends
+                .iter()
+                .map(|(k, v)| (k.clone(), v.default_args.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
 
     let mut backends: Vec<BackendCardDto> = Vec::new();
     let mut custom: Vec<BackendCardDto> = Vec::new();
@@ -456,6 +472,10 @@ pub async fn list_backends(State(state): State<Arc<AppState>>) -> impl IntoRespo
             for (type_, display_name, release_notes_url) in KNOWN_BACKENDS {
                 #[allow(clippy::unnecessary_to_owned)]
                 let installed = installed_by_type.get(&type_.to_string());
+                let default_args = default_args_map
+                    .get(&type_.to_string())
+                    .cloned()
+                    .unwrap_or_default();
                 if let Some(info) = installed {
                     backends.push(BackendCardDto {
                         r#type: type_.to_string(),
@@ -464,12 +484,14 @@ pub async fn list_backends(State(state): State<Arc<AppState>>) -> impl IntoRespo
                         info: Some(BackendInfoDto::from(info.clone())),
                         update: UpdateStatusDto::default(),
                         release_notes_url: release_notes_url.map(String::from),
+                        default_args,
                     });
                 } else {
                     backends.push(BackendCardDto::default_uninstalled(
                         type_,
                         display_name,
                         *release_notes_url,
+                        default_args,
                     ));
                 }
             }
@@ -484,6 +506,7 @@ pub async fn list_backends(State(state): State<Arc<AppState>>) -> impl IntoRespo
                         .iter()
                         .any(|c| c.r#type == format!("{}", info.backend_type))
                     {
+                        let default_args = default_args_map.get(&bt).cloned().unwrap_or_default();
                         custom.push(BackendCardDto {
                             r#type: format!("{}", info.backend_type),
                             display_name: format!("Custom ({})", info.name),
@@ -491,6 +514,7 @@ pub async fn list_backends(State(state): State<Arc<AppState>>) -> impl IntoRespo
                             info: Some(BackendInfoDto::from(info.clone())),
                             update: UpdateStatusDto::default(),
                             release_notes_url: None,
+                            default_args,
                         });
                     }
                 }
@@ -500,10 +524,15 @@ pub async fn list_backends(State(state): State<Arc<AppState>>) -> impl IntoRespo
             tracing::warn!("Failed to open backend registry: {}", e);
             // On error, still return known backends as not installed
             for (type_, display_name, release_notes_url) in KNOWN_BACKENDS {
+                let default_args = default_args_map
+                    .get(&type_.to_string())
+                    .cloned()
+                    .unwrap_or_default();
                 backends.push(BackendCardDto::default_uninstalled(
                     type_,
                     display_name,
                     *release_notes_url,
+                    default_args,
                 ));
             }
         }
@@ -700,6 +729,22 @@ pub async fn install_backend(
         }
     };
 
+    // Capture values needed for DB registration before gpu_type/source are moved
+    let reg_backend_type = backend_type.clone();
+    let reg_version = version.clone();
+    let reg_gpu_type = gpu_type.clone();
+    let reg_source = source.clone();
+    let reg_backend_name = match backend_type {
+        koji_core::backends::BackendType::LlamaCpp => "llama_cpp",
+        koji_core::backends::BackendType::IkLlama => "ik_llama",
+        _ => "custom",
+    }
+    .to_string();
+    let reg_config_dir = state
+        .config_path
+        .as_ref()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+
     let options = koji_core::backends::InstallOptions {
         backend_type: backend_type.clone(),
         source,
@@ -723,17 +768,45 @@ pub async fn install_backend(
         )
         .await
         {
-            Ok(_) => Ok(()),
+            Ok(binary_path) => Ok(binary_path),
             Err(e) => Err(e.to_string()),
         };
 
         match result {
-            Ok(_) => {
+            Ok(binary_path) => {
+                // Register the installation in the DB so `resolve_backend_path` can find it.
+                if let Some(config_dir) = reg_config_dir {
+                    let installed_at = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    let reg_result = tokio::task::spawn_blocking(move || {
+                        let mut registry =
+                            koji_core::backends::BackendRegistry::open(&config_dir)?;
+                        registry.add(koji_core::backends::BackendInfo {
+                            name: reg_backend_name,
+                            backend_type: reg_backend_type,
+                            version: reg_version,
+                            path: binary_path,
+                            installed_at,
+                            gpu_type: reg_gpu_type,
+                            source: Some(reg_source),
+                        })
+                    })
+                    .await;
+                    if let Err(e) = reg_result {
+                        tracing::warn!("Failed to register backend in DB: {}", e);
+                    }
+                }
                 let _ = jobs_clone
                     .finish(&job_clone, crate::jobs::JobStatus::Succeeded, None)
                     .await;
             }
             Err(e) => {
+                // Emit the error as a log line so it appears in the build log panel.
+                jobs_clone
+                    .append_log(&job_clone, format!("Error: {}", e))
+                    .await;
                 let _ = jobs_clone
                     .finish(&job_clone, crate::jobs::JobStatus::Failed, Some(e))
                     .await;
@@ -1124,13 +1197,26 @@ pub async fn check_backend_updates(State(state): State<Arc<AppState>>) -> impl I
     };
 
     // Open registry
+    let config_dir_clone = config_dir.clone();
     let registry_result: Result<koji_core::backends::BackendRegistry, _> =
         tokio::task::spawn_blocking(move || {
-            koji_core::backends::BackendRegistry::open(&config_dir)
+            koji_core::backends::BackendRegistry::open(&config_dir_clone)
         })
         .await
         .map_err(|e| anyhow::anyhow!("spawn error: {}", e))
         .and_then(|r| r);
+
+    // Load config to get default_args
+    let config_result = koji_core::config::Config::load_from(&config_path);
+    let default_args_map: std::collections::HashMap<String, Vec<String>> = config_result
+        .ok()
+        .map(|cfg| {
+            cfg.backends
+                .iter()
+                .map(|(k, v)| (k.clone(), v.default_args.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
 
     let mut backends: Vec<BackendCardDto> = Vec::new();
     let mut custom: Vec<BackendCardDto> = Vec::new();
@@ -1139,6 +1225,10 @@ pub async fn check_backend_updates(State(state): State<Arc<AppState>>) -> impl I
         Ok(registry) => {
             // Always emit both known cards
             for (type_, display_name, release_notes_url) in KNOWN_BACKENDS {
+                let default_args = default_args_map
+                    .get(&type_.to_string())
+                    .cloned()
+                    .unwrap_or_default();
                 match registry.get(type_) {
                     Ok(Some(info)) => {
                         // Check for updates
@@ -1166,6 +1256,7 @@ pub async fn check_backend_updates(State(state): State<Arc<AppState>>) -> impl I
                                 update_available: update_check.update_available,
                             },
                             release_notes_url: release_notes_url.map(String::from),
+                            default_args,
                         });
                     }
                     Ok(None) => {
@@ -1173,6 +1264,7 @@ pub async fn check_backend_updates(State(state): State<Arc<AppState>>) -> impl I
                             type_,
                             display_name,
                             *release_notes_url,
+                            default_args,
                         ));
                     }
                     Err(_) => {
@@ -1180,6 +1272,7 @@ pub async fn check_backend_updates(State(state): State<Arc<AppState>>) -> impl I
                             type_,
                             display_name,
                             *release_notes_url,
+                            default_args,
                         ));
                     }
                 }
@@ -1188,10 +1281,10 @@ pub async fn check_backend_updates(State(state): State<Arc<AppState>>) -> impl I
             // List all backends and filter for custom ones
             let all_backends = registry.list().unwrap_or_default();
             for info in all_backends {
+                let bt = info.backend_type.to_string();
                 // Skip known backends (they're already in the backends list)
-                if info.backend_type.to_string() == "llama_cpp"
-                    && info.backend_type.to_string() != "ik_llama"
-                {
+                if bt != "llama_cpp" && bt != "ik_llama" {
+                    let default_args = default_args_map.get(&bt).cloned().unwrap_or_default();
                     custom.push(BackendCardDto {
                         r#type: format!("{}", info.backend_type),
                         display_name: format!("Custom ({})", info.name),
@@ -1199,6 +1292,7 @@ pub async fn check_backend_updates(State(state): State<Arc<AppState>>) -> impl I
                         info: Some(BackendInfoDto::from(info)),
                         update: UpdateStatusDto::default(),
                         release_notes_url: None,
+                        default_args,
                     });
                 }
             }
@@ -1207,10 +1301,15 @@ pub async fn check_backend_updates(State(state): State<Arc<AppState>>) -> impl I
             tracing::warn!("Failed to open backend registry: {}", e);
             // On error, still return known backends as not installed
             for (type_, display_name, release_notes_url) in KNOWN_BACKENDS {
+                let default_args = default_args_map
+                    .get(&type_.to_string())
+                    .cloned()
+                    .unwrap_or_default();
                 backends.push(BackendCardDto::default_uninstalled(
                     type_,
                     display_name,
                     *release_notes_url,
+                    default_args,
                 ));
             }
         }
@@ -1374,4 +1473,81 @@ pub async fn job_events_sse(
     };
 
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+/// POST /api/backends/:name/default-args
+/// Update default_args for a backend in config.toml
+#[derive(Deserialize)]
+pub struct UpdateDefaultArgsRequest {
+    pub default_args: Vec<String>,
+}
+
+pub async fn update_backend_default_args(
+    State(state): State<Arc<AppState>>,
+    Path(backend_name): Path<String>,
+    Json(req): Json<UpdateDefaultArgsRequest>,
+) -> impl IntoResponse {
+    let config_path = match &state.config_path {
+        Some(p) => p.clone(),
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "config_path not configured"})),
+            )
+                .into_response();
+        }
+    };
+
+    // Load config
+    let mut config = match koji_core::config::Config::load_from(&config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Failed to load config: {}", e)})),
+            )
+                .into_response();
+        }
+    };
+
+    // Update default_args for the backend
+    if let Some(backend) = config.backends.get_mut(&backend_name) {
+        backend.default_args = req.default_args;
+    } else {
+        // Backend doesn't exist in config, create it
+        config.backends.insert(
+            backend_name.clone(),
+            koji_core::config::BackendConfig {
+                path: None,
+                default_args: req.default_args,
+                health_check_url: None,
+                version: None,
+            },
+        );
+    }
+
+    // Clone config for proxy sync
+    let config_clone = config.clone();
+    
+    // Save config
+    match tokio::task::spawn_blocking(move || config.save_to(&config_path)).await {
+        Ok(Ok(())) => {
+            // Sync proxy config if available
+            if let Some(ref proxy_config) = state.proxy_config {
+                let mut pc = proxy_config.write().await;
+                *pc = config_clone;
+            }
+            Json(serde_json::json!({"success": true})).into_response()
+        }
+        Ok(Err(e)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to save config: {}", e)})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Task failed: {}", e)})),
+        )
+            .into_response(),
+    }
 }

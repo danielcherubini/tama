@@ -132,6 +132,15 @@ pub fn collect_system_metrics() -> SystemMetrics {
 /// Query GPU utilization percentage via nvidia-smi.
 /// Returns None if nvidia-smi is unavailable or output cannot be parsed.
 fn query_gpu_utilization() -> Option<u8> {
+    // Try NVIDIA first
+    if let Some(pct) = query_nvidia_gpu_utilization() {
+        return Some(pct);
+    }
+    // Fall back to AMD sysfs
+    query_amd_gpu_utilization()
+}
+
+fn query_nvidia_gpu_utilization() -> Option<u8> {
     let output = std::process::Command::new("nvidia-smi")
         .args([
             "--query-gpu=utilization.gpu",
@@ -146,6 +155,24 @@ fn query_gpu_utilization() -> Option<u8> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     stdout.lines().next()?.trim().parse().ok()
+}
+
+/// Read GPU busy percentage from AMD AMDGPU sysfs interface.
+///
+/// Iterates `/sys/class/drm/card*/device/gpu_busy_percent` and returns
+/// the first successfully parsed value.
+fn query_amd_gpu_utilization() -> Option<u8> {
+    let pattern = "/sys/class/drm/card*/device/gpu_busy_percent";
+    if let Ok(paths) = glob::glob(pattern) {
+        for path in paths.flatten() {
+            if let Ok(contents) = std::fs::read_to_string(&path) {
+                if let Ok(pct) = contents.trim().parse::<u8>() {
+                    return Some(pct);
+                }
+            }
+        }
+    }
+    None
 }
 
 pub fn detect_build_prerequisites() -> BuildPrerequisites {
@@ -297,6 +324,15 @@ fn detect_cuda_version_nvidia_smi() -> Option<String> {
 
 /// Query GPU VRAM via nvidia-smi. Returns None if no NVIDIA GPU or nvidia-smi unavailable.
 pub fn query_vram() -> Option<VramInfo> {
+    // Try NVIDIA first
+    if let Some(info) = query_nvidia_vram() {
+        return Some(info);
+    }
+    // Fall back to AMD sysfs
+    query_amd_vram()
+}
+
+fn query_nvidia_vram() -> Option<VramInfo> {
     let output = std::process::Command::new("nvidia-smi")
         .args([
             "--query-gpu=memory.used,memory.total",
@@ -321,6 +357,30 @@ pub fn query_vram() -> Option<VramInfo> {
     } else {
         None
     }
+}
+
+/// Read VRAM usage from AMD AMDGPU sysfs interface.
+///
+/// Reads `mem_info_vram_used` and `mem_info_vram_total` (reported in bytes)
+/// for the first AMD card found under `/sys/class/drm/card*/device/`.
+fn query_amd_vram() -> Option<VramInfo> {
+    let used_pattern = "/sys/class/drm/card*/device/mem_info_vram_used";
+    let total_pattern = "/sys/class/drm/card*/device/mem_info_vram_total";
+
+    let used_bytes: u64 = glob::glob(used_pattern)
+        .ok()?
+        .flatten()
+        .find_map(|p| std::fs::read_to_string(p).ok()?.trim().parse().ok())?;
+
+    let total_bytes: u64 = glob::glob(total_pattern)
+        .ok()?
+        .flatten()
+        .find_map(|p| std::fs::read_to_string(p).ok()?.trim().parse().ok())?;
+
+    Some(VramInfo {
+        used_mib: used_bytes / (1024 * 1024),
+        total_mib: total_bytes / (1024 * 1024),
+    })
 }
 
 /// A suggested context size with metadata.

@@ -1,3 +1,4 @@
+pub mod backends;
 pub mod config_editor;
 pub mod dashboard;
 pub mod logs;

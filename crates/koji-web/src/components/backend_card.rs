@@ -2,6 +2,7 @@
 
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
+use wasm_bindgen::JsCast;
 
 // ── DTOs (mirror of koji-web::api::backends DTOs) ────────────────────────────
 
@@ -79,6 +80,8 @@ pub struct BackendCardDto {
     pub update: UpdateStatusDto,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_notes_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub default_args: Vec<String>,
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -109,9 +112,13 @@ pub fn BackendCard(
     let installed = backend.installed;
     let display_name = backend.display_name.clone();
     let release_notes_url = backend.release_notes_url.clone();
+    let backend_type = backend.r#type.clone();
 
     let update_available = backend.update.update_available.unwrap_or(false);
     let latest_version = backend.update.latest_version.clone();
+
+    let default_args_initial = backend.default_args.join(" ");
+    let default_args_signal = RwSignal::new(default_args_initial.clone());
 
     let (path_str, version_str, gpu_label) = match &backend.info {
         Some(info) => (
@@ -156,6 +163,35 @@ pub fn BackendCard(
                 } else {
                     view! { <span/> }.into_any()
                 }}
+
+                <div style="display:flex;flex-direction:column;gap:0.25rem;">
+                    <label style="font-size:0.875rem;font-weight:600;">"Default Args"</label>
+                    <input
+                        type="text"
+                        placeholder="--arg value --another-arg"
+                        style="font-size:0.875rem;padding:0.375rem;border:1px solid var(--border,#ccc);border-radius:4px;font-family:monospace;"
+                        prop:value=move || default_args_signal.get()
+                        on:input=move |ev| {
+                            if let Some(input) = ev.target().and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok()) {
+                                default_args_signal.set(input.value());
+                            }
+                        }
+                        on:blur=move |_| {
+                            let args_str = default_args_signal.get();
+                            let backend_type_clone = backend_type.clone();
+                            wasm_bindgen_futures::spawn_local(async move {
+                                let parts: Vec<String> = args_str.split_whitespace().map(String::from).collect();
+                                let body = serde_json::json!({ "default_args": parts });
+                                let url = format!("/api/backends/{}/default-args", backend_type_clone);
+                                let _ = gloo_net::http::Request::post(&url)
+                                    .json(&body)
+                                    .unwrap()
+                                    .send()
+                                    .await;
+                            });
+                        }
+                    />
+                </div>
 
                 {if update_available {
                     if let Some(lv) = latest_version {

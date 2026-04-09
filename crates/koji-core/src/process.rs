@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::io::Write;
+use std::path::Path;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -10,6 +11,28 @@ use tokio::time::interval;
 
 use crate::config::HealthCheck;
 use crate::logging;
+
+/// Configure a Command to find companion shared libraries alongside the binary.
+///
+/// Sets the working directory and LD_LIBRARY_PATH (on Unix) to the binary's
+/// parent directory so that .so/.dylib/.dll files in the same location are
+/// found at runtime. Call this before spawning any backend process.
+pub fn configure_backend_command(cmd: &mut Command, binary_path: &Path) {
+    if let Some(parent) = binary_path.parent().filter(|p| p.is_dir()) {
+        cmd.current_dir(parent);
+        #[cfg(unix)]
+        {
+            let existing = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
+            let parent_str = parent.to_string_lossy();
+            let new_path = if existing.is_empty() {
+                parent_str.into_owned()
+            } else {
+                format!("{}:{}", parent_str, existing)
+            };
+            cmd.env("LD_LIBRARY_PATH", new_path);
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum ProcessEvent {
@@ -72,11 +95,16 @@ impl ProcessSupervisor {
         let mut restart_count: u32 = 0;
 
         loop {
-            let mut child = Command::new(&self.exe_path)
-                .args(&self.args)
+            let exe = std::path::Path::new(&self.exe_path);
+            let mut cmd = Command::new(exe);
+            cmd.args(&self.args)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
-                .kill_on_drop(true)
+                .kill_on_drop(true);
+
+            configure_backend_command(&mut cmd, exe);
+
+            let mut child = cmd
                 .spawn()
                 .with_context(|| format!("Failed to spawn: {}", self.exe_path))?;
 

@@ -80,6 +80,10 @@ async fn start_proxy_server(
     {
         let proxy_base_url = format!("http://127.0.0.1:{}", port);
         let logs_dir = updated_config.logs_dir().ok();
+        // Ensure logs directory exists (creates if missing)
+        if let Some(ref dir) = logs_dir {
+            let _ = std::fs::create_dir_all(dir);
+        }
         let config_path = koji_core::config::Config::config_path().ok();
         let web_addr: SocketAddr = "0.0.0.0:11435".parse().unwrap();
         tracing::info!("Starting koji web UI on http://{}", web_addr);
