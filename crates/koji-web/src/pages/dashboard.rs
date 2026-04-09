@@ -37,6 +37,8 @@ struct VramInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ModelStatus {
     id: String,
+    #[serde(default)]
+    api_name: Option<String>,
     backend: String,
     loaded: bool,
 }
@@ -496,21 +498,25 @@ mod tests {
         let models = vec![
             ModelStatus {
                 id: "a".into(),
+                api_name: None,
                 backend: "llama_cpp".into(),
                 loaded: true,
             },
             ModelStatus {
                 id: "b".into(),
+                api_name: None,
                 backend: "llama_cpp".into(),
                 loaded: false,
             },
             ModelStatus {
                 id: "c".into(),
+                api_name: None,
                 backend: "ik_llama".into(),
                 loaded: true,
             },
             ModelStatus {
                 id: "d".into(),
+                api_name: None,
                 backend: "ik_llama".into(),
                 loaded: false,
             },
@@ -587,8 +593,8 @@ mod tests {
             "vram": null,
             "models_loaded": 1,
             "models": [
-                { "id": "alpha", "backend": "llama_cpp", "loaded": true },
-                { "id": "beta",  "backend": "ik_llama",  "loaded": false }
+                { "id": "alpha", "api_name": "org/alpha", "backend": "llama_cpp", "loaded": true },
+                { "id": "beta",  "api_name": "org/beta",  "backend": "ik_llama",  "loaded": false }
             ]
         }"#;
 
@@ -598,10 +604,12 @@ mod tests {
         assert_eq!(sample.models.len(), 2);
 
         assert_eq!(sample.models[0].id, "alpha");
+        assert_eq!(sample.models[0].api_name, Some("org/alpha".to_string()));
         assert_eq!(sample.models[0].backend, "llama_cpp");
         assert!(sample.models[0].loaded);
 
         assert_eq!(sample.models[1].id, "beta");
+        assert_eq!(sample.models[1].api_name, Some("org/beta".to_string()));
         assert_eq!(sample.models[1].backend, "ik_llama");
         assert!(!sample.models[1].loaded);
     }
