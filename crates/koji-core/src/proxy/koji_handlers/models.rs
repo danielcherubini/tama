@@ -1,10 +1,11 @@
+use std::sync::Arc;
+
 use axum::{
     extract::{Path, State},
+    http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
-use reqwest::StatusCode;
-use std::sync::Arc;
 
 use super::types::ModelResponse;
 use crate::proxy::ProxyState;

@@ -168,9 +168,6 @@ fn spawn_download_job(
                         tracing::info!(job_id = %job_id_clone, bytes, "Download finished, entering verify phase");
                     }
                 }
-                // Release the in-flight lock before the post-download setup so
-                // a retry of the same file can start immediately if needed.
-                in_flight_clone.lock().await.remove(&dest_path);
                 // Post-download: auto-create model card and config entries (best-effort)
                 // Also updates the live ProxyState.config so the model appears immediately.
                 setup_model_after_pull(
@@ -195,6 +192,10 @@ fn spawn_download_job(
                     bytes,
                 )
                 .await;
+
+                // Release the in-flight lock after setup and verification complete
+                // to prevent concurrent retries from starting mid-processing.
+                in_flight_clone.lock().await.remove(&dest_path);
             }
             Err(e) => {
                 in_flight_clone.lock().await.remove(&dest_path);

@@ -90,7 +90,11 @@ pub async fn handle_koji_system_restart(state: State<Arc<ProxyState>>) -> Respon
     // Trigger graceful shutdown first
     state.0.shutdown().await;
 
-    // Schedule process exit on a short delay so the HTTP response can be delivered
+    // Schedule process exit on a short delay so the HTTP response can be delivered.
+    // We use std::process::exit(0) here because this is a hard restart operation
+    // - we want to immediately terminate all background tasks (metrics, DB, etc.)
+    // without waiting for them to drain. The shutdown() call above has already
+    // cleared in-memory state (models, pull jobs, metrics channel).
     tokio::spawn(async {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         std::process::exit(0);

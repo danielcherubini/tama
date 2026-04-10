@@ -68,9 +68,5 @@ pub struct RestartResponse {
 
 /// Returns `false` if the path component contains traversal sequences or invalid characters.
 pub(super) fn is_safe_path_component(s: &str) -> bool {
-    !s.is_empty()
-        && !s.contains("..")
-        && !s.starts_with('/')
-        && !s.starts_with('\\')
-        && !s.contains('\0')
+    !s.is_empty() && !s.contains("..") && !s.contains('/') && !s.contains('\\') && !s.contains('\0')
 }

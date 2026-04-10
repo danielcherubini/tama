@@ -388,20 +388,11 @@ pub fn migrate_profiles_to_model_cards(config: &mut Config) -> anyhow::Result<()
                     sampling: crate::profiles::SamplingParams,
                 }
 
-                if let Ok(profile_def) =
-                    toml::from_str::<TempProfileDef>(&std::fs::read_to_string(&path)?)
-                {
-                    profiles.push((name.clone(), profile_def.sampling));
-                } else {
-                    match toml::from_str::<TempProfileDef>(&std::fs::read_to_string(&path)?) {
-                        Ok(_) => unreachable!(),
-                        Err(e) => {
-                            tracing::warn!(
-                                "Skipping malformed profile file {}: {}",
-                                path.display(),
-                                e
-                            );
-                        }
+                let contents = std::fs::read_to_string(&path)?;
+                match toml::from_str::<TempProfileDef>(&contents) {
+                    Ok(profile_def) => profiles.push((name.clone(), profile_def.sampling)),
+                    Err(e) => {
+                        tracing::warn!("Skipping malformed profile file {}: {}", path.display(), e);
                     }
                 }
             }
