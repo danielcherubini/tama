@@ -17,6 +17,7 @@ use leptos_router::{
 };
 mod components;
 mod pages;
+pub mod utils;
 
 #[component]
 pub fn App() -> impl IntoView {
