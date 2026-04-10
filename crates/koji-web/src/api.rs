@@ -749,27 +749,7 @@ pub async fn delete_quant(
         let filename = quant_entry.file.clone();
         let repo_id = model_config.model.clone().unwrap_or_default();
 
-        let mut deleted_file = None; // Track deleted file for response
-
-        if !repo_id.is_empty() {
-            if let Ok(models_dir) = cfg.models_dir() {
-                let file_path = models_dir.join(&repo_id).join(&filename);
-                if file_path.exists() {
-                    if let Err(e) = std::fs::remove_file(&file_path) {
-                        tracing::warn!("Failed to delete quant file {}: {}", file_path.display(), e);
-                    } else {
-                        deleted_file = Some(filename.clone());
-                    }
-                }
-            }
-
-            // Clean up DB record (best-effort)
-            if let Ok(open) = koji_core::db::open(&config_dir) {
-                let _ = koji_core::db::queries::delete_model_file(&open.conn, &repo_id, &filename);
-            }
-        }
-
- // Get mutable reference to model config and remove the quant entry
+        // Get mutable reference to model config and remove the quant entry
         {
             let model = cfg.models.get_mut(&id).unwrap();
 
@@ -800,8 +780,6 @@ pub async fn delete_quant(
                 if file_path.exists() {
                     if let Err(e) = std::fs::remove_file(&file_path) {
                         tracing::warn!("Failed to delete quant file {}: {}", file_path.display(), e);
-                    } else {
-                        deleted_file = Some(filename.clone());
                     }
                 }
             }
@@ -820,7 +798,7 @@ pub async fn delete_quant(
                 "ok": true,
                 "id": id,
                 "quant_key": quant_key,
-                "deleted_file": deleted_file.unwrap_or(filename)
+                "deleted_file": filename
             }),
         ))
     })
