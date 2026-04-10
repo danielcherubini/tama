@@ -334,8 +334,7 @@ async fn run_verification(
                         Some(bytes as i64),
                     ) {
                         tracing::warn!(error = %e, "Failed to upsert model_files row");
-                    }
-                    if let Err(e) = crate::db::queries::update_verification(
+                    } else if let Err(e) = crate::db::queries::update_verification(
                         &conn,
                         &hash_repo,
                         &hash_filename,
