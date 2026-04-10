@@ -203,8 +203,14 @@ pub fn Backends() -> impl IntoView {
                     .unwrap()
                     .send()
                     .await;
-                if let Err(e) = res {
-                    errors.push(format!("{}: {}", bt, e));
+                match res {
+                    Ok(response) if response.ok() => {}
+                    Ok(response) => {
+                        let status = response.status();
+                        let text = response.text().await.unwrap_or_default();
+                        errors.push(format!("{}: HTTP {} - {}", bt, status, text));
+                    }
+                    Err(e) => errors.push(format!("{}: {}", bt, e)),
                 }
             }
             if errors.is_empty() {
