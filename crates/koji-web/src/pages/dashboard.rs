@@ -312,10 +312,6 @@ pub fn Dashboard() -> impl IntoView {
             let cpu_y_refs = vec![0.0, 100.0];
             let mem_y_refs = vec![mem_max];
 
-            // Determine if GPU/VRAM data is present in the latest sample
-            let has_gpu = buf.last().and_then(|h| h.gpu_utilization_pct).is_some();
-            let has_vram = buf.last().and_then(|h| h.vram.as_ref()).is_some();
-
             let gpu_data: Vec<f32> = buf.iter().map(|s| s.gpu_utilization_pct.unwrap_or(0) as f32).collect();
             let vram_data: Vec<f32> = buf.iter().map(|s| s.vram.as_ref().map(|v| v.used_mib as f32).unwrap_or(0.0)).collect();
             let vram_max = buf.last().and_then(|h| h.vram.as_ref().map(|v| v.total_mib as f32)).unwrap_or(1.0);
@@ -376,8 +372,7 @@ pub fn Dashboard() -> impl IntoView {
                     </div>
 
                     // GPU card — only rendered if GPU data is present
-                    {has_gpu.then(|| {
-                        let gpu_pct = buf.last().and_then(|h| h.gpu_utilization_pct).unwrap_or(0);
+                    {if let Some(gpu_pct) = buf.last().and_then(|h| h.gpu_utilization_pct) {
                         view! {
                             <div class="stat-card">
                                 <div class="card-header">"GPU"</div>
@@ -396,11 +391,12 @@ pub fn Dashboard() -> impl IntoView {
                                 </div>
                             </div>
                         }.into_any()
-                    })}
+                    } else {
+                        view! { <div></div> }.into_any()
+                    }}
 
                     // VRAM card — only rendered if VRAM data is present
-                    {has_vram.then(|| {
-                        let vram_info = buf.last().and_then(|h| h.vram.as_ref()).unwrap();
+                    {if let Some(vram_info) = buf.last().and_then(|h| h.vram.as_ref()) {
                         view! {
                             <div class="stat-card">
                                 <div class="card-header">"VRAM"</div>
@@ -419,7 +415,9 @@ pub fn Dashboard() -> impl IntoView {
                                 </div>
                             </div>
                         }.into_any()
-                    })}
+                    } else {
+                        view! { <div></div> }.into_any()
+                    }}
                 </div>
 
                 // Active Models section
