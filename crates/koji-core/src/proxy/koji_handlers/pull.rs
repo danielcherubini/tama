@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::models::repo_path;
 use axum::{
     extract::{Path, State},
     response::{sse::Event, sse::KeepAlive, IntoResponse, Response, Sse},
@@ -9,6 +8,8 @@ use axum::{
 };
 use futures_util::stream;
 use reqwest::StatusCode;
+
+use crate::models::repo_path;
 
 use super::types::{
     is_safe_path_component, PullRequest, QuantDownloadSpec, CONFIG_WRITE_LOCK, MAX_CONCURRENT_PULLS,

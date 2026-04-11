@@ -1,4 +1,5 @@
 use super::types::{BackendConfig, Config, HealthCheck, ModelConfig};
+use crate::models::repo_path;
 use anyhow::Result;
 
 impl Config {
@@ -204,12 +205,7 @@ impl Config {
         if let (Some(ref model_id), Some(ref quant_name)) = (&server.model, &server.quant) {
             if let Some(quant_entry) = server.quants.get(quant_name.as_str()) {
                 let models_dir = self.models_dir()?;
-                // Split model_id on '/' so PathBuf uses the native separator on all platforms.
-                // Direct join("org/repo") produces mixed slashes on Windows.
-                let model_path = model_id
-                    .split('/')
-                    .fold(models_dir, |p, c| p.join(c))
-                    .join(&quant_entry.file);
+                let model_path = repo_path(&models_dir, model_id).join(&quant_entry.file);
                 let already_has_m = grouped
                     .iter()
                     .any(|e| matches!(crate::config::flag_name(e), Some("-m") | Some("--model")));
@@ -233,11 +229,7 @@ impl Config {
             if let Some(mmproj_entry) = server.quants.get(mmproj_name.as_str()) {
                 if mmproj_entry.kind == crate::config::QuantKind::Mmproj {
                     let models_dir = self.models_dir()?;
-                    // Split model_id on '/' so PathBuf uses the native separator on all platforms.
-                    let mmproj_path = model_id
-                        .split('/')
-                        .fold(models_dir, |p, c| p.join(c))
-                        .join(&mmproj_entry.file);
+                    let mmproj_path = repo_path(&models_dir, model_id).join(&mmproj_entry.file);
                     let already_has_mmproj = grouped
                         .iter()
                         .any(|e| matches!(crate::config::flag_name(e), Some("--mmproj")));
