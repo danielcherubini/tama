@@ -303,16 +303,18 @@ pub fn ModelEditorQuantsVisionForm(
                 >
                     <option value="">"(none)"</option>
                     {move || {
+                        let current = form.get().as_ref().and_then(|f| f.mmproj.clone()).unwrap_or_default();
                         form.get().map(|f| {
                             f.quants.iter()
                                 .filter(|(_, q)| q.kind == QuantKind::Mmproj)
                                 .map(|(name, _)| name.clone())
                                 .collect::<Vec<_>>()
                         }).unwrap_or_default()
-                    }.into_iter().map(|m| {
+                    .into_iter().map(|m| {
                         let mm = m.clone();
-                        view! { <option value=mm.clone()>{mm.clone()}</option> }
-                    }).collect::<Vec<_>>()}
+                        let selected = mm == current;
+                        view! { <option value=mm.clone() selected=selected>{mm.clone()}</option> }
+                    }).collect::<Vec<_>>()}}
                 </select>
                 <span class="form-hint">"Choose the mmproj file to use for vision support"</span>
             </div>
