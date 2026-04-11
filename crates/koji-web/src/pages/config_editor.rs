@@ -242,10 +242,16 @@ pub fn ConfigEditor() -> impl IntoView {
                 view! {
                     <div style="display:flex;gap:1.5rem;align-items:flex-start;">
                         // Side nav
-                        <nav class="card" style="width:220px;flex-shrink:0;padding:0.75rem;">
+                        <nav class="card" style="width:220px;flex-shrink:0;padding:0.75rem;position:sticky;top:1rem;">
                             <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:0.25rem;">
                                 {[Section::General, Section::Proxy, Section::Supervisor, Section::Sampling]
                                     .into_iter().map(|s| {
+                                        let scroll_id = match s {
+                                            Section::General => "cfg-general",
+                                            Section::Proxy => "cfg-proxy",
+                                            Section::Supervisor => "cfg-supervisor",
+                                            Section::Sampling => "cfg-sampling",
+                                        };
                                         let active = move || current.get() == s;
                                         view! {
                                             <li>
@@ -254,7 +260,15 @@ pub fn ConfigEditor() -> impl IntoView {
                                                     class:btn-primary=active
                                                     class:btn-secondary=move || !active()
                                                     style="width:100%;text-align:left;display:flex;gap:0.5rem;align-items:center;"
-                                                    on:click=move |_| current.set(s)
+                                                    on:click=move |_| {
+                                                        current.set(s);
+                                                        if let Some(el) = web_sys::window()
+                                                            .and_then(|w| w.document())
+                                                            .and_then(|d| d.get_element_by_id(scroll_id))
+                                                        {
+                                                            el.scroll_into_view_with_bool(true);
+                                                        }
+                                                    }
                                                 >
                                                     <span>{s.icon()}</span>
                                                     <span>{s.name()}</span>
@@ -265,14 +279,12 @@ pub fn ConfigEditor() -> impl IntoView {
                             </ul>
                         </nav>
 
-                        // Main form area
-                        <div style="flex:1;min-width:0;">
-                            {move || match current.get() {
-                                Section::General => view! { <GeneralForm config=config /> }.into_any(),
-                                Section::Proxy => view! { <ProxyForm config=config /> }.into_any(),
-                                Section::Supervisor => view! { <SupervisorForm config=config /> }.into_any(),
-                                Section::Sampling => view! { <SamplingForm config=config /> }.into_any(),
-                            }}
+                        // Main form area — all sections visible, stacked
+                        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1rem;">
+                            <div id="cfg-general"><GeneralForm config=config /></div>
+                            <div id="cfg-proxy"><ProxyForm config=config /></div>
+                            <div id="cfg-supervisor"><SupervisorForm config=config /></div>
+                            <div id="cfg-sampling"><SamplingForm config=config /></div>
                         </div>
                     </div>
                 }.into_any()

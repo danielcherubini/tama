@@ -606,7 +606,15 @@ pub fn ModelEditor() -> impl IntoView {
                                 <button
                                     class="nav-btn"
                                     class:nav-btn--active=move || active_section.get() == Section::General
-                                    on:click=move |_| active_section.set(Section::General)
+                                    on:click=move |_| {
+                                        active_section.set(Section::General);
+                                        if let Some(el) = web_sys::window()
+                                            .and_then(|w| w.document())
+                                            .and_then(|d| d.get_element_by_id("section-general"))
+                                        {
+                                            el.scroll_into_view_with_bool(true);
+                                        }
+                                    }
                                 >
                                     <span class="nav-btn__icon">{Section::General.icon()}</span>
                                     <span class="nav-btn__text">{Section::General.name()}</span>
@@ -614,7 +622,15 @@ pub fn ModelEditor() -> impl IntoView {
                                 <button
                                     class="nav-btn"
                                     class:nav-btn--active=move || active_section.get() == Section::Sampling
-                                    on:click=move |_| active_section.set(Section::Sampling)
+                                    on:click=move |_| {
+                                        active_section.set(Section::Sampling);
+                                        if let Some(el) = web_sys::window()
+                                            .and_then(|w| w.document())
+                                            .and_then(|d| d.get_element_by_id("section-sampling"))
+                                        {
+                                            el.scroll_into_view_with_bool(true);
+                                        }
+                                    }
                                 >
                                     <span class="nav-btn__icon">{Section::Sampling.icon()}</span>
                                     <span class="nav-btn__text">{Section::Sampling.name()}</span>
@@ -622,7 +638,15 @@ pub fn ModelEditor() -> impl IntoView {
                                 <button
                                     class="nav-btn"
                                     class:nav-btn--active=move || active_section.get() == Section::QuantsVision
-                                    on:click=move |_| active_section.set(Section::QuantsVision)
+                                    on:click=move |_| {
+                                        active_section.set(Section::QuantsVision);
+                                        if let Some(el) = web_sys::window()
+                                            .and_then(|w| w.document())
+                                            .and_then(|d| d.get_element_by_id("section-quants"))
+                                        {
+                                            el.scroll_into_view_with_bool(true);
+                                        }
+                                    }
                                 >
                                     <span class="nav-btn__icon">{Section::QuantsVision.icon()}</span>
                                     <span class="nav-btn__text">{Section::QuantsVision.name()}</span>
@@ -630,61 +654,62 @@ pub fn ModelEditor() -> impl IntoView {
                                 <button
                                     class="nav-btn"
                                     class:nav-btn--active=move || active_section.get() == Section::ExtraArgs
-                                    on:click=move |_| active_section.set(Section::ExtraArgs)
+                                    on:click=move |_| {
+                                        active_section.set(Section::ExtraArgs);
+                                        if let Some(el) = web_sys::window()
+                                            .and_then(|w| w.document())
+                                            .and_then(|d| d.get_element_by_id("section-extra-args"))
+                                        {
+                                            el.scroll_into_view_with_bool(true);
+                                        }
+                                    }
                                 >
                                     <span class="nav-btn__icon">{Section::ExtraArgs.icon()}</span>
                                     <span class="nav-btn__text">{Section::ExtraArgs.name()}</span>
                                 </button>
                             </div>
 
-                            // Main content area
+                            // Main content area — all sections visible, stacked
                             <div class="model-editor-main">
-                                {move || match active_section.get() {
-                                    Section::General => view! {
-                                        <div class="card">
-                                            <h2 class="card__title">"General"</h2>
-                                            <ModelEditorGeneralForm
-                                                form=form
-                                                backends=backends
-                                            />
-                                        </div>
-                                    }.into_any(),
-                                    Section::Sampling => view! {
-                                        <div class="card">
-                                            <h2 class="card__title">"Sampling"</h2>
-                                            <ModelEditorSamplingForm
-                                                form=form
-                                                templates=templates
-                                                load_preset_action=load_preset_action
-                                            />
-                                        </div>
-                                    }.into_any(),
-                                    Section::QuantsVision => view! {
-                                        <div class="card">
-                                            <h2 class="card__title">"Quants & Vision"</h2>
-                                            <ModelEditorQuantsVisionForm
-                                                form=form
-                                                repo_commit_sha=repo_commit_sha
-                                                repo_pulled_at=repo_pulled_at
-                                                refresh_busy=refresh_busy
-                                                verify_busy=verify_busy
-                                                refresh_status=refresh_status
-                                                verify_status=verify_status
-                                                pull_modal_open_signal=pull_modal_open_signal
-                                                delete_quant_action=delete_quant_action
-                                                original_id=original_id
-                                                refresh_action=refresh_action
-                                                verify_action=verify_action
-                                            />
-                                        </div>
-                                    }.into_any(),
-                                    Section::ExtraArgs => view! {
-                                        <div class="card">
-                                            <h2 class="card__title">"Extra Args"</h2>
-                                            <ModelEditorExtraArgsForm form=form />
-                                        </div>
-                                    }.into_any(),
-                                }}
+                                <div id="section-general" class="card">
+                                    <h2 class="card__title">"General"</h2>
+                                    <ModelEditorGeneralForm
+                                        form=form
+                                        backends=backends
+                                    />
+                                </div>
+
+                                <div id="section-sampling" class="card mt-2">
+                                    <h2 class="card__title">"Sampling"</h2>
+                                    <ModelEditorSamplingForm
+                                        form=form
+                                        templates=templates
+                                        load_preset_action=load_preset_action
+                                    />
+                                </div>
+
+                                <div id="section-quants" class="card mt-2">
+                                    <h2 class="card__title">"Quants & Vision"</h2>
+                                    <ModelEditorQuantsVisionForm
+                                        form=form
+                                        repo_commit_sha=repo_commit_sha
+                                        repo_pulled_at=repo_pulled_at
+                                        refresh_busy=refresh_busy
+                                        verify_busy=verify_busy
+                                        refresh_status=refresh_status
+                                        verify_status=verify_status
+                                        pull_modal_open_signal=pull_modal_open_signal
+                                        delete_quant_action=delete_quant_action
+                                        original_id=original_id
+                                        refresh_action=refresh_action
+                                        verify_action=verify_action
+                                    />
+                                </div>
+
+                                <div id="section-extra-args" class="card mt-2">
+                                    <h2 class="card__title">"Extra Args"</h2>
+                                    <ModelEditorExtraArgsForm form=form />
+                                </div>
 
                                 {move || save_status.get().map(|(ok, msg)| {
                                     let cls = if ok { "alert alert--success mt-2" } else { "alert alert--error mt-2" };
