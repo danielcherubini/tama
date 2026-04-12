@@ -128,8 +128,7 @@ mod tests {
                 gpu_layers: None,
                 quants: std::collections::BTreeMap::new(),
                 modalities: None,
-        display_name: None,
-
+                display_name: None,
             },
         );
         let state = ProxyState::new(config, None);
@@ -165,8 +164,7 @@ mod tests {
                 gpu_layers: None,
                 quants: std::collections::BTreeMap::new(),
                 modalities: None,
-        display_name: None,
-
+                display_name: None,
             },
         );
         config.models.insert(
@@ -188,8 +186,7 @@ mod tests {
                 gpu_layers: None,
                 quants: std::collections::BTreeMap::new(),
                 modalities: None,
-        display_name: None,
-
+                display_name: None,
             },
         );
         let state = ProxyState::new(config, None);
@@ -225,8 +222,7 @@ mod tests {
                 gpu_layers: None,
                 quants: std::collections::BTreeMap::new(),
                 modalities: None,
-        display_name: None,
-
+                display_name: None,
             },
         );
         let state = ProxyState::new(config, None);
@@ -262,8 +258,7 @@ mod tests {
                 gpu_layers: None,
                 quants: std::collections::BTreeMap::new(),
                 modalities: None,
-        display_name: None,
-
+                display_name: None,
             },
         );
         let state = ProxyState::new(config, None);
@@ -296,8 +291,7 @@ mod tests {
                 gpu_layers: None,
                 quants: std::collections::BTreeMap::new(),
                 modalities: None,
-        display_name: None,
-
+                display_name: None,
             },
         );
         let state = ProxyState::new(config, None);

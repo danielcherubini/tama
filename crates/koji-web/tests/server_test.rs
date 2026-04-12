@@ -247,6 +247,7 @@ mod tests {
                 gpu_layers: None,
                 quants: std::collections::BTreeMap::new(),
                 modalities: None,
+                display_name: None,
             },
         );
         let new_toml = toml::to_string_pretty(&new_config).unwrap();

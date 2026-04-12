@@ -212,6 +212,7 @@ fn test_build_full_args_unified() {
         gpu_layers: Some(99),
         quants,
         modalities: None,
+        display_name: None,
     };
 
     let backend = BackendConfig {
@@ -289,6 +290,7 @@ fn test_build_full_args_ctx_override() {
         gpu_layers: Some(99),
         quants,
         modalities: None,
+        display_name: None,
     };
 
     let backend = BackendConfig {
@@ -349,6 +351,7 @@ fn test_build_full_args_no_sampling() {
         gpu_layers: Some(99),
         quants,
         modalities: None,
+        display_name: None,
     };
 
     let backend = BackendConfig {
@@ -393,6 +396,7 @@ fn test_build_full_args_no_quants() {
         gpu_layers: Some(99),
         quants: BTreeMap::new(), // Empty quants map
         modalities: None,
+        display_name: None,
     };
 
     let backend = BackendConfig {
@@ -445,6 +449,7 @@ fn test_build_args_dedupes_backend_vs_model_flags() {
         gpu_layers: None,
         quants: std::collections::BTreeMap::new(),
         modalities: None,
+        display_name: None,
     };
 
     let backend = config.backends.get("test_backend").unwrap().clone();
@@ -504,6 +509,7 @@ fn test_build_args_sampling_overrides_inline_temp_in_args() {
         gpu_layers: None,
         quants: std::collections::BTreeMap::new(),
         modalities: None,
+        display_name: None,
     };
 
     let backend = config.backends.get("test_backend").unwrap().clone();
@@ -562,6 +568,7 @@ fn test_build_full_args_dedupes_backend_vs_model_flags() {
         gpu_layers: Some(99),
         quants,
         modalities: None,
+        display_name: None,
     };
 
     let backend = BackendConfig {
@@ -644,6 +651,7 @@ fn test_build_full_args_returns_flat_tokens_with_quoted_path() {
         gpu_layers: None,
         quants,
         modalities: None,
+        display_name: None,
     };
 
     let backend = BackendConfig {
@@ -712,6 +720,7 @@ fn test_resolve_by_api_name() {
             gpu_layers: None,
             quants,
             modalities: None,
+            display_name: None,
         },
     );
 
@@ -763,6 +772,7 @@ fn test_api_name_takes_priority() {
             gpu_layers: None,
             quants,
             modalities: None,
+            display_name: None,
         },
     );
 
@@ -815,6 +825,7 @@ fn test_backward_compat_no_api_name() {
             gpu_layers: None,
             quants,
             modalities: None,
+            display_name: None,
         },
     );
 
@@ -870,6 +881,7 @@ fn test_resolve_server_by_api_name() {
             gpu_layers: None,
             quants,
             modalities: None,
+            display_name: None,
         },
     );
 

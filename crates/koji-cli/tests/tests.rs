@@ -257,6 +257,7 @@ async fn test_cmd_server_edit_valid_profile_succeeds() {
             gpu_layers: None,
             quants: std::collections::BTreeMap::new(),
             modalities: None,
+            display_name: None,
         },
     );
     // Need a matching backend
