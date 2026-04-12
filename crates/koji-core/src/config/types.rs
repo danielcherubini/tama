@@ -209,6 +209,10 @@ pub struct ModelConfig {
     /// Modalities supported by this model (e.g. ["text", "image"] for input, ["text"] for output)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modalities: Option<ModelModalities>,
+    /// Pretty display name for UI (e.g., "Unsloth: Gemma 4 26B A4B").
+    /// Derived from HF repo name when pulling, but can be overridden.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

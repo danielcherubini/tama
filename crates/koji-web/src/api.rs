@@ -512,6 +512,7 @@ fn apply_model_body(
         gpu_layers: None,
         quants: std::collections::BTreeMap::new(),
         modalities: None,
+        display_name: None,
     });
 
     // Handle sampling from body
@@ -532,6 +533,7 @@ fn apply_model_body(
         api_name: body.api_name,
         gpu_layers: body.gpu_layers,
         modalities: base.modalities,
+        display_name: base.display_name,
         // Preserve server-side `size_bytes` on update: the UI exposes the field
         // read-only and callers must not be able to rewrite it via the API. The
         // authoritative value comes from the download pipeline
@@ -1184,6 +1186,7 @@ mod tests {
             gpu_layers: None,
             quants,
             modalities: None,
+            display_name: None,
         }
     }
 
