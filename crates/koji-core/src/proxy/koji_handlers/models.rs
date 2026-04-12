@@ -207,14 +207,13 @@ pub async fn handle_opencode_list_models(state: State<Arc<ProxyState>>) -> Json<
                 "input": m.input,
                 "output": m.output
             })
-        }).unwrap_or_else(|| {
-            serde_json::json!({
-                "input": ["text", "image"],
-                "output": ["text"]
-            })
         });
 
-        models.push(serde_json::json!({
+        // Conservative output limit: 1/16 of context window.
+        // Most models use far less output than their full context.
+        let output_limit = context_length.map(|ctx| ctx / 16);
+
+        let mut model_json = serde_json::json!({
             "id": id,
             "name": cfg.api_name.as_ref().unwrap_or(id).clone(),
             "model": cfg.model,
@@ -222,12 +221,18 @@ pub async fn handle_opencode_list_models(state: State<Arc<ProxyState>>) -> Json<
             "context_length": context_length,
             "limit": {
                 "context": context_length,
-                "output": context_length,
+                "output": output_limit,
             },
-            "modalities": modalities,
             "quant": cfg.quant,
             "gpu_layers": cfg.gpu_layers,
-        }));
+        });
+
+        // Only include modalities if explicitly configured.
+        if let Some(m) = modalities {
+            model_json["modalities"] = m;
+        }
+
+        models.push(model_json);
     }
 
     Json(serde_json::json!({
