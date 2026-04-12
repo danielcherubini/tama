@@ -175,9 +175,12 @@ pub async fn fetch_model_pipeline_tag(repo_id: &str) -> Result<Option<String>> {
 }
 
 /// Try to infer modalities from a HuggingFace pipeline tag.
+///
+/// Order matters: more specific checks (e.g., "text-to-speech") must come
+/// before broader ones (e.g., "speech") to avoid misclassification.
 pub fn infer_modalities_from_pipeline(pipeline_tag: Option<&str>) -> Option<crate::config::ModelModalities> {
     let tag = pipeline_tag?.to_lowercase();
-    
+
     if tag.contains("vision") || tag.contains("image-text") {
         Some(crate::config::ModelModalities {
             input: vec!["text".to_string(), "image".to_string()],
@@ -193,15 +196,16 @@ pub fn infer_modalities_from_pipeline(pipeline_tag: Option<&str>) -> Option<crat
             input: vec!["image".to_string()],
             output: vec!["text".to_string()],
         })
+    } else if tag.contains("text-to-speech") || tag.contains("tts") {
+        // Must check TTS before generic "speech"/"audio" to avoid misclassification.
+        Some(crate::config::ModelModalities {
+            input: vec!["text".to_string()],
+            output: vec!["audio".to_string()],
+        })
     } else if tag.contains("speech") || tag.contains("audio") {
         Some(crate::config::ModelModalities {
             input: vec!["audio".to_string()],
             output: vec!["text".to_string()],
-        })
-    } else if tag.contains("text-to-speech") || tag.contains("tts") {
-        Some(crate::config::ModelModalities {
-            input: vec!["text".to_string()],
-            output: vec!["audio".to_string()],
         })
     } else if tag.contains("embedding") || tag.contains("feature-extraction") {
         Some(crate::config::ModelModalities {
