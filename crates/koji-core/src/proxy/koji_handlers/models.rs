@@ -31,8 +31,7 @@ pub fn generate_display_name(hf_repo: &str) -> String {
     };
 
     let model_name_processed = model_name
-        .replace('-', " ")
-        .replace('_', " ")
+        .replace(['-', '_'], " ")
         .split_whitespace()
         .filter(|word| !word.eq_ignore_ascii_case("GGUF"))
         .map(capitalize_first)
@@ -267,8 +266,7 @@ pub async fn handle_opencode_list_models(state: State<Arc<ProxyState>>) -> Json<
         };
 
         let model_name_processed = model_name
-            .replace('-', " ")
-            .replace('_', " ")
+            .replace(['-', '_'], " ")
             .split_whitespace()
             .filter(|word| !word.eq_ignore_ascii_case("GGUF"))
             .map(capitalize_first)

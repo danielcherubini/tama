@@ -192,6 +192,7 @@ mod tests {
             gpu_layers: None,
             quants: BTreeMap::new(),
             modalities: None,
+            display_name: None,
         }
     }
 

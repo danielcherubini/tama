@@ -181,6 +181,7 @@ top_k = 40
                 gpu_layers: None,
                 quants: BTreeMap::new(),
                 modalities: None,
+                display_name: None,
             };
             m.insert("test-model".to_string(), model);
             m
@@ -297,6 +298,7 @@ size_bytes = 8000000000
                     quants
                 },
                 modalities: None,
+                display_name: None,
             };
             m.insert("test-model".to_string(), model);
             m
@@ -368,6 +370,7 @@ fn build_test_model_config_with_mmproj(
         gpu_layers: None,
         quants,
         modalities: None,
+        display_name: None,
     }
 }
 
@@ -521,6 +524,7 @@ quant = "Q4_K_M"
                 gpu_layers: None,
                 quants: BTreeMap::new(),
                 modalities: None,
+                display_name: None,
             };
             m.insert("test-model".to_string(), model);
             m

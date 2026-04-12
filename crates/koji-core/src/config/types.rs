@@ -194,11 +194,7 @@ pub struct ModelConfig {
     #[serde(default, skip_serializing)]
     pub profile: Option<String>,
     /// API name for model identifier in OpenAI API responses
-    #[serde(
-        default,
-        alias = "display_name",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_name: Option<String>,
     /// Default GPU layers
     #[serde(default, skip_serializing_if = "Option::is_none")]
