@@ -150,6 +150,9 @@ pub struct ModelConfig {
     /// Model modalities (input/output types)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modalities: Option<ModelModalities>,
+    /// Pretty display name for UI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     /// Forward-compatibility: preserve unknown fields
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub extra: Option<serde_json::Map<String, serde_json::Value>>,
@@ -467,6 +470,7 @@ impl From<CoreModelConfig> for ModelConfig {
             gpu_layers: m.gpu_layers,
             quants: m.quants.into_iter().map(|(k, v)| (k, v.into())).collect(),
             modalities: m.modalities.map(Into::into),
+            display_name: m.display_name,
             extra: None, // Forward-compat field - preserve unknown fields on POST
         }
     }
@@ -491,6 +495,7 @@ impl From<ModelConfig> for CoreModelConfig {
             gpu_layers: m.gpu_layers,
             quants: m.quants.into_iter().map(|(k, v)| (k, v.into())).collect(),
             modalities: m.modalities.map(Into::into),
+            display_name: m.display_name,
         }
     }
 }

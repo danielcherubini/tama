@@ -11,12 +11,35 @@ use super::types::ModelResponse;
 use crate::proxy::ProxyState;
 
 /// Capitalize the first character of a string, preserve the rest unchanged.
-fn capitalize_first(s: &str) -> String {
+pub fn capitalize_first(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {
         None => String::new(),
         Some(first) => first.to_uppercase().chain(chars).collect(),
     }
+}
+
+/// Generate a pretty display name from an HF repo name.
+/// e.g., "unsloth/Qwen3.5-35B-A3B-GGUF" -> "Unsloth: Qwen3.5 35B A3B"
+/// Strips common file suffixes like "GGUF".
+pub fn generate_display_name(hf_repo: &str) -> String {
+    let parts: Vec<&str> = hf_repo.split('/').collect();
+    let (org, model_name) = if parts.len() >= 2 {
+        (parts[0], parts[1])
+    } else {
+        (hf_repo, hf_repo)
+    };
+
+    let model_name_processed = model_name
+        .replace('-', " ")
+        .replace('_', " ")
+        .split_whitespace()
+        .filter(|word| !word.eq_ignore_ascii_case("GGUF"))
+        .map(capitalize_first)
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    format!("{}: {}", capitalize_first(org), model_name_processed)
 }
 
 /// Handle listing all configured models (Koji management API).

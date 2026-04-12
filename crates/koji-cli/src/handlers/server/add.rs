@@ -150,6 +150,7 @@ pub async fn cmd_server_add(
         gpu_layers: None,
         quants: std::collections::BTreeMap::new(),
         modalities: None,
+        display_name: None,
     };
 
     config.models.insert(name.to_string(), model_config.clone());

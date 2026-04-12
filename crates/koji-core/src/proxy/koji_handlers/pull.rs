@@ -505,6 +505,9 @@ pub(crate) async fn _setup_model_after_pull_with_config(
             }
         };
 
+        // Generate display name from HF repo name (e.g., "Unsloth: Qwen3.5 35B A3B").
+        let display_name = crate::proxy::koji_handlers::generate_display_name(repo_id);
+
         // Reuse the existing model key if we found one, otherwise create a
         // new entry keyed by the bare repo slug (no per-quant suffix).
         let model_key = existing_key.unwrap_or_else(|| repo_slug.to_lowercase());
@@ -523,10 +526,11 @@ pub(crate) async fn _setup_model_after_pull_with_config(
                 port: None,
                 health_check: None,
                 profile: None,
-                api_name: Some(repo_id.to_string()),
+                api_name: None,
                 gpu_layers: None,
                 quants: std::collections::BTreeMap::new(),
                 modalities,
+                display_name: Some(display_name),
             });
     }
 

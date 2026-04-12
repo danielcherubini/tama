@@ -68,6 +68,7 @@ top_k = 40
                 gpu_layers: None,
                 quants: BTreeMap::new(),
                 modalities: None,
+                display_name: None,
             };
             m.insert("test-model".to_string(), model);
             m
