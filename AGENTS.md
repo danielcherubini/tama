@@ -179,6 +179,20 @@ koji/
 - `feat:`, `fix:`, `chore:`, `docs:` prefixes
 - Push to remote before merging
 
+### Version Bumping
+
+When bumping the version, update **all** of these files:
+
+| File | Field |
+|------|-------|
+| `Cargo.toml` | `[workspace.package] version` |
+| `crates/koji-core/Cargo.toml` | `[package] version` |
+| `crates/koji-cli/Cargo.toml` | `[package] version` |
+| `crates/koji-mock/Cargo.toml` | `[package] version` |
+| `crates/koji-web/Cargo.toml` | `[package] version` |
+
+After bumping, run `cargo fmt --all` before committing — CI will fail on formatting errors.
+
 ## No External Rules
 
 This project does not use Cursor rules (.cursor/) or Copilot instructions (.github/copilot-instructions.md).
