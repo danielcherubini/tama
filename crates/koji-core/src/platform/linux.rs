@@ -3,17 +3,23 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-/// Manage systemd user services on Linux.
+/// Manage systemd services on Linux.
 pub fn install_service(
     service_name: &str,
     exe_path: &str,
     args: &[String],
     _port: u16,
+    system: bool,
 ) -> Result<()> {
-    let config_dir = systemd_user_dir()?;
-    fs::create_dir_all(&config_dir).context("Failed to create systemd user dir")?;
+    let config_dir = service_dir(system)?;
+    fs::create_dir_all(&config_dir).context("Failed to create systemd dir")?;
 
     let args_str = args.join(" ");
+    let wanted_by = if system {
+        "multi-user.target"
+    } else {
+        "default.target"
+    };
     let unit = format!(
         "[Unit]\n\
          Description=Koji: {service_name}\n\
@@ -26,35 +32,36 @@ pub fn install_service(
          RestartSec=3\n\
          \n\
          [Install]\n\
-         WantedBy=default.target\n"
+         WantedBy={wanted_by}\n"
     );
 
     let unit_path = config_dir.join(format!("{}.service", service_name));
     fs::write(&unit_path, unit).context("Failed to write unit file")?;
 
-    Command::new("systemctl")
-        .args(["--user", "daemon-reload"])
-        .status()
+    systemctl(system, &["daemon-reload"])
         .context("Failed to reload systemd")?;
 
-    Command::new("systemctl")
-        .args(["--user", "enable", service_name])
-        .status()
+    systemctl(system, &["enable", service_name])
         .context("Failed to enable service")?;
 
     Ok(())
 }
 
-/// Install the koji proxy as a systemd user service.
-pub fn install_proxy_service() -> Result<()> {
-    let config_dir = systemd_user_dir()?;
-    fs::create_dir_all(&config_dir).context("Failed to create systemd user dir")?;
+/// Install the koji proxy as a systemd service.
+pub fn install_proxy_service(system: bool) -> Result<()> {
+    let config_dir = service_dir(system)?;
+    fs::create_dir_all(&config_dir).context("Failed to create systemd dir")?;
 
     let exe_path = std::env::current_exe()
         .context("Failed to get current exe path")?
         .display()
         .to_string();
 
+    let wanted_by = if system {
+        "multi-user.target"
+    } else {
+        "default.target"
+    };
     let unit = format!(
         "[Unit]\n\
          Description=Koji\n\
@@ -67,29 +74,23 @@ pub fn install_proxy_service() -> Result<()> {
          RestartSec=3\n\
          \n\
          [Install]\n\
-         WantedBy=default.target\n"
+         WantedBy={wanted_by}\n"
     );
 
     let unit_path = config_dir.join("koji.service");
     fs::write(&unit_path, unit).context("Failed to write unit file")?;
 
-    Command::new("systemctl")
-        .args(["--user", "daemon-reload"])
-        .status()
+    systemctl(system, &["daemon-reload"])
         .context("Failed to reload systemd")?;
 
-    Command::new("systemctl")
-        .args(["--user", "enable", "koji"])
-        .status()
+    systemctl(system, &["enable", "koji"])
         .context("Failed to enable service")?;
 
     Ok(())
 }
 
-pub fn start_service(service_name: &str) -> Result<()> {
-    let status = Command::new("systemctl")
-        .args(["--user", "start", service_name])
-        .status()
+pub fn start_service(service_name: &str, system: bool) -> Result<()> {
+    let status = systemctl(system, &["start", service_name])
         .context("Failed to start service")?;
 
     if !status.success() {
@@ -98,14 +99,12 @@ pub fn start_service(service_name: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn stop_service(service_name: &str) -> Result<()> {
-    stop_service_force(service_name)
+pub fn stop_service(service_name: &str, system: bool) -> Result<()> {
+    stop_service_force(service_name, system)
 }
 
-pub fn stop_service_force(service_name: &str) -> Result<()> {
-    let status = Command::new("systemctl")
-        .args(["--user", "stop", service_name])
-        .status()
+pub fn stop_service_force(service_name: &str, system: bool) -> Result<()> {
+    let status = systemctl(system, &["stop", service_name])
         .context("Failed to stop service")?;
 
     if !status.success() {
@@ -118,43 +117,42 @@ pub fn stop_service_force(service_name: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn restart_service(service_name: &str) -> Result<()> {
-    stop_service_force(service_name)?;
+pub fn restart_service(service_name: &str, system: bool) -> Result<()> {
+    stop_service_force(service_name, system)?;
 
     // Wait for processes to fully terminate
     std::thread::sleep(std::time::Duration::from_millis(500));
 
-    start_service(service_name)
+    start_service(service_name, system)
 }
 
-pub fn remove_service(service_name: &str) -> Result<()> {
-    let _ = Command::new("systemctl")
-        .args(["--user", "stop", service_name])
-        .status();
+pub fn remove_service(service_name: &str, system: bool) -> Result<()> {
+    let _ = systemctl(system, &["stop", service_name]);
+    let _ = systemctl(system, &["disable", service_name]);
 
-    let _ = Command::new("systemctl")
-        .args(["--user", "disable", service_name])
-        .status();
-
-    let config_dir = systemd_user_dir()?;
+    let config_dir = service_dir(system)?;
     let unit_path = config_dir.join(format!("{}.service", service_name));
     if unit_path.exists() {
         fs::remove_file(&unit_path).context("Failed to remove unit file")?;
     }
 
-    Command::new("systemctl")
-        .args(["--user", "daemon-reload"])
-        .status()
+    systemctl(system, &["daemon-reload"])
         .context("Failed to reload systemd")?;
 
     Ok(())
 }
 
-pub fn query_service(service_name: &str) -> Result<String> {
-    let output = Command::new("systemctl")
-        .args(["--user", "is-active", service_name])
-        .output()
-        .context("Failed to query service")?;
+pub fn query_service(service_name: &str, system: bool) -> Result<String> {
+    let output = if system {
+        Command::new("systemctl")
+            .args(["is-active", service_name])
+            .output()
+    } else {
+        Command::new("systemctl")
+            .args(["--user", "is-active", service_name])
+            .output()
+    }
+    .context("Failed to query service")?;
 
     let state = String::from_utf8_lossy(&output.stdout).trim().to_string();
     match state.as_str() {
@@ -165,7 +163,44 @@ pub fn query_service(service_name: &str) -> Result<String> {
     }
 }
 
-fn systemd_user_dir() -> Result<PathBuf> {
-    let home = std::env::var("HOME").context("HOME not set")?;
-    Ok(PathBuf::from(home).join(".config/systemd/user"))
+/// Query a service, checking user mode first then system mode.
+/// Use this when the caller doesn't know which mode the service was installed in.
+pub fn auto_query_service(service_name: &str) -> Result<String> {
+    let user_state = query_service(service_name, false)?;
+    if user_state != "NOT_INSTALLED" {
+        return Ok(user_state);
+    }
+    query_service(service_name, true)
+}
+
+/// Restart a service, trying user mode first then system mode.
+/// Use this when the caller doesn't know which mode the service was installed in.
+pub fn auto_restart_service(service_name: &str) -> Result<()> {
+    let user_state = query_service(service_name, false)?;
+    if user_state != "NOT_INSTALLED" {
+        return restart_service(service_name, false);
+    }
+    restart_service(service_name, true)
+}
+
+/// Run a systemctl command, choosing system or user mode.
+fn systemctl(system: bool, args: &[&str]) -> Result<std::process::ExitStatus> {
+    if system {
+        Command::new("systemctl").args(args).status()
+    } else {
+        // Prepend --user before the rest of the args
+        let mut full_args = vec!["--user"];
+        full_args.extend_from_slice(args);
+        Command::new("systemctl").args(&full_args).status()
+    }
+    .context("Failed to run systemctl")
+}
+
+fn service_dir(system: bool) -> Result<PathBuf> {
+    if system {
+        Ok(PathBuf::from("/etc/systemd/system"))
+    } else {
+        let home = std::env::var("HOME").context("HOME not set")?;
+        Ok(PathBuf::from(home).join(".config/systemd/user"))
+    }
 }
