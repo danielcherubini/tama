@@ -11,6 +11,28 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use tracing::info;
 
+/// Process a complete SSE line, rewriting the `model` field in JSON data lines.
+fn process_sse_line(line: &str, model_name: &str, out: &mut String) {
+    if let Some(data_content) = line.strip_prefix("data: ") {
+        let trimmed = data_content.trim_end();
+        if trimmed == "[DONE]" {
+            out.push_str(line);
+        } else if let Ok(mut json_value) = serde_json::from_str::<JsonValue>(trimmed) {
+            json_value["model"] = JsonValue::String(model_name.to_string());
+            out.push_str("data: ");
+            out.push_str(
+                &serde_json::to_string(&json_value).unwrap_or_else(|_| trimmed.to_string()),
+            );
+            out.push('\n');
+        } else {
+            out.push_str(line);
+        }
+    } else {
+        // Comments, empty lines, and other lines pass through unchanged
+        out.push_str(line);
+    }
+}
+
 pub async fn forward_request(
     state: &Arc<ProxyState>,
     server_name: &str,
@@ -234,71 +256,38 @@ pub async fn forward_request(
                 .unwrap_or(false);
 
             let body = if is_streaming {
-                // Streaming response - rewrite model name in each SSE chunk
+                // Streaming response — rewrite the model name in each SSE chunk.
+                // Uses unfold to own the partial-line buffer across chunks (Send-safe).
                 let model_name = model_name.to_string();
-                // Use RefCell to persist buffer across chunk boundaries
-                let buffer = std::cell::RefCell::new(String::new());
-                let transformed_stream = response.bytes_stream().map(move |chunk_result| {
-                    match chunk_result {
-                        Ok(chunk) => {
-                            // SSE format: each line is either a comment, empty, or data: ...
-                            // We need to process data: lines and rewrite the model field.
-                            // Buffer partial lines to handle chunks split mid-line.
-                            let chunk_str = String::from_utf8_lossy(&chunk);
-                            let mut result = String::new();
-                            let mut buffer = buffer.borrow_mut();
+                let byte_stream = response.bytes_stream();
+                let transformed_stream = futures_util::stream::unfold(
+                    (byte_stream, String::new()),
+                    move |(mut stream, mut line_buf)| {
+                        let model_name = model_name.clone();
+                        async move {
+                            let chunk_result = stream.next().await?;
+                            let result: Result<Bytes, reqwest::Error> = match chunk_result {
+                                Ok(chunk) => {
+                                    let chunk_str = String::from_utf8_lossy(&chunk);
+                                    let mut out = String::new();
 
-                            for ch in chunk_str.chars() {
-                                buffer.push(ch);
-                                if ch == '\n' {
-                                    // Process complete line from buffer
-                                    let line = buffer.clone();
-                                    buffer.clear();
-
-                                    // Process complete SSE line
-                                    if let Some(data_content) = line.strip_prefix("data: ") {
-                                        let trimmed = data_content.trim_end();
-                                        if trimmed == "[DONE]" {
-                                            // Pass through unchanged
-                                            result.push_str(&line);
-                                        } else {
-                                            // Try to parse and rewrite model field
-                                            if let Ok(mut json_value) =
-                                                serde_json::from_str::<JsonValue>(data_content)
-                                            {
-                                                json_value["model"] =
-                                                    JsonValue::String(model_name.clone());
-                                                let reserialized =
-                                                    serde_json::to_string(&json_value)
-                                                        .unwrap_or_else(|_| {
-                                                            data_content.to_string()
-                                                        });
-                                                result.push_str("data: ");
-                                                result.push_str(&reserialized);
-                                                result.push('\n');
-                                            } else {
-                                                // Not valid JSON, pass through unchanged
-                                                result.push_str(&line);
-                                            }
+                                    for ch in chunk_str.chars() {
+                                        line_buf.push(ch);
+                                        if ch == '\n' {
+                                            let line = line_buf.clone();
+                                            line_buf.clear();
+                                            process_sse_line(&line, &model_name, &mut out);
                                         }
-                                    } else if line.is_empty() || line.starts_with(':') {
-                                        // Comments and empty lines pass through unchanged
-                                        result.push_str(&line);
-                                    } else {
-                                        // Other lines pass through
-                                        result.push_str(&line);
                                     }
+
+                                    Ok(Bytes::from(out.into_bytes()))
                                 }
-                            }
-
-                            // Do not emit partial lines yet - they will be completed in the next chunk
-                            // Only emit fully-formed lines (those ending with \n)
-
-                            Ok(Bytes::from(result.into_bytes()))
+                                Err(e) => Err(e),
+                            };
+                            Some((result, (stream, line_buf)))
                         }
-                        Err(e) => Err(e),
-                    }
-                });
+                    },
+                );
                 Body::from_stream(transformed_stream)
             } else {
                 // Non-streaming response - parse, rewrite, and re-serialize
