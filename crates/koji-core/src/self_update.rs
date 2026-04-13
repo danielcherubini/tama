@@ -167,7 +167,24 @@ fn perform_update_sync(
     let tmp_archive = tmp_dir.path().join(&asset.name);
     let mut tmp_file = std::fs::File::create(&tmp_archive).context("Failed to create temp file")?;
 
-    self_update::Download::from_url(&asset.download_url)
+    let mut download = self_update::Download::from_url(&asset.download_url);
+    // GitHub API asset URLs require Accept: application/octet-stream to return
+    // the binary content. Without it, the API returns JSON metadata instead.
+    download.set_header(
+        http::header::ACCEPT,
+        "application/octet-stream"
+            .parse()
+            .expect("valid header value"),
+    );
+    if let Some(token) = github_token() {
+        download.set_header(
+            http::header::AUTHORIZATION,
+            format!("token {token}")
+                .parse()
+                .expect("valid header value"),
+        );
+    }
+    download
         .download_to(&mut tmp_file)
         .context("Failed to download release asset")?;
 

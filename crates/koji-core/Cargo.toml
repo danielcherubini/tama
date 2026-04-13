@@ -1,6 +1,6 @@
 [package]
 name = "koji-core"
-version = "1.30.4"
+version = "1.30.5"
 edition.workspace = true
 
 [dependencies]
@@ -34,6 +34,7 @@ libc = "0.2.183"
 rusqlite.workspace = true
 uuid = { version = "1", features = ["v4"] }
 self_update = { version = "0.44", default-features = false, features = ["archive-tar", "compression-flate2", "archive-zip", "compression-zip-deflate", "rustls", "ureq"] }
+http = "1"
 semver = "1"
 sha2 = "0.10"
 glob = "0.3"
