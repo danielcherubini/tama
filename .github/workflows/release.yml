@@ -40,6 +40,9 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-cargo-
 
       - name: Add wasm32 target
         run: rustup target add wasm32-unknown-unknown
@@ -100,6 +103,9 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-cargo-
 
       - name: Add wasm32 target
         run: rustup target add wasm32-unknown-unknown
