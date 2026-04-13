@@ -17,7 +17,7 @@ pub fn cmd_server_rm(config: &Config, name: &str, force: bool) -> Result<()> {
         }
         #[cfg(target_os = "linux")]
         {
-            koji_core::platform::linux::query_service(&service_name)
+            koji_core::platform::linux::auto_query_service(&service_name)
                 .map(|s| s != "NOT_INSTALLED")
                 .unwrap_or(true)
         }

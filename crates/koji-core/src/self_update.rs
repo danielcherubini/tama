@@ -359,7 +359,7 @@ pub fn restart_process() -> Result<()> {
 fn restart_as_service() -> Result<()> {
     #[cfg(target_os = "linux")]
     {
-        match crate::platform::linux::restart_service("koji") {
+        match crate::platform::linux::auto_restart_service("koji") {
             Ok(()) => std::process::exit(0),
             Err(e) => {
                 tracing::warn!(

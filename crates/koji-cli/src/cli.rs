@@ -348,26 +348,41 @@ pub enum ServiceCommands {
     Install {
         /// Server name (omit to install the proxy; provide a name for legacy single-backend mode)
         name: Option<String>,
+        /// Install as a system-wide service instead of a user service (requires root)
+        #[arg(long)]
+        system: bool,
     },
     /// Start the koji service
     Start {
         /// Server name (omit to start the proxy service)
         name: Option<String>,
+        /// Manage the system-wide service instead of the user service
+        #[arg(long)]
+        system: bool,
     },
     /// Stop the koji service
     Stop {
         /// Server name (omit to stop the proxy service)
         name: Option<String>,
+        /// Manage the system-wide service instead of the user service
+        #[arg(long)]
+        system: bool,
     },
     /// Restart the koji service (stop then start)
     Restart {
         /// Server name (omit to restart the proxy service)
         name: Option<String>,
+        /// Manage the system-wide service instead of the user service
+        #[arg(long)]
+        system: bool,
     },
     /// Remove the koji service
     Remove {
         /// Server name (omit to remove the proxy service)
         name: Option<String>,
+        /// Manage the system-wide service instead of the user service
+        #[arg(long)]
+        system: bool,
     },
 }
 

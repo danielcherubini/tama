@@ -37,7 +37,7 @@ pub async fn cmd_server_ls(config: &Config) -> Result<()> {
             }
             #[cfg(target_os = "linux")]
             {
-                koji_core::platform::linux::query_service(&service_name)
+                koji_core::platform::linux::auto_query_service(&service_name)
                     .unwrap_or_else(|_| "UNKNOWN".to_string())
             }
             #[cfg(not(any(target_os = "windows", target_os = "linux")))]
