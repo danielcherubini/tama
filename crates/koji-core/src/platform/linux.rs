@@ -38,11 +38,9 @@ pub fn install_service(
     let unit_path = config_dir.join(format!("{}.service", service_name));
     fs::write(&unit_path, unit).context("Failed to write unit file")?;
 
-    systemctl(system, &["daemon-reload"])
-        .context("Failed to reload systemd")?;
+    systemctl(system, &["daemon-reload"]).context("Failed to reload systemd")?;
 
-    systemctl(system, &["enable", service_name])
-        .context("Failed to enable service")?;
+    systemctl(system, &["enable", service_name]).context("Failed to enable service")?;
 
     Ok(())
 }
@@ -80,18 +78,15 @@ pub fn install_proxy_service(system: bool) -> Result<()> {
     let unit_path = config_dir.join("koji.service");
     fs::write(&unit_path, unit).context("Failed to write unit file")?;
 
-    systemctl(system, &["daemon-reload"])
-        .context("Failed to reload systemd")?;
+    systemctl(system, &["daemon-reload"]).context("Failed to reload systemd")?;
 
-    systemctl(system, &["enable", "koji"])
-        .context("Failed to enable service")?;
+    systemctl(system, &["enable", "koji"]).context("Failed to enable service")?;
 
     Ok(())
 }
 
 pub fn start_service(service_name: &str, system: bool) -> Result<()> {
-    let status = systemctl(system, &["start", service_name])
-        .context("Failed to start service")?;
+    let status = systemctl(system, &["start", service_name]).context("Failed to start service")?;
 
     if !status.success() {
         anyhow::bail!("Failed to start service '{}'", service_name);
@@ -104,8 +99,7 @@ pub fn stop_service(service_name: &str, system: bool) -> Result<()> {
 }
 
 pub fn stop_service_force(service_name: &str, system: bool) -> Result<()> {
-    let status = systemctl(system, &["stop", service_name])
-        .context("Failed to stop service")?;
+    let status = systemctl(system, &["stop", service_name]).context("Failed to stop service")?;
 
     if !status.success() {
         anyhow::bail!("Failed to stop service '{}'", service_name);
@@ -136,8 +130,7 @@ pub fn remove_service(service_name: &str, system: bool) -> Result<()> {
         fs::remove_file(&unit_path).context("Failed to remove unit file")?;
     }
 
-    systemctl(system, &["daemon-reload"])
-        .context("Failed to reload systemd")?;
+    systemctl(system, &["daemon-reload"]).context("Failed to reload systemd")?;
 
     Ok(())
 }

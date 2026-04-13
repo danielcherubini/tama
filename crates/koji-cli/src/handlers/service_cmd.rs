@@ -80,7 +80,10 @@ pub fn cmd_service(config: &Config, command: crate::cli::ServiceCommands) -> Res
                 } else {
                     println!("Installed koji service.");
                 }
-                println!("Start it: koji service start{}", if system { " --system" } else { "" });
+                println!(
+                    "Start it: koji service start{}",
+                    if system { " --system" } else { "" }
+                );
             }
         }
         crate::cli::ServiceCommands::Start { name, system } => {
