@@ -659,7 +659,7 @@ pub async fn install_backend(
 
     // Submit job
     let job = match jobs
-        .submit(crate::jobs::JobKind::Install, backend_type.clone())
+        .submit(crate::jobs::JobKind::Install, Some(backend_type.clone()))
         .await
     {
         Ok(j) => j,
@@ -918,7 +918,7 @@ pub async fn update_backend(
 
     // Submit job
     let job = match jobs
-        .submit(crate::jobs::JobKind::Update, backend_type.clone())
+        .submit(crate::jobs::JobKind::Update, Some(backend_type.clone()))
         .await
     {
         Ok(j) => j,

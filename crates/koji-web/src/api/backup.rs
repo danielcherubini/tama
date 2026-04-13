@@ -8,23 +8,9 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tower_http::services::ServeDir;
 use uuid::Uuid;
 
 use crate::server::AppState;
-
-/// Request body for backup.
-#[derive(Deserialize)]
-pub struct BackupRequest {}
-
-/// Response body for backup.
-#[derive(Serialize)]
-pub struct BackupResponse {
-    pub path: String,
-    pub size_bytes: u64,
-    pub models: usize,
-    pub backends: usize,
-}
 
 /// Request body for restore preview.
 #[derive(Deserialize)]
@@ -109,21 +95,32 @@ pub async fn create_backup(State(state): State<Arc<AppState>>) -> impl IntoRespo
     .await;
 
     match result {
-        Ok(Ok((output_path, manifest, size))) => {
+        Ok(Ok((output_path, _manifest, _size))) => {
             // Read the file and return as attachment
-            let file_bytes = std::fs::read(&output_path)
-                .map_err(|e| anyhow::anyhow!(e))?;
+            let file_bytes = match std::fs::read(&output_path) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({"error": e.to_string()})),
+                    )
+                        .into_response();
+                }
+            };
+
+            let filename = output_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let disposition = format!("attachment; filename=\"{}\"", filename);
 
             (
                 StatusCode::OK,
-                [(
-                    "Content-Type",
-                    "application/gzip",
-                )],
-                [(
-                    "Content-Disposition",
-                    format!("attachment; filename=\"{}\"", output_path.file_name().unwrap_or_default().to_string_lossy()),
-                )],
+                [
+                    ("Content-Type", "application/gzip"),
+                    ("Content-Disposition", disposition.as_str()),
+                ],
                 file_bytes,
             )
                 .into_response()
@@ -159,8 +156,9 @@ pub async fn restore_preview(
     }
 
     // Extract manifest
+    let upload_path_clone = upload_path.clone();
     let manifest_result = tokio::task::spawn_blocking(move || {
-        koji_core::backup::extract_manifest(&upload_path)
+        koji_core::backup::extract_manifest(&upload_path_clone)
     })
     .await;
 

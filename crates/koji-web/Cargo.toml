@@ -35,6 +35,8 @@ toml = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 uuid = { version = "1", features = ["v4"], optional = true }
 urlencoding = "2.1"
+chrono = "0.4.44"
+tempfile.workspace = true
 
 [features]
 csr = []
