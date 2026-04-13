@@ -90,6 +90,7 @@ pub fn cmd_service(config: &Config, command: crate::cli::ServiceCommands) -> Res
             let service_name = name
                 .map(|n| Config::service_name(&n))
                 .unwrap_or_else(|| "koji".to_string());
+            let system = resolve_system_flag(system, &service_name);
             service_start_inner(&service_name, system)?;
             println!("Started '{}'.", service_name);
         }
@@ -97,6 +98,7 @@ pub fn cmd_service(config: &Config, command: crate::cli::ServiceCommands) -> Res
             let service_name = name
                 .map(|n| Config::service_name(&n))
                 .unwrap_or_else(|| "koji".to_string());
+            let system = resolve_system_flag(system, &service_name);
             service_stop_inner(&service_name, system)?;
             println!("Stopped '{}'.", service_name);
         }
@@ -104,6 +106,7 @@ pub fn cmd_service(config: &Config, command: crate::cli::ServiceCommands) -> Res
             let service_name = name
                 .map(|n| Config::service_name(&n))
                 .unwrap_or_else(|| "koji".to_string());
+            let system = resolve_system_flag(system, &service_name);
             service_restart_inner(&service_name, system)?;
             println!("Restarted '{}'.", service_name);
         }
@@ -111,6 +114,7 @@ pub fn cmd_service(config: &Config, command: crate::cli::ServiceCommands) -> Res
             let service_name = name
                 .map(|n| Config::service_name(&n))
                 .unwrap_or_else(|| "koji".to_string());
+            let system = resolve_system_flag(system, &service_name);
 
             #[cfg(target_os = "windows")]
             {
@@ -203,4 +207,20 @@ fn service_restart_inner(service_name: &str, system: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// When `--system` is not passed, auto-detect whether the service is
+/// installed as a system or user service. Falls back to user (false) if
+/// detection fails (e.g. the service isn't installed yet).
+#[cfg(target_os = "linux")]
+fn resolve_system_flag(explicit: bool, service_name: &str) -> bool {
+    if explicit {
+        return true;
+    }
+    koji_core::platform::linux::detect_service_mode(service_name).unwrap_or(false)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn resolve_system_flag(explicit: bool, _service_name: &str) -> bool {
+    explicit
 }
