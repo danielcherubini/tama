@@ -6,20 +6,16 @@ use super::types::{ModelState, ProxyMetrics, ProxyState};
 
 impl ProxyState {
     pub fn new(config: crate::config::Config, db_dir: Option<std::path::PathBuf>) -> Self {
-        let config_clone = config.clone();
         let (metrics_tx, _) = tokio::sync::broadcast::channel(64);
         Self {
             config: Arc::new(tokio::sync::RwLock::new(config)),
             models: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             client: reqwest::Client::builder()
-                .timeout(Duration::from_secs(
-                    if config_clone.proxy.idle_timeout_secs == 0 {
-                        // idle_timeout disabled — use a generous request timeout
-                        600
-                    } else {
-                        config_clone.proxy.idle_timeout_secs + 30
-                    },
-                ))
+                // Only set a connect timeout — not an overall timeout.
+                // The overall timeout covers the entire response lifetime
+                // including streaming bodies, which would kill long SSE
+                // streams from LLM backends.
+                .connect_timeout(Duration::from_secs(30))
                 .build()
                 // reqwest Client::build() only fails if TLS backend init fails,
                 // which is not recoverable — panic is acceptable here.
