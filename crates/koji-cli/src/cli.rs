@@ -4,6 +4,7 @@
 
 use crate::commands::backend::BackendSubcommand;
 use clap::Parser;
+use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(name = "koji")]
@@ -142,6 +143,32 @@ pub enum Commands {
         /// Number of lines to show (default: 50)
         #[arg(short = 'n', long, default_value = "50")]
         lines: usize,
+    },
+    /// Create a backup of configuration and database
+    Backup {
+        /// Output path for the backup archive (default: koji-backup-YYYY-MM-DD.tar.gz in current dir)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Show what would be backed up without creating the archive
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Restore from a backup archive
+    Restore {
+        /// Path to backup archive
+        archive: PathBuf,
+        /// Interactively select which models to restore
+        #[arg(long)]
+        select: bool,
+        /// Show what would be restored without making changes
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip backend re-installation
+        #[arg(long)]
+        skip_backends: bool,
+        /// Skip model re-downloading
+        #[arg(long)]
+        skip_models: bool,
     },
     /// Start the koji web control plane UI
     #[cfg(feature = "web-ui")]
