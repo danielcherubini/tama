@@ -240,6 +240,7 @@ pub async fn run_with_opts(
         capabilities,
         binary_version,
         update_tx: Arc::new(tokio::sync::Mutex::new(None)),
+        upload_lock: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     });
     let app = build_router(state);
     tracing::info!("Koji web UI listening on http://{}", addr);
