@@ -176,6 +176,25 @@ pub fn auto_restart_service(service_name: &str) -> Result<()> {
     restart_service(service_name, true)
 }
 
+/// Detect whether a service is installed as system or user.
+///
+/// Returns `true` for system, `false` for user. Checks user first (more
+/// common for desktop installs), falling back to system.
+pub fn detect_service_mode(service_name: &str) -> Result<bool> {
+    let user_state = query_service(service_name, false)?;
+    if user_state != "NOT_INSTALLED" {
+        return Ok(false); // user service
+    }
+    let system_state = query_service(service_name, true)?;
+    if system_state != "NOT_INSTALLED" {
+        return Ok(true); // system service
+    }
+    anyhow::bail!(
+        "Service '{}' is not installed as either a user or system service",
+        service_name
+    );
+}
+
 /// Run a systemctl command, choosing system or user mode.
 fn systemctl(system: bool, args: &[&str]) -> Result<std::process::ExitStatus> {
     if system {
