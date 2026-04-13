@@ -116,6 +116,26 @@ pub async fn main() -> Result<()> {
             let name = name.unwrap_or_else(|| "koji".to_string());
             crate::handlers::logs::cmd_logs(&config, &name, follow, lines).await
         }
+        Commands::Backup { output, dry_run } => {
+            commands::backup::cmd_backup(&config, output, dry_run)
+        }
+        Commands::Restore {
+            archive,
+            select,
+            dry_run,
+            skip_backends,
+            skip_models,
+        } => {
+            use crate::commands::backup::RestoreArgs;
+            let args = RestoreArgs {
+                archive,
+                select,
+                dry_run,
+                skip_backends,
+                skip_models,
+            };
+            commands::backup::cmd_restore(&config, args).await
+        }
         #[cfg(feature = "web-ui")]
         Commands::Web {
             port,

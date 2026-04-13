@@ -109,7 +109,6 @@ pub fn merge_database(
     local_db: &rusqlite::Connection,
     backup_db_path: &Path,
 ) -> Result<DbMergeStats> {
-
     let mut stats = DbMergeStats::default();
 
     // Attach backup database
