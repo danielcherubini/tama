@@ -372,8 +372,7 @@ pub async fn download_gguf_with_progress(
         }
         #[cfg(windows)]
         {
-            std::fs::hard_link(&cached_path, &dest_path)
-                .context("Failed to create hard link")?;
+            std::fs::hard_link(&cached_path, &dest_path).context("Failed to create hard link")?;
         }
     }
 
