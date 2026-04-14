@@ -60,7 +60,6 @@ enum WizardStep {
     RepoInput,
     LoadingQuants,
     SelectQuants,
-    Vision,
     SetContext,
     Downloading,
     Done,
@@ -353,17 +352,14 @@ pub fn PullQuantWizard(
                     <div class=step_class(&step, &WizardStep::SelectQuants, 2)>
                         "3. Select"
                     </div>
-                    <div class=step_class(&step, &WizardStep::Vision, 3)>
-                        "4. Vision"
+                    <div class=step_class(&step, &WizardStep::SetContext, 3)>
+                        "4. Context"
                     </div>
-                    <div class=step_class(&step, &WizardStep::SetContext, 4)>
-                        "5. Context"
+                    <div class=step_class(&step, &WizardStep::Downloading, 4)>
+                        "5. Download"
                     </div>
-                    <div class=step_class(&step, &WizardStep::Downloading, 5)>
-                        "6. Download"
-                    </div>
-                    <div class=step_class(&step, &WizardStep::Done, 6)>
-                        "7. Done"
+                    <div class=step_class(&step, &WizardStep::Done, 5)>
+                        "6. Done"
                     </div>
                 }
             }}
@@ -564,83 +560,8 @@ pub fn PullQuantWizard(
                                     ctx.insert(fname.clone(), 32768u32);
                                 }
                                 context_lengths.set(ctx);
-                                // If mmprojs exist, go to Vision step first
-                                if !available_mmprojs.get().is_empty() {
-                                    wizard_step.set(WizardStep::Vision);
-                                } else {
-                                    wizard_step.set(WizardStep::SetContext);
-                                }
-                            }
-                        >"Next →"</button>
-                    </div>
-                }.into_any(),
+                                 wizard_step.set(WizardStep::SetContext);
 
-                // ── Step 4: Vision ────────────────────────────────────────────
-                WizardStep::Vision => view! {
-                    <div class="form-card__header">
-                        <h2 class="form-card__title">"Select Vision Projector"</h2>
-                        <p class="form-card__desc text-muted">
-                            "Choose a vision projector file for multimodal support."
-                        </p>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="form-label" for="mmproj-select">"Vision Projector"</label>
-                        <select
-                            id="mmproj-select"
-                            class="form-select"
-                            multiple
-                            on:change=move |e| {
-                                use wasm_bindgen::JsCast;
-                                let select = e.target().unwrap().dyn_into::<web_sys::HtmlSelectElement>().unwrap();
-                                let selected_filenames: HashSet<String> = {
-                                    let options = select.selected_options();
-                                    let len = options.length();
-                                    let mut set = HashSet::new();
-                                    for i in 0..len {
-                                        if let Some(option) = options.item(i) {
-                                            if let Some(value) = option.get_attribute("value") {
-                                                set.insert(value);
-                                            }
-                                        }
-                                    }
-                                    set
-                                };
-                                selected_mmproj_filenames.set(selected_filenames);
-                            }
-                        >
-                            {move || available_mmprojs.get().into_iter().map(|m| {
-                                let filename = m.filename.clone();
-                                view! { <option value=filename.clone()>{filename.clone()}</option> }
-                            }).collect::<Vec<_>>()}
-                        </select>
-                        <span class="form-hint">"Hold Ctrl/Cmd to select multiple"</span>
-                    </div>
-
-                    {move || {
-                        if available_mmprojs.get().is_empty() {
-                            None
-                        } else {
-                            Some(view! {
-                                <div class="alert alert--info mt-2">
-                                    <span class="alert__icon">"ℹ"</span>
-                                    <span>"Vision projector available: " {available_mmprojs.get().len()} " file(s) found"</span>
-                                </div>
-                            }.into_any())
-                        }
-                    }}
-
-                    <div class="form-actions mt-3">
-                        <button class="btn btn-secondary" on:click=move |_| {
-                            wizard_step.set(WizardStep::SelectQuants);
-                        }>
-                            "Back"
-                        </button>
-                        <button
-                            class="btn btn-primary"
-                            prop:disabled=move || selected_mmproj_filenames.get().is_empty()
-                            on:click=move |_| {
-                                wizard_step.set(WizardStep::SetContext);
                             }
                         >"Next →"</button>
                     </div>
@@ -707,12 +628,7 @@ pub fn PullQuantWizard(
 
                     <div class="form-actions mt-3">
                         <button class="btn btn-secondary" on:click=move |_| {
-                            // If mmprojs exist, go to Vision step; otherwise go to SelectQuants
-                            if !available_mmprojs.get().is_empty() {
-                                wizard_step.set(WizardStep::Vision);
-                            } else {
-                                wizard_step.set(WizardStep::SelectQuants);
-                            }
+                            wizard_step.set(WizardStep::SelectQuants);
                         }>
                             "Back"
                         </button>
