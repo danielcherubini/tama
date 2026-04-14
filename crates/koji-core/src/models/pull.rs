@@ -485,9 +485,45 @@ pub fn infer_quant_from_filename(filename: &str) -> Option<String> {
     let stem = filename.strip_suffix(".gguf")?;
 
     // Ordered longest-first so "Q4_K_M" matches before "Q4_K"
-    // Includes UD (Unsloth Dynamic) variants
+    // Includes UD (Unsloth Dynamic) and APEX variants
     let quant_patterns = [
-        // Unsloth Dynamic (UD) quants - must come before standard quants
+        // APEX semantic quants (must come before APEX standard patterns)
+        "APEX-I-BALANCED",
+        "APEX-I-QUALITY",
+        "APEX-I-COMPACT",
+        "APEX-I-MINI",
+        // APEX IQ quants
+        "APEX-IQ2_XXS",
+        "APEX-IQ3_XXS",
+        "APEX-IQ1_S",
+        "APEX-IQ1_M",
+        "APEX-IQ2_XS",
+        "APEX-IQ2_S",
+        "APEX-IQ2_M",
+        "APEX-IQ3_XS",
+        "APEX-IQ3_S",
+        "APEX-IQ3_M",
+        "APEX-IQ4_XS",
+        "APEX-IQ4_NL",
+        // APEX standard quants
+        "APEX-Q2_K_S",
+        "APEX-Q3_K_S",
+        "APEX-Q3_K_M",
+        "APEX-Q3_K_L",
+        "APEX-Q4_K_S",
+        "APEX-Q4_K_M",
+        "APEX-Q4_K_L",
+        "APEX-Q5_K_S",
+        "APEX-Q5_K_M",
+        "APEX-Q5_K_L",
+        "APEX-Q6_K",
+        "APEX-Q8_0",
+        // UD semantic quants (must come before UD standard patterns)
+        "UD-I-BALANCED",
+        "UD-I-QUALITY",
+        "UD-I-COMPACT",
+        "UD-I-MINI",
+        // Unsloth Dynamic (UD) IQ quants
         "UD-IQ2_XXS",
         "UD-IQ3_XXS",
         "UD-IQ1_S",
@@ -500,6 +536,7 @@ pub fn infer_quant_from_filename(filename: &str) -> Option<String> {
         "UD-IQ3_M",
         "UD-IQ4_XS",
         "UD-IQ4_NL",
+        // Unsloth Dynamic (UD) standard quants
         "UD-Q2_K_S",
         "UD-Q3_K_S",
         "UD-Q3_K_M",
@@ -696,11 +733,11 @@ mod tests {
 
     #[test]
     fn test_infer_quant_non_standard_name() {
-        // For non-standard quant names, return the last component after splitting by `-` or `_`
-        // "Qwen3.5-35B-A3B-APEX-I-Balanced" -> "Balanced"
+        // APEX semantic quants are now recognized
+        // "Qwen3.5-35B-A3B-APEX-I-Balanced" -> "APEX-I-BALANCED"
         assert_eq!(
             infer_quant_from_filename("Qwen3.5-35B-A3B-APEX-I-Balanced.gguf"),
-            Some("Balanced".to_string())
+            Some("APEX-I-BALANCED".to_string())
         );
     }
 
@@ -783,6 +820,92 @@ mod tests {
         assert_eq!(
             infer_quant_from_filename("Llama-3.2-UD-Q4_K_M.gguf"),
             Some("UD-Q4_K_M".to_string())
+        );
+    }
+
+    // ── APEX and UD semantic quant tests ──────────────────────────────────────
+
+    #[test]
+    fn test_infer_quant_apex_patterns() {
+        // APEX IQ quants
+        assert_eq!(
+            infer_quant_from_filename("model-APEX-IQ2_XXS.gguf"),
+            Some("APEX-IQ2_XXS".to_string())
+        );
+        assert_eq!(
+            infer_quant_from_filename("Llama-3.2-APEX-IQ3_XXS.gguf"),
+            Some("APEX-IQ3_XXS".to_string())
+        );
+        assert_eq!(
+            infer_quant_from_filename("model-APEX-IQ4_NL.gguf"),
+            Some("APEX-IQ4_NL".to_string())
+        );
+        // APEX standard quants
+        assert_eq!(
+            infer_quant_from_filename("model-APEX-Q4_K_M.gguf"),
+            Some("APEX-Q4_K_M".to_string())
+        );
+        assert_eq!(
+            infer_quant_from_filename("Llama-3.2-APEX-Q8_0.gguf"),
+            Some("APEX-Q8_0".to_string())
+        );
+    }
+
+    #[test]
+    fn test_infer_quant_apex_semantic() {
+        // APEX semantic quants (I-Balanced, I-Quality, etc.)
+        // Note: function returns uppercase patterns
+        assert_eq!(
+            infer_quant_from_filename("gemma-4-26B-A4B-APEX-I-Balanced.gguf"),
+            Some("APEX-I-BALANCED".to_string())
+        );
+        assert_eq!(
+            infer_quant_from_filename("Qwen3.5-35B-A3B-APEX-I-Quality.gguf"),
+            Some("APEX-I-QUALITY".to_string())
+        );
+        assert_eq!(
+            infer_quant_from_filename("model-APEX-I-Compact.gguf"),
+            Some("APEX-I-COMPACT".to_string())
+        );
+        assert_eq!(
+            infer_quant_from_filename("model-APEX-I-Mini.gguf"),
+            Some("APEX-I-MINI".to_string())
+        );
+    }
+
+    #[test]
+    fn test_infer_quant_ud_semantic() {
+        // UD semantic quants
+        // Note: function returns uppercase patterns
+        assert_eq!(
+            infer_quant_from_filename("gemma-4-26B-A4B-UD-I-Balanced.gguf"),
+            Some("UD-I-BALANCED".to_string())
+        );
+        assert_eq!(
+            infer_quant_from_filename("Qwen3.5-35B-A3B-UD-I-Quality.gguf"),
+            Some("UD-I-QUALITY".to_string())
+        );
+        assert_eq!(
+            infer_quant_from_filename("model-UD-I-Compact.gguf"),
+            Some("UD-I-COMPACT".to_string())
+        );
+        assert_eq!(
+            infer_quant_from_filename("model-UD-I-Mini.gguf"),
+            Some("UD-I-MINI".to_string())
+        );
+    }
+
+    #[test]
+    fn test_infer_quant_semantic_without_prefix() {
+        // Semantic quants without APEX/UD prefix should fall back gracefully
+        // Returns last component from original stem (preserves case)
+        assert_eq!(
+            infer_quant_from_filename("model-I-Balanced.gguf"),
+            Some("Balanced".to_string())
+        );
+        assert_eq!(
+            infer_quant_from_filename("model-Quality.gguf"),
+            Some("Quality".to_string())
         );
     }
 }
