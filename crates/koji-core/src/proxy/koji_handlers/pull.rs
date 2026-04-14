@@ -201,7 +201,10 @@ fn spawn_download_job(
         let repo = api.model(repo_id_clone.clone());
         let progress_adapter = crate::models::pull::ProgressAdapter::new(Some(progress_callback));
 
-        let cached_path = match repo.download_with_progress(&filename_clone, progress_adapter).await {
+        let cached_path = match repo
+            .download_with_progress(&filename_clone, progress_adapter)
+            .await
+        {
             Ok(path) => path,
             Err(e) => {
                 let mut jobs = pull_jobs_arc.write().await;
