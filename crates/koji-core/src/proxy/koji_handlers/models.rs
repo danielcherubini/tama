@@ -94,11 +94,9 @@ pub async fn handle_koji_get_model(
 
     // Check if it's a configured (but not loaded) model
     let config = state.config.read().await;
-    for (config_name, server_cfg) in &config.models {
-        if !server_cfg.enabled {
-            continue;
-        }
-        if config_name == &model_id || server_cfg.model.as_deref() == Some(model_id.as_str()) {
+    let servers = config.resolve_servers_for_model(&model_id);
+    if let Some((config_name, server_cfg, _)) = servers.first() {
+        if server_cfg.enabled {
             return Json(serde_json::json!({
                 "id": config_name,
                 "object": "model",
@@ -127,26 +125,9 @@ pub async fn handle_koji_load_model(
     state: State<Arc<ProxyState>>,
     Path(model_id): Path<String>,
 ) -> Response {
-    // Check the model is present in config (model card is optional)
-    if !state.config.read().await.models.contains_key(&model_id) {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({
-                "error": {
-                    "message": "Model not configured",
-                    "type": "NotFoundError"
-                }
-            })),
-        )
-            .into_response();
-    }
-
-    // Model card is optional — pass None if it doesn't exist on disk
-    let model_card = state.get_model_card(&model_id).await;
-
-    match state.load_model(&model_id, model_card.as_ref()).await {
-        Ok(_) => {
-            let model_state = state.get_model_state(&model_id).await;
+    match state.load_model(&model_id, None).await {
+        Ok(server_name) => {
+            let model_state = state.get_model_state(&server_name).await;
             let loaded = model_state.as_ref().is_some_and(|ms| ms.is_ready());
             Json(ModelResponse {
                 id: model_id,

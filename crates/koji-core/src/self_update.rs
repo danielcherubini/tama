@@ -396,15 +396,10 @@ pub fn restart_process() -> Result<()> {
 fn restart_as_service() -> Result<()> {
     #[cfg(target_os = "linux")]
     {
-        match crate::platform::linux::auto_restart_service("koji") {
-            Ok(()) => std::process::exit(0),
-            Err(e) => {
-                tracing::warn!(
-                    "Failed to restart via systemd: {e:#}. Falling back to CLI re-exec."
-                );
-                restart_as_cli()?;
-            }
-        }
+        // When running as a systemd service, we simply exit.
+        // Our unit file is configured with `Restart=always`, so systemd
+        // will automatically restart the process using the new binary.
+        std::process::exit(0);
     }
 
     #[cfg(target_os = "windows")]
