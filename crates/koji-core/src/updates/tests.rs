@@ -21,15 +21,17 @@ async fn test_get_results() {
     let open = crate::db::open(&config_dir).unwrap();
     upsert_update_check(
         &open.conn,
-        "backend",
-        "test-backend",
-        Some("v1"),
-        Some("v2"),
-        true,
-        "update_available",
-        None,
-        None,
-        123456789,
+        crate::db::queries::UpdateCheckParams {
+            item_type: "backend",
+            item_id: "test-backend",
+            current_version: Some("v1"),
+            latest_version: Some("v2"),
+            update_available: true,
+            status: "update_available",
+            error_message: None,
+            details_json: None,
+            checked_at: 123456789,
+        },
     )
     .unwrap();
 
@@ -64,15 +66,17 @@ async fn test_should_check() {
 
     upsert_update_check(
         &open.conn,
-        "backend",
-        "test",
-        None,
-        None,
-        false,
-        "unknown",
-        None,
-        None,
-        two_hours_ago,
+        crate::db::queries::UpdateCheckParams {
+            item_type: "backend",
+            item_id: "test",
+            current_version: None,
+            latest_version: None,
+            update_available: false,
+            status: "unknown",
+            error_message: None,
+            details_json: None,
+            checked_at: two_hours_ago,
+        },
     )
     .unwrap();
 

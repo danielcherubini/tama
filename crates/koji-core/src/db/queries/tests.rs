@@ -18,15 +18,17 @@ mod tests {
         // Insert
         upsert_update_check(
             &conn,
-            item_type,
-            item_id,
-            Some("v1.0.0"),
-            Some("v1.1.0"),
-            true,
-            "update_available",
-            None,
-            None,
-            now,
+            super::update_check_queries::UpdateCheckParams {
+                item_type,
+                item_id,
+                current_version: Some("v1.0.0"),
+                latest_version: Some("v1.1.0"),
+                update_available: true,
+                status: "update_available",
+                error_message: None,
+                details_json: None,
+                checked_at: now,
+            },
         )
         .unwrap();
 
@@ -44,15 +46,17 @@ mod tests {
         // Upsert (Update)
         upsert_update_check(
             &conn,
-            item_type,
-            item_id,
-            Some("v1.1.0"),
-            Some("v1.1.0"),
-            false,
-            "up_to_date",
-            None,
-            None,
-            now + 100,
+            super::update_check_queries::UpdateCheckParams {
+                item_type,
+                item_id,
+                current_version: Some("v1.1.0"),
+                latest_version: Some("v1.1.0"),
+                update_available: false,
+                status: "up_to_date",
+                error_message: None,
+                details_json: None,
+                checked_at: now + 100,
+            },
         )
         .unwrap();
 
@@ -71,12 +75,34 @@ mod tests {
         let now = 1713168000;
 
         upsert_update_check(
-            &conn, "backend", "b1", None, None, false, "unknown", None, None, now,
+            &conn,
+            super::update_check_queries::UpdateCheckParams {
+                item_type: "backend",
+                item_id: "b1",
+                current_version: None,
+                latest_version: None,
+                update_available: false,
+                status: "unknown",
+                error_message: None,
+                details_json: None,
+                checked_at: now,
+            },
         )
         .unwrap();
 
         upsert_update_check(
-            &conn, "model", "m1", None, None, false, "unknown", None, None, now,
+            &conn,
+            super::update_check_queries::UpdateCheckParams {
+                item_type: "model",
+                item_id: "m1",
+                current_version: None,
+                latest_version: None,
+                update_available: false,
+                status: "unknown",
+                error_message: None,
+                details_json: None,
+                checked_at: now,
+            },
         )
         .unwrap();
 
@@ -91,7 +117,18 @@ mod tests {
         let item_id = "b1";
 
         upsert_update_check(
-            &conn, item_type, item_id, None, None, false, "unknown", None, None, 12345,
+            &conn,
+            super::update_check_queries::UpdateCheckParams {
+                item_type,
+                item_id,
+                current_version: None,
+                latest_version: None,
+                update_available: false,
+                status: "unknown",
+                error_message: None,
+                details_json: None,
+                checked_at: 12345,
+            },
         )
         .unwrap();
 
@@ -107,12 +144,34 @@ mod tests {
         assert_eq!(get_oldest_check_time(&conn).unwrap(), None);
 
         upsert_update_check(
-            &conn, "backend", "b1", None, None, false, "unknown", None, None, 2000,
+            &conn,
+            super::update_check_queries::UpdateCheckParams {
+                item_type: "backend",
+                item_id: "b1",
+                current_version: None,
+                latest_version: None,
+                update_available: false,
+                status: "unknown",
+                error_message: None,
+                details_json: None,
+                checked_at: 2000,
+            },
         )
         .unwrap();
 
         upsert_update_check(
-            &conn, "backend", "b2", None, None, false, "unknown", None, None, 1000,
+            &conn,
+            super::update_check_queries::UpdateCheckParams {
+                item_type: "backend",
+                item_id: "b2",
+                current_version: None,
+                latest_version: None,
+                update_available: false,
+                status: "unknown",
+                error_message: None,
+                details_json: None,
+                checked_at: 1000,
+            },
         )
         .unwrap();
 

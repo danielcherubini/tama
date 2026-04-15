@@ -326,7 +326,10 @@ pub async fn apply_backend_update(
         let target_dir = match backend_info.path.parent() {
             Some(p) => p.to_path_buf(),
             None => {
-                tracing::error!("Backend '{}' has no parent directory for installation path", name_clone);
+                tracing::error!(
+                    "Backend '{}' has no parent directory for installation path",
+                    name_clone
+                );
                 return;
             }
         };
@@ -448,7 +451,11 @@ pub async fn apply_model_update(
                             let commit_sha = listing.commit_sha.clone();
                             move || -> anyhow::Result<()> {
                                 let open = koji_core::db::open(&config_dir)?;
-                                koji_core::db::queries::upsert_model_pull(&open.conn, &repo_id, &commit_sha)?;
+                                koji_core::db::queries::upsert_model_pull(
+                                    &open.conn,
+                                    &repo_id,
+                                    &commit_sha,
+                                )?;
                                 Ok(())
                             }
                         })

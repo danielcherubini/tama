@@ -3,18 +3,21 @@ use rusqlite::Connection;
 
 use super::types::UpdateCheckRecord;
 
-pub fn upsert_update_check(
-    conn: &Connection,
-    item_type: &str,
-    item_id: &str,
-    current_version: Option<&str>,
-    latest_version: Option<&str>,
-    update_available: bool,
-    status: &str,
-    error_message: Option<&str>,
-    details_json: Option<&str>,
-    checked_at: i64,
-) -> Result<()> {
+/// Params for upserting an update check record.
+#[derive(Debug, Clone)]
+pub struct UpdateCheckParams<'a> {
+    pub item_type: &'a str,
+    pub item_id: &'a str,
+    pub current_version: Option<&'a str>,
+    pub latest_version: Option<&'a str>,
+    pub update_available: bool,
+    pub status: &'a str,
+    pub error_message: Option<&'a str>,
+    pub details_json: Option<&'a str>,
+    pub checked_at: i64,
+}
+
+pub fn upsert_update_check(conn: &Connection, params: UpdateCheckParams) -> Result<()> {
     conn.execute(
         "INSERT INTO update_checks (item_type, item_id, current_version, latest_version, update_available, status, error_message, details_json, checked_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
@@ -27,15 +30,15 @@ pub fn upsert_update_check(
              details_json = excluded.details_json,
              checked_at = excluded.checked_at",
         (
-            item_type,
-            item_id,
-            current_version,
-            latest_version,
-            update_available as i32,
-            status,
-            error_message,
-            details_json,
-            checked_at,
+            params.item_type,
+            params.item_id,
+            params.current_version,
+            params.latest_version,
+            params.update_available as i32,
+            params.status,
+            params.error_message,
+            params.details_json,
+            params.checked_at,
         ),
     )?;
     Ok(())
