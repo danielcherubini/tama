@@ -9,7 +9,7 @@ use rusqlite::Connection;
 pub type Migration = (i32, &'static str);
 
 /// Version number for the latest migration
-pub const LATEST_VERSION: i32 = 5;
+pub const LATEST_VERSION: i32 = 6;
 
 /// Run all applicable migrations on the database
 ///
@@ -126,6 +126,25 @@ pub fn run(conn: &Connection) -> anyhow::Result<()> {
                 ALTER TABLE model_files ADD COLUMN verify_error TEXT;
                 "#,
         ),
+        (
+            6,
+            r#"
+                CREATE TABLE IF NOT EXISTS update_checks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    item_type TEXT NOT NULL,           -- 'backend' or 'model'
+                    item_id TEXT NOT NULL,             -- backend name or model config key
+                    current_version TEXT,              -- installed version/commit SHA
+                    latest_version TEXT,               -- remote version/commit SHA
+                    update_available INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'unknown',
+                    error_message TEXT,
+                    details_json TEXT,                 -- JSON blob (per-file changes for models)
+                    checked_at INTEGER NOT NULL,        -- unix timestamp
+                    UNIQUE(item_type, item_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_update_checks_type ON update_checks(item_type);
+            "#,
+        ),
     ];
 
     let current_version: i32 =
@@ -144,4 +163,34 @@ pub fn run(conn: &Connection) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    #[test]
+    fn test_migration_v6_creates_update_checks_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        run(&conn).unwrap();
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='update_checks'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+
+        let idx_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_update_checks_type'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(idx_count, 1);
+    }
 }
