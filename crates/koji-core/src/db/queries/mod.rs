@@ -8,12 +8,14 @@ mod backend_queries;
 mod metrics_queries;
 mod model_queries;
 mod types;
+mod update_check_queries;
 
 pub use active_model_queries::*;
 pub use backend_queries::*;
 pub use metrics_queries::*;
 pub use model_queries::*;
 pub use types::*;
+pub use update_check_queries::*;
 
 #[cfg(test)]
 mod tests;
