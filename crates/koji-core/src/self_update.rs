@@ -393,6 +393,7 @@ pub fn restart_process() -> Result<()> {
 }
 
 /// Restart via the platform service manager.
+#[allow(unreachable_code)]
 fn restart_as_service() -> Result<()> {
     #[cfg(target_os = "linux")]
     {
@@ -413,7 +414,11 @@ fn restart_as_service() -> Result<()> {
                 restart_as_cli()?;
             }
         }
+        return Ok(());
     }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    anyhow::bail!("service restart is not supported on this platform");
 
     Ok(())
 }
