@@ -941,18 +941,24 @@ fn cmd_scan(config: &Config) -> Result<()> {
     let mut found_any = false;
     let mut config = config.clone();
 
+    // Open the DB once for stale-entry cleanup (best-effort — skip if unavailable).
+    let db_conn = koji_core::config::Config::config_dir()
+        .ok()
+        .and_then(|dir| koji_core::db::open(&dir).ok())
+        .map(|r| r.conn);
+
     // ── Stale file detection ─────────────────────────────────────────────────
     // Check every tracked quant and remove any whose file is missing or is a
     // dead symlink. `Path::exists()` follows symlinks and returns false for
     // both cases, so this catches the "symlink left behind after cache cleanup"
     // scenario as well as plain missing files.
     for model in &models {
-        let stale: Vec<String> = model
+        let stale: Vec<(String, String)> = model // (quant_key, filename)
             .card
             .quants
             .iter()
             .filter(|(_, q)| !model.dir.join(&q.file).exists())
-            .map(|(k, _)| k.clone())
+            .map(|(k, q)| (k.clone(), q.file.clone()))
             .collect();
 
         if !stale.is_empty() {
@@ -962,17 +968,24 @@ fn cmd_scan(config: &Config) -> Result<()> {
                 stale.len()
             );
             let mut card = model.card.clone();
-            for key in &stale {
-                let file = card.quants[key].file.clone();
+            let repo_id = &model.card.model.source;
+            for (key, file) in &stale {
                 println!("    - {} ({})", file, key);
                 card.quants.remove(key);
+                // Remove the model_files DB row for this (repo, filename).
+                if let Some(conn) = &db_conn {
+                    if let Err(e) =
+                        koji_core::db::queries::delete_model_file(conn, repo_id, file)
+                    {
+                        tracing::warn!("Failed to delete DB record for {}/{}: {}", repo_id, file, e);
+                    }
+                }
             }
             card.save(&model.card_path)?;
 
-            // If the card is now empty, remove the config.toml model entry so
-            // the web UI stops listing it.
+            // If the card is now empty, remove the config.toml model entry and
+            // the model_pulls DB row so the web UI stops listing it.
             if card.quants.is_empty() {
-                let repo_id = &model.card.model.source;
                 let removed: Vec<String> = config
                     .models
                     .iter()
@@ -984,17 +997,24 @@ fn cmd_scan(config: &Config) -> Result<()> {
                     config.models.remove(&key);
                 }
                 config.save()?;
+                // Remove the repo-level pull record from DB.
+                if let Some(conn) = &db_conn {
+                    if let Err(e) =
+                        koji_core::db::queries::delete_model_records(conn, repo_id)
+                    {
+                        tracing::warn!("Failed to delete DB records for {}: {}", repo_id, e);
+                    }
+                }
             } else {
                 // Remove config entries whose selected quant no longer exists.
-                let repo_id = &model.card.model.source;
+                let stale_keys: Vec<&str> = stale.iter().map(|(k, _)| k.as_str()).collect();
                 let mut dirty = false;
                 for mc in config.models.values_mut() {
                     if mc.model.as_deref() != Some(repo_id.as_str()) {
                         continue;
                     }
                     if let Some(q) = &mc.quant {
-                        if stale.contains(q) {
-                            // Point to the first surviving quant, if any.
+                        if stale_keys.contains(&q.as_str()) {
                             mc.quant = card.quants.keys().next().cloned();
                             dirty = true;
                         }
