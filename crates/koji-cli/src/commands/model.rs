@@ -1043,6 +1043,55 @@ fn cmd_scan(config: &Config) -> Result<()> {
         }
     }
 
+    // ── Config-based stale detection ────────────────────────────────────────
+    // Catch models that were registered in koji.toml / the DB but whose files
+    // are completely gone from disk (no model card was ever written, or the
+    // card was already cleaned up above). For each config entry whose model
+    // directory either doesn't exist or contains no real GGUF files, remove
+    // it from config and the DB.
+    {
+        let stale_keys: Vec<(String, String)> = config // (config_key, repo_id)
+            .models
+            .iter()
+            .filter_map(|(key, mc)| {
+                let repo_id = mc.model.as_ref()?;
+                let model_dir = koji_core::models::repo_path(&models_dir, repo_id);
+                let has_gguf = model_dir.exists() && std::fs::read_dir(&model_dir)
+                    .ok()
+                    .map(|entries| {
+                        entries
+                            .filter_map(|e| e.ok())
+                            .any(|e| {
+                                e.file_name().to_string_lossy().ends_with(".gguf")
+                                    && e.path().exists() // follows symlinks — false for dead ones
+                            })
+                    })
+                    .unwrap_or(false);
+                if has_gguf { None } else { Some((key.clone(), repo_id.clone())) }
+            })
+            .collect();
+
+        if !stale_keys.is_empty() {
+            println!(
+                "  found {} ghost config entr(ies) with no files on disk:",
+                stale_keys.len()
+            );
+            for (key, repo_id) in &stale_keys {
+                println!("    x {} ({})", key, repo_id);
+                config.models.remove(key);
+                if let Some(conn) = &db_conn {
+                    if let Err(e) =
+                        koji_core::db::queries::delete_model_records(conn, repo_id)
+                    {
+                        tracing::warn!("Failed to delete DB records for {}: {}", repo_id, e);
+                    }
+                }
+            }
+            config.save()?;
+            found_any = true;
+        }
+    }
+
     // Check existing models for untracked GGUFs
     for model in &models {
         let untracked = registry.untracked_ggufs(&model.dir, &model.card)?;
