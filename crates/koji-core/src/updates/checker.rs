@@ -6,7 +6,6 @@ use crate::config::Config;
 use crate::db;
 use crate::db::queries::{
     get_active_backend, get_all_update_checks, get_model_pull, get_oldest_check_time,
-    upsert_update_check,
 };
 use crate::models::pull::list_gguf_files;
 
@@ -16,6 +15,9 @@ pub struct UpdateChecker {
     /// Mutex to prevent concurrent check runs. Locking the guard serializes checks.
     lock: Arc<Mutex<()>>,
 }
+
+/// Results from an initial sync of backends and models to check for updates.
+pub type UpdateSyncResults = (Vec<(String, BackendType)>, Vec<(String, Option<String>)>);
 
 impl UpdateChecker {
     pub fn new() -> Self {
@@ -41,8 +43,7 @@ impl UpdateChecker {
         // Phase 1: Sync DB - fetch all items to check
         let (backends, models) = tokio::task::spawn_blocking({
             let config_dir = config_dir.to_path_buf();
-            move || -> anyhow::Result<(Vec<(String, BackendType)>, Vec<(String, Option<String>)>)> {
-                // Get backend info from registry
+            move || -> anyhow::Result<UpdateSyncResults> {
                 let registry = BackendRegistry::open(&config_dir)?;
                 let backends: Vec<(String, BackendType)> = registry
                     .list()
@@ -51,7 +52,6 @@ impl UpdateChecker {
                     .map(|b| (b.name.clone(), b.backend_type.clone()))
                     .collect();
 
-                // Get model keys and repo_ids from config
                 let config = Config::load_from(&config_dir)?;
                 let models: Vec<(String, Option<String>)> = config
                     .models
@@ -252,6 +252,7 @@ impl UpdateChecker {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn save_check_result(
         &self,
         config_dir: &std::path::Path,
@@ -265,7 +266,7 @@ impl UpdateChecker {
         details_json: Option<&str>,
     ) -> anyhow::Result<()> {
         let now = chrono::Utc::now().timestamp();
-        let status = status.to_string();
+        let status_str = status.to_string();
         tokio::task::spawn_blocking({
             let config_dir = config_dir.to_path_buf();
             let item_type = item_type.to_string();
@@ -274,20 +275,22 @@ impl UpdateChecker {
             let latest_version = latest_version.map(String::from);
             let error_message = error_message.map(String::from);
             let details_json = details_json.map(String::from);
-            let status = status;
+            let status = status_str;
             move || -> anyhow::Result<()> {
                 let open = db::open(&config_dir)?;
-                upsert_update_check(
+                crate::db::queries::upsert_update_check(
                     &open.conn,
-                    &item_type,
-                    &item_id,
-                    current_version.as_deref(),
-                    latest_version.as_deref(),
-                    update_available,
-                    &status,
-                    error_message.as_deref(),
-                    details_json.as_deref(),
-                    now,
+                    crate::db::queries::UpdateCheckParams {
+                        item_type: &item_type,
+                        item_id: &item_id,
+                        current_version: current_version.as_deref(),
+                        latest_version: latest_version.as_deref(),
+                        update_available,
+                        status: &status,
+                        error_message: error_message.as_deref(),
+                        details_json: details_json.as_deref(),
+                        checked_at: now,
+                    },
                 )?;
                 Ok(())
             }
