@@ -52,3 +52,17 @@ pub struct ActiveModelRecord {
     pub loaded_at: String,
     pub last_accessed: String,
 }
+
+/// A stored update check record for a backend or model.
+#[derive(Debug, Clone)]
+pub struct UpdateCheckRecord {
+    pub item_type: String, // "backend" or "model"
+    pub item_id: String,   // backend name or model config key
+    pub current_version: Option<String>,
+    pub latest_version: Option<String>,
+    pub update_available: bool,
+    pub status: String, // "unknown", "up_to_date", "update_available", "error"
+    pub error_message: Option<String>,
+    pub details_json: Option<String>, // JSON blob for model file changes
+    pub checked_at: i64,              // unix timestamp
+}
