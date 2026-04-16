@@ -281,7 +281,7 @@ pub fn Models() -> impl IntoView {
                                                                             </button>
                                                                         }.into_any()
                                                                     }}
-                                                                    <A href=format!("/models/{}?id={}/edit", id_edit, id_edit)>
+                                                                    <A href=format!("/models/{}/edit", id_edit)>
                                                                         <button class="btn btn-secondary btn-sm">"Edit"</button>
                                                                     </A>
                                                                 </div>
@@ -363,7 +363,7 @@ pub fn Models() -> impl IntoView {
                                                                             </button>
                                                                         }.into_any()
                                                                     }}
-                                                                    <A href=format!("/models/{}?id={}/edit", id_edit, id_edit)>
+                                                                    <A href=format!("/models/{}/edit", id_edit)>
                                                                         <button class="btn btn-secondary btn-sm">"Edit"</button>
                                                                     </A>
                                                                 </div>
