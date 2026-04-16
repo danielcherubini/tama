@@ -173,6 +173,125 @@ pub fn migrate_backend_registry_toml(
     Ok(())
 }
 
+/// Repopulate `model_files` for any `model_configs` row that has zero
+/// referencing files. Scans `<models_dir>/<repo_id>/` for `.gguf` files and
+/// inserts one `model_files` row per file.
+///
+/// Exists to recover from the v9 migration FK-cascade bug, which silently
+/// wiped every `model_files` row via `ON DELETE CASCADE` when the parent
+/// table was rebuilt. For affected users, the files themselves are still on
+/// disk — only the DB metadata is gone, and this function restores it.
+///
+/// Safe to call on every startup: a no-op for any `model_configs` row whose
+/// `model_files` set is already populated.
+///
+/// Returns the number of `model_files` rows inserted.
+pub fn repair_orphaned_model_files(
+    conn: &Connection,
+    models_dir: &std::path::Path,
+) -> Result<usize> {
+    use crate::config::QuantKind;
+    use crate::db::queries::{get_all_model_configs, get_model_files, upsert_model_file};
+    use crate::models::{pull::infer_quant_from_filename, repo_path};
+
+    let records = get_all_model_configs(conn)?;
+    let mut inserted = 0usize;
+
+    for record in records {
+        let existing = get_model_files(conn, record.id)?;
+        if !existing.is_empty() {
+            continue;
+        }
+
+        let repo_dir = repo_path(models_dir, &record.repo_id);
+        let read_dir = match std::fs::read_dir(&repo_dir) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::debug!(
+                    repo_id = %record.repo_id,
+                    dir = %repo_dir.display(),
+                    error = %e,
+                    "repair_orphaned_model_files: repo dir unreadable, skipping",
+                );
+                continue;
+            }
+        };
+
+        let mut first_mmproj: Option<String> = None;
+
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("gguf") {
+                continue;
+            }
+            let Some(filename) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+
+            let kind = QuantKind::from_filename(filename);
+            let quant = match kind {
+                QuantKind::Mmproj => None,
+                QuantKind::Model => infer_quant_from_filename(filename),
+            };
+            let size = std::fs::metadata(&path).ok().map(|m| m.len() as i64);
+
+            if let Err(e) = upsert_model_file(
+                conn,
+                record.id,
+                &record.repo_id,
+                filename,
+                quant.as_deref(),
+                None,
+                size,
+            ) {
+                tracing::warn!(
+                    repo_id = %record.repo_id,
+                    filename = %filename,
+                    error = %e,
+                    "repair_orphaned_model_files: upsert failed",
+                );
+                continue;
+            }
+            inserted += 1;
+
+            if matches!(kind, QuantKind::Mmproj) && first_mmproj.is_none() {
+                first_mmproj = Some(filename.to_string());
+            }
+
+            tracing::info!(
+                repo_id = %record.repo_id,
+                filename = %filename,
+                "repair_orphaned_model_files: reinserted row",
+            );
+        }
+
+        if record.selected_mmproj.is_none() {
+            if let Some(mmproj) = first_mmproj {
+                if let Err(e) = conn.execute(
+                    "UPDATE model_configs SET selected_mmproj = ?1 WHERE id = ?2",
+                    rusqlite::params![mmproj, record.id],
+                ) {
+                    tracing::warn!(
+                        id = record.id,
+                        error = %e,
+                        "repair_orphaned_model_files: failed to set selected_mmproj",
+                    );
+                }
+            }
+        }
+    }
+
+    if inserted > 0 {
+        tracing::info!(
+            inserted,
+            "repair_orphaned_model_files: restored {} model_files row(s) from disk",
+            inserted,
+        );
+    }
+
+    Ok(inserted)
+}
+
 // ---------------------------------------------------------------------------
 // Private legacy deserialization structs (for one-time TOML migration only)
 // ---------------------------------------------------------------------------
@@ -320,5 +439,132 @@ installed_at = 1700000000
         // File should still be renamed
         assert!(tmp.path().join("backend_registry.toml.migrated").exists());
         assert!(!tmp.path().join("backend_registry.toml").exists());
+    }
+
+    /// Simulates the state a user ends up in after the v9 FK-cascade bug:
+    /// `model_configs` still has the row, the GGUF files are on disk, but
+    /// `model_files` is empty. `repair_orphaned_model_files` must rebuild
+    /// those rows and wire `selected_mmproj` for vision models.
+    #[test]
+    fn test_repair_orphaned_model_files_rebuilds_from_disk() {
+        use crate::db::queries::{
+            get_model_files, upsert_model_config, ModelConfigRecord,
+        };
+
+        let tmp = tempfile::tempdir().unwrap();
+        let models_dir = tmp.path().join("models");
+        let repo_dir = models_dir.join("unsloth").join("Qwen3.6-35B-A3B-GGUF");
+        std::fs::create_dir_all(&repo_dir).unwrap();
+
+        std::fs::write(repo_dir.join("Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"), b"fake-gguf-1").unwrap();
+        std::fs::write(repo_dir.join("mmproj-F16.gguf"), b"fake-mmproj").unwrap();
+
+        let OpenResult { conn, .. } = open_in_memory().unwrap();
+        let now = "2026-04-16T20:00:00Z".to_string();
+        let record = ModelConfigRecord {
+            id: 0,
+            repo_id: "unsloth/Qwen3.6-35B-A3B-GGUF".to_string(),
+            display_name: None,
+            backend: "llama_cpp".to_string(),
+            enabled: true,
+            selected_quant: Some("UD-Q4_K_XL".to_string()),
+            selected_mmproj: None,
+            context_length: None,
+            gpu_layers: None,
+            port: None,
+            args: None,
+            sampling: None,
+            modalities: None,
+            profile: None,
+            api_name: None,
+            health_check: None,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        let model_id = upsert_model_config(&conn, &record).unwrap();
+
+        // Precondition: no model_files rows (the v9 cascade aftermath).
+        assert!(get_model_files(&conn, model_id).unwrap().is_empty());
+
+        let inserted = repair_orphaned_model_files(&conn, &models_dir).unwrap();
+        assert_eq!(inserted, 2, "both gguf files must be reinserted");
+
+        let files = get_model_files(&conn, model_id).unwrap();
+        let mut filenames: Vec<_> = files.iter().map(|f| f.filename.as_str()).collect();
+        filenames.sort();
+        assert_eq!(
+            filenames,
+            vec!["Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf", "mmproj-F16.gguf"]
+        );
+
+        let main = files
+            .iter()
+            .find(|f| f.filename == "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf")
+            .unwrap();
+        assert_eq!(main.quant.as_deref(), Some("UD-Q4_K_XL"));
+        assert_eq!(main.size_bytes, Some(11)); // "fake-gguf-1" byte count
+
+        // selected_mmproj must be set since the row had none and an mmproj
+        // file was discovered.
+        let selected_mmproj: Option<String> = conn
+            .query_row(
+                "SELECT selected_mmproj FROM model_configs WHERE id=?1",
+                [model_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(selected_mmproj.as_deref(), Some("mmproj-F16.gguf"));
+
+        // Second call is a no-op (rows already present).
+        let again = repair_orphaned_model_files(&conn, &models_dir).unwrap();
+        assert_eq!(again, 0, "repair must be idempotent");
+    }
+
+    /// If `selected_mmproj` is already set, the repair must not overwrite it.
+    #[test]
+    fn test_repair_preserves_existing_selected_mmproj() {
+        use crate::db::queries::{upsert_model_config, ModelConfigRecord};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let models_dir = tmp.path().join("models");
+        let repo_dir = models_dir.join("u").join("r");
+        std::fs::create_dir_all(&repo_dir).unwrap();
+        std::fs::write(repo_dir.join("mmproj-F16.gguf"), b"x").unwrap();
+        std::fs::write(repo_dir.join("model-Q4_K_M.gguf"), b"x").unwrap();
+
+        let OpenResult { conn, .. } = open_in_memory().unwrap();
+        let now = "2026-04-16T20:00:00Z".to_string();
+        let record = ModelConfigRecord {
+            id: 0,
+            repo_id: "u/r".to_string(),
+            display_name: None,
+            backend: "llama_cpp".to_string(),
+            enabled: true,
+            selected_quant: Some("Q4_K_M".to_string()),
+            selected_mmproj: Some("user-chosen.gguf".to_string()),
+            context_length: None,
+            gpu_layers: None,
+            port: None,
+            args: None,
+            sampling: None,
+            modalities: None,
+            profile: None,
+            api_name: None,
+            health_check: None,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        let id = upsert_model_config(&conn, &record).unwrap();
+
+        repair_orphaned_model_files(&conn, &models_dir).unwrap();
+
+        let selected_mmproj: Option<String> = conn
+            .query_row(
+                "SELECT selected_mmproj FROM model_configs WHERE id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(selected_mmproj.as_deref(), Some("user-chosen.gguf"));
     }
 }

@@ -11,12 +11,29 @@ pub type Migration = (i32, &'static str);
 /// Version number for the latest migration
 pub const LATEST_VERSION: i32 = 9;
 
+/// Migrations that rebuild a parent table via DROP + RENAME. SQLite with
+/// `foreign_keys=ON` performs an implicit DELETE on the dropped table which
+/// fires `ON DELETE CASCADE` on referencing tables (e.g. `model_files.model_id
+/// REFERENCES model_configs(id) ON DELETE CASCADE`) and wipes their rows.
+/// `PRAGMA defer_foreign_keys` defers enforcement checks but NOT cascade
+/// actions, and `PRAGMA foreign_keys` is a no-op inside a transaction. The
+/// only safe fix is to toggle `foreign_keys=OFF` around the entire migration
+/// from outside the transaction.
+const FK_OFF_MIGRATIONS: &[i32] = &[9];
+
 /// Run all applicable migrations on the database
 ///
 /// Reads current `user_version`, applies any migrations with a higher version number.
 /// Each individual migration runs in its own transaction. After each successful
 /// migration, updates `user_version` to that migration's version.
 pub fn run(conn: &Connection) -> anyhow::Result<()> {
+    run_up_to(conn, i32::MAX)
+}
+
+/// Run migrations only up to (and including) `target_version`. Primarily for
+/// tests that need to simulate a pre-release schema (e.g. insert rows against
+/// the v8 schema before running v9 to verify FK cascade behaviour).
+pub(crate) fn run_up_to(conn: &Connection, target_version: i32) -> anyhow::Result<()> {
     // Define all migrations in order.
     // Each tuple uses an explicit version literal (not the LATEST_VERSION constant)
     // so that adding a new migration never accidentally changes an existing version number.
@@ -241,10 +258,13 @@ pub fn run(conn: &Connection) -> anyhow::Result<()> {
                 -- config-key normalisation) routinely lowercase them, so a
                 -- binary UNIQUE index produced duplicate rows for the same repo.
 
-                -- Defer FK checks until commit. model_files / model_pulls
-                -- reference model_configs(id); INSERT SELECT preserves the old
-                -- ids, so the refs still resolve after the rename.
-                PRAGMA defer_foreign_keys = ON;
+                -- The migration runner toggles `PRAGMA foreign_keys=OFF`
+                -- around this migration (see `FK_OFF_MIGRATIONS`). That is
+                -- required because the `DROP TABLE` below would otherwise
+                -- fire `ON DELETE CASCADE` on `model_files` / `model_pulls`
+                -- and wipe every referencing row. `defer_foreign_keys` does
+                -- NOT prevent cascade actions, only deferred enforcement
+                -- checks, so it is the wrong tool here.
 
                 -- Deduplicate any existing rows that differ only by case
                 -- (keep the row with the lowest id). Without this, the new
@@ -297,13 +317,24 @@ pub fn run(conn: &Connection) -> anyhow::Result<()> {
         conn.pragma_query_value::<i32, _>(None, "user_version", |row| row.get(0))?;
 
     for (version, sql) in migrations {
-        if *version > current_version {
+        if *version > current_version && *version <= target_version {
+            let fk_off = FK_OFF_MIGRATIONS.contains(version);
+            // PRAGMA foreign_keys must be toggled outside any transaction —
+            // it is a no-op inside one. For rebuild-style migrations we need
+            // FKs off so DROP TABLE on the parent does not cascade-delete
+            // rows in referencing tables.
+            if fk_off {
+                conn.execute_batch("PRAGMA foreign_keys=OFF;")?;
+            }
             // Run each migration in its own transaction so a crash mid-migration
             // leaves the DB in a consistent state (user_version only updates on commit).
             let tx = conn.unchecked_transaction()?;
             tx.execute_batch(sql)?;
             tx.execute_batch(&format!("PRAGMA user_version = {version};"))?;
             tx.commit()?;
+            if fk_off {
+                conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+            }
             tracing::debug!("Applied migration to version {}", version);
         }
     }
@@ -455,5 +486,79 @@ mod tests {
 
         // Also verify the full migration applies cleanly on an empty DB.
         run(&conn).unwrap();
+    }
+
+    /// Regression test for the v9 FK-cascade bug. Before the fix, running v9
+    /// on a DB with existing `model_files` rows would wipe those rows because
+    /// `DROP TABLE model_configs` (with `foreign_keys=ON`) performs an
+    /// implicit `DELETE FROM model_configs`, which cascades through
+    /// `ON DELETE CASCADE` to `model_files`. The migration must preserve all
+    /// referencing rows.
+    #[test]
+    fn test_migration_v9_preserves_model_files_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+
+        // Bring the DB up to v8 — the pre-v9 schema where model_configs
+        // exists with a case-sensitive UNIQUE constraint on repo_id.
+        run_up_to(&conn, 8).unwrap();
+
+        // Seed a model_configs row and two model_files rows that reference it.
+        conn.execute(
+            "INSERT INTO model_configs (id, repo_id, backend) VALUES (1, 'unsloth/Qwen3.6-35B-A3B-GGUF', 'llama_cpp')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO model_files (model_id, repo_id, filename, quant, size_bytes, downloaded_at, kind) \
+             VALUES (1, 'unsloth/Qwen3.6-35B-A3B-GGUF', 'Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf', 'UD-Q4_K_XL', 22360456160, '2026-04-16T20:00:00Z', 'model')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO model_files (model_id, repo_id, filename, quant, size_bytes, downloaded_at, kind) \
+             VALUES (1, 'unsloth/Qwen3.6-35B-A3B-GGUF', 'mmproj-F16.gguf', NULL, 899283680, '2026-04-16T20:00:00Z', 'mmproj')",
+            [],
+        )
+        .unwrap();
+
+        // Sanity: rows are present before the migration.
+        let files_before: i64 = conn
+            .query_row("SELECT COUNT(*) FROM model_files", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(files_before, 2);
+
+        // Apply v9.
+        run(&conn).unwrap();
+
+        // The model_configs row must survive (same id, same repo_id).
+        let configs_after: i64 = conn
+            .query_row("SELECT COUNT(*) FROM model_configs WHERE id=1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            configs_after, 1,
+            "model_configs row 1 must survive the rebuild"
+        );
+
+        // All referencing model_files rows must survive. Before the fix this
+        // was 0 because DROP TABLE cascaded.
+        let files_after: i64 = conn
+            .query_row("SELECT COUNT(*) FROM model_files WHERE model_id=1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            files_after, 2,
+            "both model_files rows must survive migration v9"
+        );
+
+        // Foreign keys must be re-enabled after the migration completes, so
+        // subsequent DB activity enforces referential integrity.
+        let fk_on: i32 = conn
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .unwrap();
+        assert_eq!(fk_on, 1, "foreign_keys must be re-enabled after migration");
     }
 }

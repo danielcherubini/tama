@@ -31,6 +31,22 @@ impl ProxyServer {
                 }
             }
 
+            // Repair model_configs rows whose model_files were wiped by the
+            // v9 FK-cascade bug. No-op when rows are intact.
+            {
+                let config = state.config.read().await;
+                match config.models_dir() {
+                    Ok(models_dir) => {
+                        if let Err(e) =
+                            crate::db::backfill::repair_orphaned_model_files(&conn, &models_dir)
+                        {
+                            tracing::warn!("repair_orphaned_model_files failed: {}", e);
+                        }
+                    }
+                    Err(e) => tracing::debug!("models_dir unavailable for repair scan: {}", e),
+                }
+            }
+
             match crate::db::load_model_configs(&conn) {
                 Ok(db_models) if !db_models.is_empty() => {
                     tracing::info!("Loaded {} models from database", db_models.len());
