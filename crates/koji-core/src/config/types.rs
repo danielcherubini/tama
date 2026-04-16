@@ -268,7 +268,7 @@ impl ModelConfig {
                 .api_name
                 .clone()
                 .filter(|s| !s.is_empty())
-                .or_else(|| Some(record.repo_id.to_lowercase())),
+                .or_else(|| Some(record.repo_id.clone())),
             port: record.port,
             context_length: record.context_length,
             gpu_layers: record.gpu_layers,
