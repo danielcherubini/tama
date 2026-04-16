@@ -271,7 +271,7 @@ fn spawn_download_job(
         // destination and known-good. setup_model_after_pull creates the
         // matching model_configs row, which the model_files row below FKs to.
         if outcome.passed {
-            setup_model_after_pull(
+            let model_id = setup_model_after_pull(
                 Arc::clone(&state_clone),
                 &repo_id_clone,
                 &spec_clone,
@@ -280,31 +280,73 @@ fn spawn_download_job(
             .await;
 
             // Persist the hash + verification state to model_files now that
-            // the parent model_configs row exists.
-            if let Some(dir) = state_clone.db_dir.as_ref() {
-                if let Ok(open_res) = crate::db::open(dir) {
-                    let conn = open_res.conn;
-                    if let Ok(Some(rec)) = crate::db::queries::get_model_config_by_repo_id(
-                        &conn,
-                        &repo_id_clone,
-                    ) {
-                        let _ = crate::db::queries::upsert_model_file(
+            // the parent model_configs row exists. Use the id returned by
+            // setup_model_after_pull so there's no case-sensitive lookup in
+            // between that could miss.
+            match (state_clone.db_dir.as_ref(), model_id) {
+                (Some(dir), Some(mid)) => match crate::db::open(dir) {
+                    Ok(open_res) => {
+                        let conn = open_res.conn;
+                        if let Err(e) = crate::db::queries::upsert_model_file(
                             &conn,
-                            rec.id,
+                            mid,
                             &repo_id_clone,
                             &filename_clone,
                             spec_clone.quant.as_deref(),
                             outcome.expected_sha.as_deref(),
                             Some(bytes as i64),
-                        );
-                        let _ = crate::db::queries::update_verification(
+                        ) {
+                            tracing::error!(
+                                job_id = %job_id_clone,
+                                model_id = mid,
+                                file = %filename_clone,
+                                error = %e,
+                                "upsert_model_file failed"
+                            );
+                        } else {
+                            tracing::info!(
+                                job_id = %job_id_clone,
+                                model_id = mid,
+                                file = %filename_clone,
+                                "model_files row written"
+                            );
+                        }
+                        if let Err(e) = crate::db::queries::update_verification(
                             &conn,
-                            rec.id,
+                            mid,
                             &filename_clone,
                             outcome.ok,
                             outcome.err.as_deref(),
+                        ) {
+                            tracing::warn!(
+                                job_id = %job_id_clone,
+                                model_id = mid,
+                                file = %filename_clone,
+                                error = %e,
+                                "update_verification failed"
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            job_id = %job_id_clone,
+                            error = %e,
+                            "failed to open DB to persist model_files"
                         );
                     }
+                },
+                (None, _) => {
+                    tracing::warn!(
+                        job_id = %job_id_clone,
+                        "db_dir not configured — model_files row skipped"
+                    );
+                }
+                (Some(_), None) => {
+                    tracing::error!(
+                        job_id = %job_id_clone,
+                        repo = %repo_id_clone,
+                        "setup_model_after_pull returned no model_id — model_files skipped"
+                    );
                 }
             }
         }
@@ -712,12 +754,16 @@ pub(crate) async fn _setup_model_after_pull_with_config(
 /// Called after a quant download completes. Updates the model card, saves config to
 /// disk, and — critically — also inserts the new model entry into the live
 /// `ProxyState.config` so it appears immediately in the models list without a restart.
+///
+/// Returns the integer model_configs id when the row was (re)saved, so the
+/// caller can persist related rows (model_files) against it without a second
+/// lookup that could miss due to case or key drift.
 pub(crate) async fn setup_model_after_pull(
     state: Arc<ProxyState>,
     repo_id: &str,
     spec: &QuantDownloadSpec,
     dest_dir: &std::path::Path,
-) {
+) -> Option<i64> {
     let _guard = CONFIG_WRITE_LOCK.lock().await;
     let config = state.config.read().await;
     let mut model_configs = state.model_configs.write().await;
@@ -725,6 +771,7 @@ pub(crate) async fn setup_model_after_pull(
         _setup_model_after_pull_with_config(&config, &mut model_configs, repo_id, spec, dest_dir)
             .await;
 
+    let mut saved_id: Option<i64> = None;
     if let Some(key) = model_key {
         if let Some(conn) = state.open_db() {
             let save_result = model_configs
@@ -732,6 +779,7 @@ pub(crate) async fn setup_model_after_pull(
                 .map(|mc| crate::db::save_model_config(&conn, &key, mc));
             match save_result {
                 Some(Ok(id)) => {
+                    saved_id = Some(id);
                     if let Some(mc_mut) = model_configs.get_mut(&key) {
                         mc_mut.db_id = Some(id);
                     }
@@ -743,6 +791,7 @@ pub(crate) async fn setup_model_after_pull(
             }
         }
     }
+    saved_id
     // _guard dropped here, releasing the lock
     // config write guard also dropped here, making the new model entry visible immediately
 }
