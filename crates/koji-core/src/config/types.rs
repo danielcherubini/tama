@@ -222,6 +222,7 @@ impl ModelConfig {
     pub fn to_db_record(&self, repo_id: &str) -> crate::db::queries::ModelConfigRecord {
         let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         crate::db::queries::ModelConfigRecord {
+            id: 0, // auto-generated on insert
             repo_id: repo_id.to_string(),
             display_name: self.display_name.clone(),
             backend: self.backend.clone(),

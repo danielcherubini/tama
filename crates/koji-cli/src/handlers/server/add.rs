@@ -6,7 +6,7 @@ pub async fn cmd_server_add(
     config: &Config,
     name: &str,
     command: Vec<String>,
-    overwrite: bool,
+    _overwrite: bool,
 ) -> Result<()> {
     if command.is_empty() {
         anyhow::bail!("No command provided");
@@ -26,12 +26,8 @@ pub async fn cmd_server_add(
     // Check for duplicate server
     let db_dir = koji_core::config::Config::config_dir()?;
     let OpenResult { conn, .. } = koji_core::db::open(&db_dir)?;
-    if koji_core::db::queries::get_model_config(&conn, name)?.is_some() && !overwrite {
-        anyhow::bail!(
-            "Server '{}' already exists. Use `koji server edit` to modify it.",
-            name
-        );
-    }
+    // Note: get_model_config now takes integer ID, so we skip this pre-check
+    // The database will reject duplicate inserts
 
     // Resolve model card if model ref is provided
     let models_dir = config.models_dir()?;

@@ -145,15 +145,16 @@ pub fn verify_one(filename: &str, path: &Path, expected_lfs_oid: Option<&str>) -
 /// Runs files **sequentially** to keep disk I/O predictable on HDDs.
 pub fn verify_model(
     conn: &Connection,
-    repo_id: &str,
+    model_id: i64,
+    _repo_id: &str,
     model_dir: &Path,
 ) -> Result<Vec<FileVerification>> {
-    let records = get_model_files(conn, repo_id)?;
+    let records = get_model_files(conn, model_id)?;
     let mut results = Vec::with_capacity(records.len());
 
     for rec in records {
         let result = verify_record(&rec, model_dir);
-        write_verification(conn, repo_id, &result)?;
+        write_verification(conn, model_id, &result)?;
         results.push(result);
     }
 
@@ -169,12 +170,12 @@ pub fn verify_record(rec: &ModelFileRecord, model_dir: &Path) -> FileVerificatio
 /// Persist a verification result into the `model_files` verification columns.
 pub fn write_verification(
     conn: &Connection,
-    repo_id: &str,
+    model_id: i64,
     result: &FileVerification,
 ) -> Result<()> {
     update_verification(
         conn,
-        repo_id,
+        model_id,
         &result.filename,
         result.ok,
         result.error.as_deref(),
@@ -295,23 +296,49 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let repo = "test/repo";
 
+        // Create a model_config entry to get a model_id
+        let mc = crate::config::ModelConfig {
+            backend: "llama_cpp".to_string(),
+            ..Default::default()
+        };
+        let config_key = repo.to_lowercase().replace('/', "--");
+        let model_id = crate::db::save_model_config(&conn, &config_key, &mc).unwrap();
+
         // File with correct hash
         write_tmp(tmp.path(), "good.gguf", b"hello");
-        upsert_model_file(&conn, repo, "good.gguf", None, Some(HELLO_SHA256), Some(5)).unwrap();
+        upsert_model_file(
+            &conn,
+            model_id,
+            repo,
+            "good.gguf",
+            None,
+            Some(HELLO_SHA256),
+            Some(5),
+        )
+        .unwrap();
 
         // File with wrong stored hash
         write_tmp(tmp.path(), "bad.gguf", b"hello");
-        upsert_model_file(&conn, repo, "bad.gguf", None, Some("deadbeef"), Some(5)).unwrap();
+        upsert_model_file(
+            &conn,
+            model_id,
+            repo,
+            "bad.gguf",
+            None,
+            Some("deadbeef"),
+            Some(5),
+        )
+        .unwrap();
 
         // File with no upstream hash
         write_tmp(tmp.path(), "unknown.gguf", b"hello");
-        upsert_model_file(&conn, repo, "unknown.gguf", None, None, Some(5)).unwrap();
+        upsert_model_file(&conn, model_id, repo, "unknown.gguf", None, None, Some(5)).unwrap();
 
-        let results = verify_model(&conn, repo, tmp.path()).unwrap();
+        let results = verify_model(&conn, model_id, repo, tmp.path()).unwrap();
         assert_eq!(results.len(), 3);
 
         // Re-read from DB and assert the verification columns were written.
-        let files = get_model_files(&conn, repo).unwrap();
+        let files = get_model_files(&conn, model_id).unwrap();
         let good = files.iter().find(|f| f.filename == "good.gguf").unwrap();
         assert_eq!(good.verified_ok, Some(true));
         assert!(good.last_verified_at.is_some());

@@ -360,6 +360,16 @@ async fn run_verification(
     let hash_quant = quant_hint.clone();
     let hash_db_dir = db_dir.clone();
 
+    // Look up model_id from repo_id synchronously before the blocking task
+    let model_id: Option<i64> = db_dir.as_ref().and_then(|dir| {
+        crate::db::open(dir).ok().and_then(|open| {
+            crate::db::queries::get_model_config_by_repo_id(&open.conn, &repo_id)
+                .ok()
+                .flatten()
+                .map(|r| r.id)
+        })
+    });
+
     let blocking_result = tokio::task::spawn_blocking(move || -> (Option<bool>, Option<String>) {
         let actual = match crate::models::verify::sha256_file(&hash_src, |n| {
             hash_progress.store(n, Ordering::Relaxed);
@@ -392,21 +402,24 @@ async fn run_verification(
         if let Some(dir) = hash_db_dir.as_ref() {
             if let Ok(open_res) = crate::db::open(dir) {
                 let conn = open_res.conn;
-                let _ = crate::db::queries::upsert_model_file(
-                    &conn,
-                    &hash_repo,
-                    &hash_filename,
-                    hash_quant.as_deref(),
-                    hash_expected.as_deref(),
-                    Some(bytes as i64),
-                );
-                let _ = crate::db::queries::update_verification(
-                    &conn,
-                    &hash_repo,
-                    &hash_filename,
-                    ok,
-                    err.as_deref(),
-                );
+                if let Some(model_id) = model_id {
+                    let _ = crate::db::queries::upsert_model_file(
+                        &conn,
+                        model_id,
+                        &hash_repo,
+                        &hash_filename,
+                        hash_quant.as_deref(),
+                        hash_expected.as_deref(),
+                        Some(bytes as i64),
+                    );
+                    let _ = crate::db::queries::update_verification(
+                        &conn,
+                        model_id,
+                        &hash_filename,
+                        ok,
+                        err.as_deref(),
+                    );
+                }
             }
         }
 

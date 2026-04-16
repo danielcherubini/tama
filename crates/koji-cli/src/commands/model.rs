@@ -361,7 +361,13 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
             needs_backfill: _,
         } = koji_core::db::open(&db_dir)?;
 
-        koji_core::db::queries::upsert_model_pull(&conn, repo_id, &listing.commit_sha)?;
+        // Look up model_id before DB writes
+        let model_id = match koji_core::db::queries::get_model_config_by_repo_id(&conn, repo_id)? {
+            Some(r) => r.id,
+            None => anyhow::bail!("Model not found in DB: {}", repo_id),
+        };
+
+        koji_core::db::queries::upsert_model_pull(&conn, model_id, repo_id, &listing.commit_sha)?;
 
         let now = manual_timestamp();
         for df in &downloaded_files {
@@ -377,6 +383,7 @@ async fn cmd_pull(config: &Config, repo_id: &str) -> Result<()> {
 
             koji_core::db::queries::upsert_model_file(
                 &conn,
+                model_id,
                 repo_id,
                 &df.filename,
                 df.quant.as_deref(),
@@ -528,15 +535,9 @@ async fn cmd_create(
             .context("Config name input cancelled")?,
     };
 
-    // Resolve DB and check if server name already exists
+    // Resolve DB
     let db_dir = koji_core::config::Config::config_dir()?;
     let OpenResult { conn, .. } = koji_core::db::open(&db_dir)?;
-    if koji_core::db::queries::get_model_config(&conn, &server_name)?.is_some() {
-        anyhow::bail!(
-            "Server '{}' already exists. Use `koji server edit` or choose a different name.",
-            server_name
-        );
-    }
 
     // Resolve backend
     let resolved_backend_key = match backend_arg {
@@ -674,7 +675,10 @@ fn cmd_rm(config: &Config, model_id: &str) -> Result<()> {
     } else {
         &model.card.model.source
     };
-    let _ = koji_core::db::queries::delete_model_records(&conn, repo_key);
+    // Look up model_id for DB deletion
+    if let Some(record) = koji_core::db::queries::get_model_config_by_repo_id(&conn, repo_key)? {
+        let _ = koji_core::db::queries::delete_model_records(&conn, record.id);
+    }
 
     println!("Removed model '{}'.", model_id);
     Ok(())
@@ -872,8 +876,18 @@ async fn cmd_update(
                 .and_then(|b| b.get(&file_info.filename))
                 .and_then(|b| b.lfs_sha256.as_deref());
 
+            // Look up model_id for DB writes
+            let model_id =
+                match koji_core::db::queries::get_model_config_by_repo_id(&conn, repo_id)? {
+                    Some(r) => r.id,
+                    None => {
+                        tracing::warn!("Model {} not in DB, skipping", repo_id);
+                        continue;
+                    }
+                };
             let _ = koji_core::db::queries::upsert_model_file(
                 &conn,
+                model_id,
                 repo_id,
                 &file_info.filename,
                 file_info.quant.as_deref(),
@@ -911,7 +925,12 @@ async fn cmd_update(
         card.save(&model.card_path)?;
 
         // Update DB pull record with new commit SHA
-        let _ = koji_core::db::queries::upsert_model_pull(&conn, repo_id, &listing.commit_sha);
+        let model_id =
+            koji_core::db::queries::get_model_config_by_repo_id(&conn, repo_id)?.map(|r| r.id);
+        if let Some(id) = model_id {
+            let _ =
+                koji_core::db::queries::upsert_model_pull(&conn, id, repo_id, &listing.commit_sha);
+        }
     }
 
     println!();
@@ -942,14 +961,14 @@ pub(crate) fn cmd_scan(config: &Config) -> Result<()> {
         dir: &std::path::Path,
         base_dir: &std::path::Path,
         conn: &koji_core::db::Connection,
-        added: &mut usize,
+        _added: &mut usize,
     ) -> anyhow::Result<()> {
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
 
             if path.is_dir() {
-                walk_and_reconcile(&path, base_dir, conn, added)?;
+                walk_and_reconcile(&path, base_dir, conn, _added)?;
             } else if path.extension().is_some_and(|e| e == "gguf") {
                 let relative_path = path.strip_prefix(base_dir)?;
                 if let Some(repo_id_path) = relative_path.parent() {
@@ -959,15 +978,14 @@ pub(crate) fn cmd_scan(config: &Config) -> Result<()> {
                         .replace(std::path::MAIN_SEPARATOR, "/");
                     let filename = path.file_name().unwrap().to_string_lossy().to_string();
 
-                    // Check if file is in DB
-                    let files = koji_core::db::queries::get_model_files(conn, &repo_id)?;
-                    if !files.iter().any(|f| f.filename == filename) {
-                        koji_core::db::queries::upsert_model_file(
-                            conn, &repo_id, &filename, None, None, None,
-                        )?;
-
-                        if koji_core::db::queries::get_model_config(conn, &repo_id)?.is_none() {
+                    // Get or create model_id
+                    let model_id = match koji_core::db::queries::get_model_config_by_repo_id(
+                        conn, &repo_id,
+                    )? {
+                        Some(r) => r.id,
+                        None => {
                             let record = koji_core::db::queries::ModelConfigRecord {
+                                id: 0,
                                 repo_id: repo_id.clone(),
                                 display_name: None,
                                 backend: "llama.cpp".to_string(),
@@ -987,8 +1005,17 @@ pub(crate) fn cmd_scan(config: &Config) -> Result<()> {
                                 updated_at: manual_timestamp(),
                             };
                             koji_core::db::queries::upsert_model_config(conn, &record)?;
+                            koji_core::db::queries::get_model_config_by_repo_id(conn, &repo_id)?
+                                .unwrap()
+                                .id
                         }
-                        *added += 1;
+                    };
+
+                    let files = koji_core::db::queries::get_model_files(conn, model_id)?;
+                    if !files.iter().any(|f| f.filename == filename) {
+                        koji_core::db::queries::upsert_model_file(
+                            conn, model_id, &repo_id, &filename, None, None, None,
+                        )?;
                     }
                 }
             }
@@ -1006,7 +1033,7 @@ pub(crate) fn cmd_scan(config: &Config) -> Result<()> {
         let filename = file.filename;
         let path = koji_core::models::repo_path(&models_dir, &repo_id).join(&filename);
         if !path.exists() {
-            koji_core::db::queries::delete_model_file(&conn, &repo_id, &filename)?;
+            koji_core::db::queries::delete_model_file(&conn, file.model_id, &filename)?;
             removed_files += 1;
             repos_to_check.insert(repo_id);
         }
@@ -1023,7 +1050,7 @@ pub(crate) fn cmd_scan(config: &Config) -> Result<()> {
                 .map(|mut d| d.next().is_none())
                 .unwrap_or(true)
         {
-            koji_core::db::queries::delete_model_config(&conn, &repo_id)?;
+            koji_core::db::queries::delete_model_config(&conn, config.id)?;
             removed_configs += 1;
         }
     }
@@ -1222,7 +1249,9 @@ fn cmd_prune(config: &Config, dry_run: bool, yes: bool) -> Result<()> {
 
     // Clean up DB records for actually deleted files
     for (repo_id, filename) in &actually_deleted {
-        let _ = koji_core::db::queries::delete_model_file(&conn, repo_id, filename);
+        if let Some(record) = koji_core::db::queries::get_model_config_by_repo_id(&conn, repo_id)? {
+            let _ = koji_core::db::queries::delete_model_file(&conn, record.id, filename);
+        }
     }
 
     println!();
@@ -1393,11 +1422,22 @@ async fn cmd_verify(config: &Config, model_filter: Option<String>) -> Result<()>
         let model_dir = &model.dir;
         println!("{}", repo_id);
 
-        let results = match verify::verify_model(&conn, repo_id, model_dir) {
-            Ok(r) => r,
-            Err(e) => {
-                println!("  verify error: {}", e);
-                any_failed = true;
+        let model_id = koji_core::db::queries::get_model_config_by_repo_id(&conn, repo_id)
+            .ok()
+            .flatten()
+            .map(|r| r.id);
+
+        let results = match model_id {
+            Some(id) => match verify::verify_model(&conn, id, repo_id, model_dir) {
+                Ok(r) => r,
+                Err(e) => {
+                    println!("  verify error: {}", e);
+                    any_failed = true;
+                    continue;
+                }
+            },
+            None => {
+                println!("  (no DB entry — skipping verification)");
                 continue;
             }
         };
@@ -1535,8 +1575,17 @@ async fn cmd_verify_existing(
 
         println!("Model: {}", repo_id);
 
+        // Look up model_id
+        let model_id = match koji_core::db::queries::get_model_config_by_repo_id(&conn, repo_id)? {
+            Some(r) => r.id,
+            None => {
+                println!("  (no DB entry)");
+                continue;
+            }
+        };
+
         // Check if any files need hash backfilling
-        let records = match koji_core::db::queries::get_model_files(&conn, repo_id) {
+        let records = match koji_core::db::queries::get_model_files(&conn, model_id) {
             Ok(r) => r,
             Err(e) => {
                 println!("  Error reading database: {}", e);
@@ -1572,7 +1621,7 @@ async fn cmd_verify_existing(
                 Ok(_) => {
                     // Re-fetch records to see how many were successfully backfilled
                     let updated_records =
-                        match koji_core::db::queries::get_model_files(&conn, repo_id) {
+                        match koji_core::db::queries::get_model_files(&conn, model_id) {
                             Ok(r) => r,
                             Err(e) => {
                                 println!("  Error reading database: {}", e);
@@ -1604,20 +1653,24 @@ async fn cmd_verify_existing(
             }
         }
 
-        let results = match verify::verify_model(&conn, repo_id, &model_dir) {
-            Ok(r) => r,
-            Err(e) => {
-                println!("  verify error: {}", e);
-                any_failed = true;
+        let model_id = koji_core::db::queries::get_model_config_by_repo_id(&conn, repo_id)
+            .ok()
+            .flatten()
+            .map(|r| r.id);
+
+        let results = match model_id {
+            Some(id) => match verify::verify_model(&conn, id, repo_id, &model_dir) {
+                Ok(r) => r,
+                Err(e) => {
+                    println!("  verify error: {}", e);
+                    any_failed = true;
+                    continue;
+                }
+            },
+            None => {
                 continue;
             }
         };
-
-        if results.is_empty() {
-            println!("  (no files tracked)");
-            continue;
-        }
-
         for r in &results {
             total_files += 1;
             let (icon, label) = match r.ok {
@@ -1763,7 +1816,9 @@ mod tests {
         cmd_scan(&config).unwrap();
 
         // Verify it was added to DB
-        let files = koji_core::db::queries::get_model_files(conn, repo_id).unwrap();
+        let configs = koji_core::db::queries::get_all_model_configs(conn).unwrap();
+        let model_id = configs.iter().find(|c| c.repo_id == repo_id).unwrap().id;
+        let files = koji_core::db::queries::get_model_files(conn, model_id).unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].filename, filename);
 
@@ -1781,13 +1836,46 @@ mod tests {
         let filename = "missing.gguf";
 
         // Add to DB but NOT on disk
-        upsert_model_file(conn, repo_id, filename, Some("Q4"), None, Some(100)).unwrap();
+        // First create the model config
+        let record = ModelConfigRecord {
+            id: 0,
+            repo_id: repo_id.to_string(),
+            display_name: None,
+            backend: "llama.cpp".to_string(),
+            enabled: true,
+            selected_quant: None,
+            selected_mmproj: None,
+            context_length: None,
+            gpu_layers: None,
+            port: None,
+            args: None,
+            sampling: None,
+            modalities: None,
+            profile: None,
+            api_name: None,
+            health_check: None,
+            created_at: "now".to_string(),
+            updated_at: "now".to_string(),
+        };
+        upsert_model_config(conn, &record).unwrap();
+        let configs = get_all_model_configs(conn).unwrap();
+        let model_id = configs.iter().find(|c| c.repo_id == repo_id).unwrap().id;
+        upsert_model_file(
+            conn,
+            model_id,
+            repo_id,
+            filename,
+            Some("Q4"),
+            None,
+            Some(100),
+        )
+        .unwrap();
 
         // Run scan
         cmd_scan(&config).unwrap();
 
         // Verify it was removed from DB
-        let files = koji_core::db::queries::get_model_files(conn, repo_id).unwrap();
+        let files = get_model_files(conn, model_id).unwrap();
         assert!(files.is_empty());
     }
 
@@ -1798,6 +1886,7 @@ mod tests {
 
         let repo_id = "ghost/model";
         let record = ModelConfigRecord {
+            id: 1,
             repo_id: repo_id.to_string(),
             display_name: None,
             backend: "llama.cpp".to_string(),
@@ -1833,10 +1922,11 @@ mod tests {
         let (dir, config, open_res) = setup_test_env().await;
         let conn = &open_res.conn;
 
-        // Populate DB with some garbage
+        // Populate DB with some garbage (let DB assign IDs via AUTOINCREMENT)
         upsert_model_config(
             conn,
             &ModelConfigRecord {
+                id: 0,
                 repo_id: "repo1".to_string(),
                 display_name: None,
                 backend: "llama.cpp".to_string(),
@@ -1857,11 +1947,18 @@ mod tests {
             },
         )
         .unwrap();
-        upsert_model_file(conn, "repo1", "file1.gguf", None, None, None).unwrap();
+        let id1 = get_all_model_configs(conn)
+            .unwrap()
+            .iter()
+            .find(|c| c.repo_id == "repo1")
+            .unwrap()
+            .id;
+        upsert_model_file(conn, id1, "repo1", "file1.gguf", None, None, None).unwrap();
 
         upsert_model_config(
             conn,
             &ModelConfigRecord {
+                id: 0,
                 repo_id: "repo2".to_string(),
                 display_name: None,
                 backend: "llama.cpp".to_string(),
@@ -1882,7 +1979,37 @@ mod tests {
             },
         )
         .unwrap();
-        upsert_model_file(conn, "repo2", "file2.gguf", None, None, None).unwrap();
+        upsert_model_config(
+            conn,
+            &ModelConfigRecord {
+                id: 0,
+                repo_id: "repo2".to_string(),
+                display_name: None,
+                backend: "llama.cpp".to_string(),
+                enabled: true,
+                selected_quant: None,
+                selected_mmproj: None,
+                context_length: None,
+                gpu_layers: None,
+                port: None,
+                args: None,
+                sampling: None,
+                modalities: None,
+                profile: None,
+                api_name: None,
+                health_check: None,
+                created_at: "now".to_string(),
+                updated_at: "now".to_string(),
+            },
+        )
+        .unwrap();
+        let id2 = get_all_model_configs(conn)
+            .unwrap()
+            .iter()
+            .find(|c| c.repo_id == "repo2")
+            .unwrap()
+            .id;
+        upsert_model_file(conn, id2, "repo2", "file2.gguf", None, None, None).unwrap();
 
         // Models dir is empty
 
@@ -1890,7 +2017,7 @@ mod tests {
         cmd_scan(&config).unwrap();
 
         // Verify DB is clean
-        let files = koji_core::db::queries::get_model_files(conn, "repo1").unwrap();
+        let files = get_model_files(conn, id1).unwrap();
         assert!(files.is_empty());
         let configs = koji_core::db::queries::get_all_model_configs(conn).unwrap();
         assert!(configs.is_empty());

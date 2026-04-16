@@ -158,20 +158,28 @@ pub async fn check_single(
         "model" => {
             let config_dir_clone = config_dir.clone();
             let item_id_clone = item_id.clone();
-            let rid_result =
-                tokio::task::spawn_blocking(move || -> anyhow::Result<Option<String>> {
+            let rid_result = tokio::task::spawn_blocking(
+                move || -> anyhow::Result<(Option<i64>, Option<String>)> {
                     let open = koji_core::db::open(&config_dir_clone)?;
+                    // Convert config_key to repo_id to look up model_id
+                    let repo_id = koji_core::db::config_key_to_repo_id(&item_id_clone);
                     let record =
-                        koji_core::db::queries::get_model_config(&open.conn, &item_id_clone)?;
-                    Ok(record.map(|r| r.repo_id.clone()))
-                })
-                .await;
+                        koji_core::db::queries::get_model_config_by_repo_id(&open.conn, &repo_id)?;
+                    Ok(record
+                        .map(|r| (Some(r.id), Some(r.repo_id.clone())))
+                        .unwrap_or((None, None)))
+                },
+            )
+            .await;
 
             match rid_result {
-                Ok(Ok(rid)) => checker
-                    .check_model(&config_dir, &item_id, rid.as_deref())
+                Ok(Ok((Some(model_id), Some(repo_id)))) => checker
+                    .check_model(&config_dir, model_id, Some(&repo_id))
                     .await
                     .map(|_| ()),
+                Ok(Ok((None, _))) | Ok(Ok((_, None))) => {
+                    Err(anyhow::anyhow!("Model not found in DB"))
+                }
                 Ok(Err(e)) => Err(e),
                 Err(e) => Err(anyhow::anyhow!("Join error: {}", e)),
             }
@@ -382,7 +390,7 @@ pub async fn apply_backend_update(
 /// POST /api/updates/apply/model/:id - Trigger model re-pull (resolve model ID to repo_id, then trigger re-pull)
 pub async fn apply_model_update(
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
+    Path(id): Path<i64>,
 ) -> impl IntoResponse {
     let config_dir = match state.config_path.as_ref().and_then(|p| p.parent()) {
         Some(d) => d.to_path_buf(),
@@ -397,26 +405,20 @@ pub async fn apply_model_update(
 
     let res_result = tokio::task::spawn_blocking({
         let config_dir = config_dir.clone();
-        let id = id.clone();
-        move || -> anyhow::Result<(String, std::path::PathBuf)> {
+        move || -> anyhow::Result<(i64, String, std::path::PathBuf)> {
             let open = koji_core::db::open(&config_dir)?;
-            let model_record = koji_core::db::queries::get_model_config(&open.conn, &id)?
+            let model_record = koji_core::db::queries::get_model_config(&open.conn, id)?
                 .ok_or_else(|| anyhow::anyhow!("Model not found"))?;
-            let model_config = koji_core::config::ModelConfig::from_db_record(&model_record);
-
-            let repo_id = model_config
-                .model
-                .clone()
-                .ok_or_else(|| anyhow::anyhow!("Model has no source"))?;
-
+            let repo_id = model_record.repo_id;
+            let model_id = model_record.id;
             let cfg = koji_core::config::Config::load_from(&config_dir)?;
             let models_dir = cfg.models_dir()?;
-            Ok((repo_id, models_dir))
+            Ok((model_id, repo_id, models_dir))
         }
     })
     .await;
 
-    let (repo_id, models_dir) = match res_result {
+    let (model_id, repo_id, models_dir) = match res_result {
         Ok(Ok(val)) => val,
         Ok(Err(e)) => {
             return (
@@ -457,6 +459,7 @@ pub async fn apply_model_update(
                                 let open = koji_core::db::open(&config_dir)?;
                                 koji_core::db::queries::upsert_model_pull(
                                     &open.conn,
+                                    model_id,
                                     &repo_id,
                                     &commit_sha,
                                 )?;

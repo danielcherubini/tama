@@ -5,32 +5,40 @@ use rusqlite::Connection;
 
 use super::types::{DownloadLogEntry, ModelFileRecord, ModelPullRecord};
 
-/// Insert or update the pull record for a repo.
-/// Uses INSERT ... ON CONFLICT(repo_id) DO UPDATE (upsert).
+/// Insert or update the pull record for a model.
+/// Uses INSERT ... ON CONFLICT(model_id) DO UPDATE.
 /// Timestamp generated via SQLite's strftime('%Y-%m-%dT%H:%M:%fZ', 'now').
-pub fn upsert_model_pull(conn: &Connection, repo_id: &str, commit_sha: &str) -> Result<()> {
+pub fn upsert_model_pull(
+    conn: &Connection,
+    model_id: i64,
+    repo_id: &str,
+    commit_sha: &str,
+) -> Result<()> {
     conn.execute(
-        "INSERT INTO model_pulls (repo_id, commit_sha, pulled_at)
-         VALUES (?1, ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-         ON CONFLICT(repo_id) DO UPDATE SET
-             commit_sha = excluded.commit_sha,
-             pulled_at  = excluded.pulled_at",
-        (repo_id, commit_sha),
+        "INSERT INTO model_pulls (model_id, repo_id, commit_sha, pulled_at)
+         VALUES (?1, ?2, ?3, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT(model_id) DO UPDATE SET
+             repo_id     = excluded.repo_id,
+             commit_sha  = excluded.commit_sha,
+             pulled_at   = excluded.pulled_at",
+        (model_id, repo_id, commit_sha),
     )?;
     Ok(())
 }
 
-/// Get the stored pull record for a repo. Returns None if never pulled.
-pub fn get_model_pull(conn: &Connection, repo_id: &str) -> Result<Option<ModelPullRecord>> {
+/// Get the stored pull record for a model. Returns None if never pulled.
+pub fn get_model_pull(conn: &Connection, model_id: i64) -> Result<Option<ModelPullRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT repo_id, commit_sha, pulled_at
-         FROM model_pulls WHERE repo_id = ?1",
+        "SELECT id, model_id, repo_id, commit_sha, pulled_at
+         FROM model_pulls WHERE model_id = ?1",
     )?;
-    let mut rows = stmt.query_map([repo_id], |row| {
+    let mut rows = stmt.query_map([model_id], |row| {
         Ok(ModelPullRecord {
-            repo_id: row.get(0)?,
-            commit_sha: row.get(1)?,
-            pulled_at: row.get(2)?,
+            id: row.get(0)?,
+            model_id: row.get(1)?,
+            repo_id: row.get(2)?,
+            commit_sha: row.get(3)?,
+            pulled_at: row.get(4)?,
         })
     })?;
     match rows.next() {
@@ -40,15 +48,15 @@ pub fn get_model_pull(conn: &Connection, repo_id: &str) -> Result<Option<ModelPu
 }
 
 /// Insert or update a file record for a downloaded GGUF.
-/// Uses INSERT ... ON CONFLICT(repo_id, filename) DO UPDATE.
+/// Uses INSERT ... ON CONFLICT(model_id, filename) DO UPDATE.
 /// Timestamp generated via SQLite's strftime('%Y-%m-%dT%H:%M:%fZ', 'now').
 ///
 /// **Verification state preservation:** if a row already exists and the incoming
-/// `lfs_oid` equals the stored one, the existing `last_verified_at` / `verified_ok`
-/// / `verify_error` fields are preserved. If the hash changed (file was re-uploaded
-/// on HF) the verification columns are cleared so the file will be re-verified.
+/// `lfs_oid` equals the stored one, the existing verification fields are preserved.
+/// If the hash changed the verification columns are cleared so the file will be re-verified.
 pub fn upsert_model_file(
     conn: &Connection,
+    model_id: i64,
     repo_id: &str,
     filename: &str,
     quant: Option<&str>,
@@ -57,9 +65,10 @@ pub fn upsert_model_file(
 ) -> Result<()> {
     conn.execute(
         "INSERT INTO model_files
-             (repo_id, filename, quant, lfs_oid, size_bytes, downloaded_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-         ON CONFLICT(repo_id, filename) DO UPDATE SET
+             (model_id, repo_id, filename, quant, lfs_oid, size_bytes, downloaded_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT(model_id, filename) DO UPDATE SET
+             repo_id       = excluded.repo_id,
              quant         = excluded.quant,
              lfs_oid       = excluded.lfs_oid,
              size_bytes    = excluded.size_bytes,
@@ -74,7 +83,7 @@ pub fn upsert_model_file(
              verify_error = CASE
                  WHEN model_files.lfs_oid IS NOT excluded.lfs_oid THEN NULL
                  ELSE model_files.verify_error END",
-        (repo_id, filename, quant, lfs_oid, size_bytes),
+        (model_id, repo_id, filename, quant, lfs_oid, size_bytes),
     )?;
     Ok(())
 }
@@ -82,23 +91,18 @@ pub fn upsert_model_file(
 /// Update the verification columns for a single file.
 ///
 /// - `verified_ok = Some(true)`: hash matched; `verify_error` cleared.
-/// - `verified_ok = Some(false)`: hash mismatch or verification failure; caller
-///   should supply a short `verify_error` message.
-/// - `verified_ok = None`: no upstream hash available; `verify_error` optionally
-///   set to a reason like `"no upstream hash"`.
+/// - `verified_ok = Some(false)`: hash mismatch; caller should supply a short `verify_error`.
+/// - `verified_ok = None`: no upstream hash available.
 ///
 /// `last_verified_at` is set to the current time via SQLite's `strftime`.
-/// The file row must already exist (caller is responsible for ensuring it does
-/// via `upsert_model_file` at download time).
 pub fn update_verification(
     conn: &Connection,
-    repo_id: &str,
+    model_id: i64,
     filename: &str,
     verified_ok: Option<bool>,
     verify_error: Option<&str>,
 ) -> Result<()> {
     let verified_ok_int = verified_ok.map(|b| b as i64);
-    // When verified_ok is Some(true), pass NULL for verify_error to clear it
     let verify_error_param = if verified_ok == Some(true) {
         None
     } else {
@@ -109,43 +113,91 @@ pub fn update_verification(
               last_verified_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
               verified_ok      = ?3,
               verify_error     = ?4
-          WHERE repo_id = ?1 AND filename = ?2",
-        (repo_id, filename, verified_ok_int, verify_error_param),
+          WHERE model_id = ?1 AND filename = ?2",
+        (model_id, filename, verified_ok_int, verify_error_param),
     )?;
     if affected == 0 {
         anyhow::bail!(
-            "update_verification: no row found for repo_id={} filename={} \
-             (call upsert_model_file first)",
-            repo_id,
+            "update_verification: no row found for model_id={} filename={}",
+            model_id,
             filename
         );
     }
     Ok(())
 }
 
-/// Get all stored file records for a repo.
-pub fn get_model_files(conn: &Connection, repo_id: &str) -> Result<Vec<ModelFileRecord>> {
+/// Get all stored file records for a model.
+pub fn get_model_files(conn: &Connection, model_id: i64) -> Result<Vec<ModelFileRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT repo_id, filename, quant, lfs_oid, size_bytes, downloaded_at,
+        "SELECT id, model_id, repo_id, filename, quant, lfs_oid, size_bytes, downloaded_at,
                 last_verified_at, verified_ok, verify_error
-         FROM model_files WHERE repo_id = ?1",
+         FROM model_files WHERE model_id = ?1",
     )?;
-    let rows = stmt.query_map([repo_id], |row| {
-        let verified_ok: Option<i64> = row.get(7)?;
+    let rows = stmt.query_map([model_id], |row| {
+        let verified_ok: Option<i64> = row.get(9)?;
         Ok(ModelFileRecord {
-            repo_id: row.get(0)?,
-            filename: row.get(1)?,
-            quant: row.get(2)?,
-            lfs_oid: row.get(3)?,
-            size_bytes: row.get(4)?,
-            downloaded_at: row.get(5)?,
-            last_verified_at: row.get(6)?,
+            id: row.get(0)?,
+            model_id: row.get(1)?,
+            repo_id: row.get(2)?,
+            filename: row.get(3)?,
+            quant: row.get(4)?,
+            lfs_oid: row.get(5)?,
+            size_bytes: row.get(6)?,
+            downloaded_at: row.get(7)?,
+            last_verified_at: row.get(8)?,
             verified_ok: verified_ok.map(|v| v != 0),
-            verify_error: row.get(8)?,
+            verify_error: row.get(10)?,
         })
     })?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .map_err(Into::into)
+}
+
+/// Get all stored file records across all models.
+pub fn get_all_model_files(conn: &Connection) -> Result<Vec<ModelFileRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, model_id, repo_id, filename, quant, lfs_oid, size_bytes, downloaded_at,
+                last_verified_at, verified_ok, verify_error
+         FROM model_files",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        let verified_ok: Option<i64> = row.get(9)?;
+        Ok(ModelFileRecord {
+            id: row.get(0)?,
+            model_id: row.get(1)?,
+            repo_id: row.get(2)?,
+            filename: row.get(3)?,
+            quant: row.get(4)?,
+            lfs_oid: row.get(5)?,
+            size_bytes: row.get(6)?,
+            downloaded_at: row.get(7)?,
+            last_verified_at: row.get(8)?,
+            verified_ok: verified_ok.map(|v| v != 0),
+            verify_error: row.get(10)?,
+        })
+    })?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
+}
+
+/// Delete all records for a model (model_pulls, model_files cascade automatically).
+/// Does NOT delete download_log entries (they're historical).
+pub fn delete_model_records(conn: &Connection, model_id: i64) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM model_configs WHERE id = ?1", [model_id])?;
+    // model_pulls and model_files are deleted by ON DELETE CASCADE
+    tx.commit()?;
+    Ok(())
+}
+
+/// Delete a single model file record by (model_id, filename).
+/// Does NOT touch model_pulls — the pull record stays.
+pub fn delete_model_file(conn: &Connection, model_id: i64, filename: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM model_files WHERE model_id = ?1 AND filename = ?2",
+        (model_id, filename),
+    )?;
+    Ok(())
 }
 
 /// Log a download event (append-only).
@@ -169,59 +221,6 @@ pub fn log_download(conn: &Connection, entry: &DownloadLogEntry) -> Result<()> {
     Ok(())
 }
 
-/// Delete all records for a repo (model_pulls, model_files).
-/// Does NOT delete download_log entries (they're historical).
-/// Both deletes run in a single transaction — either both succeed or neither does.
-pub fn delete_model_records(conn: &Connection, repo_id: &str) -> Result<()> {
-    let tx = conn.unchecked_transaction()?;
-    _delete_model_records(&tx, repo_id)?;
-    tx.commit()?;
-    Ok(())
-}
-
-/// Internal helper to delete model records without starting a transaction.
-pub(crate) fn _delete_model_records(conn: &Connection, repo_id: &str) -> Result<()> {
-    conn.execute("DELETE FROM model_pulls WHERE repo_id = ?1", [repo_id])?;
-    conn.execute("DELETE FROM model_files WHERE repo_id = ?1", [repo_id])?;
-    Ok(())
-}
-
-/// Delete a single model file record by (repo_id, filename).
-/// Does NOT touch model_pulls — the repo-level pull record stays.
-/// Use this when removing a single quant from a model, not the entire model.
-pub fn delete_model_file(conn: &Connection, repo_id: &str, filename: &str) -> Result<()> {
-    conn.execute(
-        "DELETE FROM model_files WHERE repo_id = ?1 AND filename = ?2",
-        [repo_id, filename],
-    )?;
-    Ok(())
-}
-
-/// Get all stored file records across all repos.
-pub fn get_all_model_files(conn: &Connection) -> Result<Vec<ModelFileRecord>> {
-    let mut stmt = conn.prepare(
-        "SELECT repo_id, filename, quant, lfs_oid, size_bytes, downloaded_at,
-                last_verified_at, verified_ok, verify_error
-         FROM model_files",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let verified_ok: Option<i64> = row.get(7)?;
-        Ok(ModelFileRecord {
-            repo_id: row.get(0)?,
-            filename: row.get(1)?,
-            quant: row.get(2)?,
-            lfs_oid: row.get(3)?,
-            size_bytes: row.get(4)?,
-            downloaded_at: row.get(5)?,
-            last_verified_at: row.get(6)?,
-            verified_ok: verified_ok.map(|v| v != 0),
-            verify_error: row.get(8)?,
-        })
-    })?;
-    rows.collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(Into::into)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,12 +229,15 @@ mod tests {
 
     #[test]
     fn test_delete_model_file() {
-        // Create in-memory SQLite DB with migrations
         let OpenResult { conn, .. } = db::open_in_memory().unwrap();
 
-        // Insert a model file record
+        // Insert a model config first (required for FK)
+        db::save_model_config(&conn, "test-repo", &Default::default()).unwrap();
+
+        // Insert a model file record via upsert
         upsert_model_file(
             &conn,
+            1,
             "test-repo",
             "test-model.Q4_K_M.gguf",
             Some("Q4_K_M"),
@@ -245,26 +247,27 @@ mod tests {
         .unwrap();
 
         // Verify it exists
-        let files_before = get_model_files(&conn, "test-repo").unwrap();
+        let files_before = get_model_files(&conn, 1).unwrap();
         assert_eq!(files_before.len(), 1);
         assert_eq!(files_before[0].filename, "test-model.Q4_K_M.gguf");
 
         // Delete the file record
-        delete_model_file(&conn, "test-repo", "test-model.Q4_K_M.gguf").unwrap();
+        delete_model_file(&conn, 1, "test-model.Q4_K_M.gguf").unwrap();
 
         // Verify it's gone
-        let files_after = get_model_files(&conn, "test-repo").unwrap();
+        let files_after = get_model_files(&conn, 1).unwrap();
         assert_eq!(files_after.len(), 0);
     }
 
     #[test]
     fn test_delete_model_file_preserves_other_files() {
-        // Create in-memory SQLite DB with migrations
         let OpenResult { conn, .. } = db::open_in_memory().unwrap();
 
-        // Insert two model file records
+        db::save_model_config(&conn, "test-repo", &Default::default()).unwrap();
+
         upsert_model_file(
             &conn,
+            1,
             "test-repo",
             "model.Q4_K_M.gguf",
             Some("Q4_K_M"),
@@ -274,6 +277,7 @@ mod tests {
         .unwrap();
         upsert_model_file(
             &conn,
+            1,
             "test-repo",
             "model.Q8_0.gguf",
             Some("Q8_0"),
@@ -282,25 +286,21 @@ mod tests {
         )
         .unwrap();
 
-        // Delete only one
-        delete_model_file(&conn, "test-repo", "model.Q4_K_M.gguf").unwrap();
+        delete_model_file(&conn, 1, "model.Q4_K_M.gguf").unwrap();
 
-        // Verify the other still exists
-        let files = get_model_files(&conn, "test-repo").unwrap();
+        let files = get_model_files(&conn, 1).unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].filename, "model.Q8_0.gguf");
     }
 
     #[test]
     fn test_delete_model_file_nonexistent() {
-        // Create in-memory SQLite DB with migrations
         let OpenResult { conn, .. } = db::open_in_memory().unwrap();
+        db::save_model_config(&conn, "test-repo", &Default::default()).unwrap();
 
-        // Try to delete a file that doesn't exist — should succeed (no-op)
-        delete_model_file(&conn, "test-repo", "nonexistent.gguf").unwrap();
-
-        // Verify nothing broke
-        let files = get_model_files(&conn, "test-repo").unwrap();
+        // Should succeed (no-op)
+        delete_model_file(&conn, 1, "nonexistent.gguf").unwrap();
+        let files = get_model_files(&conn, 1).unwrap();
         assert_eq!(files.len(), 0);
     }
 }

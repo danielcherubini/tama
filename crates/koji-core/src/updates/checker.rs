@@ -5,7 +5,8 @@ use crate::backends::{check_latest_version, BackendRegistry, BackendType};
 use crate::config::Config;
 use crate::db;
 use crate::db::queries::{
-    get_active_backend, get_all_update_checks, get_model_pull, get_oldest_check_time,
+    get_active_backend, get_all_model_configs, get_all_update_checks, get_model_pull,
+    get_oldest_check_time,
 };
 use crate::models::pull::list_gguf_files;
 
@@ -19,7 +20,7 @@ pub struct UpdateChecker {
 }
 
 /// Results from an initial sync of backends and models to check for updates.
-pub type UpdateSyncResults = (Vec<(String, BackendType)>, Vec<(String, Option<String>)>);
+pub type UpdateSyncResults = (Vec<(String, BackendType)>, Vec<(i64, Option<String>)>);
 
 impl UpdateChecker {
     pub fn new() -> Self {
@@ -55,10 +56,10 @@ impl UpdateChecker {
                     .collect();
 
                 let open = db::open(&config_dir)?;
-                let db_models = db::load_model_configs(&open.conn)?;
-                let models: Vec<(String, Option<String>)> = db_models
+                let db_model_records = get_all_model_configs(&open.conn)?;
+                let models: Vec<(i64, Option<String>)> = db_model_records
                     .into_iter()
-                    .map(|(key, mc)| (key, mc.model.clone()))
+                    .map(|r| (r.id, Some(r.repo_id)))
                     .collect();
 
                 Ok((backends, models))
@@ -79,7 +80,7 @@ impl UpdateChecker {
         // Phase 2: Async network - check each model
         for (model_id, repo_id) in &models {
             if let Err(e) = self
-                .check_model(config_dir, model_id, repo_id.as_deref())
+                .check_model(config_dir, *model_id, repo_id.as_deref())
                 .await
             {
                 tracing::warn!("Failed to check model {}: {}", model_id, e);
@@ -166,16 +167,16 @@ impl UpdateChecker {
     pub async fn check_model(
         &self,
         config_dir: &std::path::Path,
-        model_id: &str,
+        model_id: i64,
         repo_id: Option<&str>,
     ) -> anyhow::Result<()> {
-        let repo_id = match repo_id.filter(|s| !s.is_empty()) {
-            Some(id) => id,
-            None => {
+        let repo_id = match repo_id {
+            Some(id) if !id.is_empty() => id,
+            _ => {
                 self.save_check_result(
                     config_dir,
                     "model",
-                    model_id,
+                    &model_id.to_string(),
                     None,
                     None,
                     false,
@@ -194,7 +195,12 @@ impl UpdateChecker {
             let repo_id = repo_id.to_string();
             move || -> anyhow::Result<Option<String>> {
                 let open = db::open(&config_dir)?;
-                let pull = get_model_pull(&open.conn, &repo_id)?;
+                let model_record =
+                    match db::queries::get_model_config_by_repo_id(&open.conn, &repo_id)? {
+                        Some(r) => r,
+                        None => return Ok(None),
+                    };
+                let pull = get_model_pull(&open.conn, model_record.id)?;
                 Ok(pull.map(|p| p.commit_sha))
             }
         })
@@ -207,7 +213,7 @@ impl UpdateChecker {
                 self.save_check_result(
                     config_dir,
                     "model",
-                    model_id,
+                    &model_id.to_string(),
                     current_version.as_deref(),
                     None,
                     false,
@@ -243,7 +249,7 @@ impl UpdateChecker {
         self.save_check_result(
             config_dir,
             "model",
-            model_id,
+            &model_id.to_string(),
             current_version.as_deref(),
             Some(&latest_listing.commit_sha),
             update_available,

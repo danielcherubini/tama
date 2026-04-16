@@ -40,8 +40,29 @@ pub async fn run_initial_backfill(conn: &Connection, config: &Config) -> Result<
             }
         };
 
+        // Get or create the model_config entry to get the integer id
+        let model_record = match crate::db::queries::get_model_config_by_repo_id(conn, repo_id)? {
+            Some(r) => r,
+            None => {
+                // Create a placeholder model_config entry for this repo
+                let mc = crate::config::ModelConfig {
+                    backend: "llama_cpp".to_string(),
+                    ..Default::default()
+                };
+                let config_key = repo_id.to_lowercase().replace('/', "--");
+                let model_id = crate::db::save_model_config(conn, &config_key, &mc)?;
+                crate::db::queries::get_model_config(conn, model_id)?
+                    .expect("just-created model config should exist")
+            }
+        };
+
         // Upsert pull record with commit SHA
-        if let Err(e) = crate::db::queries::upsert_model_pull(conn, repo_id, &listing.commit_sha) {
+        if let Err(e) = crate::db::queries::upsert_model_pull(
+            conn,
+            model_record.id,
+            repo_id,
+            &listing.commit_sha,
+        ) {
             tracing::warn!("Failed to upsert pull record for {}: {}", repo_id, e);
         }
 
@@ -59,6 +80,7 @@ pub async fn run_initial_backfill(conn: &Connection, config: &Config) -> Result<
         for (filename, blob_info) in blobs {
             if let Err(e) = crate::db::queries::upsert_model_file(
                 conn,
+                model_record.id,
                 repo_id,
                 &filename,
                 None,
@@ -68,8 +90,6 @@ pub async fn run_initial_backfill(conn: &Connection, config: &Config) -> Result<
                 tracing::warn!("Failed to upsert file record for {}: {}", filename, e);
             }
         }
-
-        // Skip logging download for backfill - it's a batch operation
     }
 
     println!("  Database backfill complete.");

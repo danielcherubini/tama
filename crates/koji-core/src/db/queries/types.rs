@@ -1,9 +1,34 @@
 //! Record types for database query results.
 
+/// Per-repo user configuration for a model.
+#[derive(Debug, Clone)]
+pub struct ModelConfigRecord {
+    pub id: i64,         // auto-increment primary key
+    pub repo_id: String, // HF repo name
+    pub display_name: Option<String>,
+    pub backend: String,
+    pub enabled: bool,
+    pub selected_quant: Option<String>,
+    pub selected_mmproj: Option<String>,
+    pub context_length: Option<u32>,
+    pub gpu_layers: Option<u32>,
+    pub port: Option<u16>,
+    pub args: Option<String>,       // raw JSON string
+    pub sampling: Option<String>,   // raw JSON string
+    pub modalities: Option<String>, // raw JSON string
+    pub profile: Option<String>,
+    pub api_name: Option<String>,
+    pub health_check: Option<String>, // raw JSON string
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 /// A stored pull record for a HuggingFace repo.
 #[derive(Debug, Clone)]
 pub struct ModelPullRecord {
-    pub repo_id: String,
+    pub id: i64,         // auto-increment primary key
+    pub model_id: i64,   // FK to model_configs.id
+    pub repo_id: String, // cached
     pub commit_sha: String,
     pub pulled_at: String, // ISO 8601 from SQLite
 }
@@ -11,7 +36,9 @@ pub struct ModelPullRecord {
 /// A stored file record for a downloaded GGUF.
 #[derive(Debug, Clone)]
 pub struct ModelFileRecord {
-    pub repo_id: String,
+    pub id: i64,         // auto-increment primary key
+    pub model_id: i64,   // FK to model_configs.id
+    pub repo_id: String, // cached
     pub filename: String,
     pub quant: Option<String>,
     pub lfs_oid: Option<String>,
@@ -65,26 +92,4 @@ pub struct UpdateCheckRecord {
     pub error_message: Option<String>,
     pub details_json: Option<String>, // JSON blob for model file changes
     pub checked_at: i64,              // unix timestamp
-}
-
-/// Per-repo user configuration for a model.
-#[derive(Debug, Clone)]
-pub struct ModelConfigRecord {
-    pub repo_id: String,
-    pub display_name: Option<String>,
-    pub backend: String,
-    pub enabled: bool,
-    pub selected_quant: Option<String>,
-    pub selected_mmproj: Option<String>,
-    pub context_length: Option<u32>,
-    pub gpu_layers: Option<u32>,
-    pub port: Option<u16>,
-    pub args: Option<String>,       // raw JSON string
-    pub sampling: Option<String>,   // raw JSON string
-    pub modalities: Option<String>, // raw JSON string
-    pub profile: Option<String>,
-    pub api_name: Option<String>,
-    pub health_check: Option<String>, // raw JSON string
-    pub created_at: String,
-    pub updated_at: String,
 }

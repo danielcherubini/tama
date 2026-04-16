@@ -5,16 +5,19 @@ use rusqlite::{params, Connection};
 
 use super::types::ModelConfigRecord;
 
-/// Insert or update the model configuration for a repo.
+/// Insert or update the model configuration.
 /// Timestamp updated via SQLite's strftime('%Y-%m-%dT%H:%M:%fZ', 'now') on conflict.
-pub fn upsert_model_config(conn: &Connection, record: &ModelConfigRecord) -> Result<()> {
+/// Returns the model id.
+pub fn upsert_model_config(conn: &Connection, record: &ModelConfigRecord) -> Result<i64> {
     conn.execute(
         "INSERT INTO model_configs (
             repo_id, display_name, backend, enabled, selected_quant,
             selected_mmproj, context_length, gpu_layers, port, args,
             sampling, modalities, profile, api_name, health_check,
             created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17
+        )
          ON CONFLICT(repo_id) DO UPDATE SET
              display_name = excluded.display_name,
              backend = excluded.backend,
@@ -51,13 +54,59 @@ pub fn upsert_model_config(conn: &Connection, record: &ModelConfigRecord) -> Res
             record.updated_at,
         ],
     )?;
-    Ok(())
+    // Return the id (either existing or newly created)
+    let id: i64 = conn.query_row(
+        "SELECT id FROM model_configs WHERE repo_id = ?1",
+        [&record.repo_id],
+        |row| row.get(0),
+    )?;
+    Ok(id)
 }
 
-/// Get the model configuration for a repo. Returns None if not found.
-pub fn get_model_config(conn: &Connection, repo_id: &str) -> Result<Option<ModelConfigRecord>> {
+/// Get the model configuration by id. Returns None if not found.
+pub fn get_model_config(conn: &Connection, id: i64) -> Result<Option<ModelConfigRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT repo_id, display_name, backend, enabled, selected_quant,
+        "SELECT id, repo_id, display_name, backend, enabled, selected_quant,
+                selected_mmproj, context_length, gpu_layers, port, args,
+                sampling, modalities, profile, api_name, health_check,
+                created_at, updated_at
+         FROM model_configs WHERE id = ?1",
+    )?;
+    let mut rows = stmt.query_map([id], |row| {
+        Ok(ModelConfigRecord {
+            id: row.get(0)?,
+            repo_id: row.get(1)?,
+            display_name: row.get(2)?,
+            backend: row.get(3)?,
+            enabled: row.get::<_, i32>(4)? != 0,
+            selected_quant: row.get(5)?,
+            selected_mmproj: row.get(6)?,
+            context_length: row.get(7)?,
+            gpu_layers: row.get(8)?,
+            port: row.get(9)?,
+            args: row.get(10)?,
+            sampling: row.get(11)?,
+            modalities: row.get(12)?,
+            profile: row.get(13)?,
+            api_name: row.get(14)?,
+            health_check: row.get(15)?,
+            created_at: row.get(16)?,
+            updated_at: row.get(17)?,
+        })
+    })?;
+    match rows.next() {
+        Some(row) => Ok(Some(row?)),
+        None => Ok(None),
+    }
+}
+
+/// Get the model configuration by repo_id. Returns None if not found.
+pub fn get_model_config_by_repo_id(
+    conn: &Connection,
+    repo_id: &str,
+) -> Result<Option<ModelConfigRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, repo_id, display_name, backend, enabled, selected_quant,
                 selected_mmproj, context_length, gpu_layers, port, args,
                 sampling, modalities, profile, api_name, health_check,
                 created_at, updated_at
@@ -65,23 +114,24 @@ pub fn get_model_config(conn: &Connection, repo_id: &str) -> Result<Option<Model
     )?;
     let mut rows = stmt.query_map([repo_id], |row| {
         Ok(ModelConfigRecord {
-            repo_id: row.get(0)?,
-            display_name: row.get(1)?,
-            backend: row.get(2)?,
-            enabled: row.get::<_, i32>(3)? != 0,
-            selected_quant: row.get(4)?,
-            selected_mmproj: row.get(5)?,
-            context_length: row.get(6)?,
-            gpu_layers: row.get(7)?,
-            port: row.get(8)?,
-            args: row.get(9)?,
-            sampling: row.get(10)?,
-            modalities: row.get(11)?,
-            profile: row.get(12)?,
-            api_name: row.get(13)?,
-            health_check: row.get(14)?,
-            created_at: row.get(15)?,
-            updated_at: row.get(16)?,
+            id: row.get(0)?,
+            repo_id: row.get(1)?,
+            display_name: row.get(2)?,
+            backend: row.get(3)?,
+            enabled: row.get::<_, i32>(4)? != 0,
+            selected_quant: row.get(5)?,
+            selected_mmproj: row.get(6)?,
+            context_length: row.get(7)?,
+            gpu_layers: row.get(8)?,
+            port: row.get(9)?,
+            args: row.get(10)?,
+            sampling: row.get(11)?,
+            modalities: row.get(12)?,
+            profile: row.get(13)?,
+            api_name: row.get(14)?,
+            health_check: row.get(15)?,
+            created_at: row.get(16)?,
+            updated_at: row.get(17)?,
         })
     })?;
     match rows.next() {
@@ -93,7 +143,7 @@ pub fn get_model_config(conn: &Connection, repo_id: &str) -> Result<Option<Model
 /// Get all stored model configurations.
 pub fn get_all_model_configs(conn: &Connection) -> Result<Vec<ModelConfigRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT repo_id, display_name, backend, enabled, selected_quant,
+        "SELECT id, repo_id, display_name, backend, enabled, selected_quant,
                 selected_mmproj, context_length, gpu_layers, port, args,
                 sampling, modalities, profile, api_name, health_check,
                 created_at, updated_at
@@ -101,35 +151,32 @@ pub fn get_all_model_configs(conn: &Connection) -> Result<Vec<ModelConfigRecord>
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(ModelConfigRecord {
-            repo_id: row.get(0)?,
-            display_name: row.get(1)?,
-            backend: row.get(2)?,
-            enabled: row.get::<_, i32>(3)? != 0,
-            selected_quant: row.get(4)?,
-            selected_mmproj: row.get(5)?,
-            context_length: row.get(6)?,
-            gpu_layers: row.get(7)?,
-            port: row.get(8)?,
-            args: row.get(9)?,
-            sampling: row.get(10)?,
-            modalities: row.get(11)?,
-            profile: row.get(12)?,
-            api_name: row.get(13)?,
-            health_check: row.get(14)?,
-            created_at: row.get(15)?,
-            updated_at: row.get(16)?,
+            id: row.get(0)?,
+            repo_id: row.get(1)?,
+            display_name: row.get(2)?,
+            backend: row.get(3)?,
+            enabled: row.get::<_, i32>(4)? != 0,
+            selected_quant: row.get(5)?,
+            selected_mmproj: row.get(6)?,
+            context_length: row.get(7)?,
+            gpu_layers: row.get(8)?,
+            port: row.get(9)?,
+            args: row.get(10)?,
+            sampling: row.get(11)?,
+            modalities: row.get(12)?,
+            profile: row.get(13)?,
+            api_name: row.get(14)?,
+            health_check: row.get(15)?,
+            created_at: row.get(16)?,
+            updated_at: row.get(17)?,
         })
     })?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .map_err(Into::into)
 }
 
-/// Delete the model configuration for a repo and all associated model files.
-/// Runs in a single transaction.
-pub fn delete_model_config(conn: &Connection, repo_id: &str) -> Result<()> {
-    let tx = conn.unchecked_transaction()?;
-    tx.execute("DELETE FROM model_configs WHERE repo_id = ?1", [repo_id])?;
-    super::model_queries::_delete_model_records(&tx, repo_id)?;
-    tx.commit()?;
+/// Delete the model configuration by id. CASCADE deletes model_pulls and model_files.
+pub fn delete_model_config(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute("DELETE FROM model_configs WHERE id = ?1", [id])?;
     Ok(())
 }
