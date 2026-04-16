@@ -289,7 +289,14 @@ async fn test_cmd_server_edit_valid_profile_succeeds() {
     {
         let koji_core::db::OpenResult { conn, .. } =
             koji_core::db::open(&db_dir).expect("Failed to open DB for cleanup");
-        koji_core::db::queries::delete_model_config(&conn, "test_server").ok();
+        // Look up model_id by repo_id for cleanup
+        if let Some(record) =
+            koji_core::db::queries::get_model_config_by_repo_id(&conn, "test_server")
+                .ok()
+                .flatten()
+        {
+            koji_core::db::queries::delete_model_config(&conn, record.id).ok();
+        }
     }
 
     // This should succeed since "coding" is a valid profile

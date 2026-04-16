@@ -53,7 +53,11 @@ pub fn cmd_server_rm(_config: &Config, name: &str, force: bool) -> Result<()> {
     }
 
     // Remove from DB
-    koji_core::db::queries::delete_model_config(&conn, name)?;
+    let all_configs = koji_core::db::queries::get_all_model_configs(&conn)?;
+    let model_id = all_configs.iter().find(|c| c.repo_id == name).map(|c| c.id);
+    if let Some(id) = model_id {
+        koji_core::db::queries::delete_model_config(&conn, id)?;
+    }
 
     println!("Model '{}' removed.", name);
     Ok(())

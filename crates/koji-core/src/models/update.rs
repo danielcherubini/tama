@@ -18,7 +18,8 @@ use anyhow::Result;
 use rusqlite::Connection;
 
 use crate::db::queries::{
-    get_model_files, get_model_pull, upsert_model_file, upsert_model_pull, ModelFileRecord,
+    get_model_config_by_repo_id, get_model_files, get_model_pull, upsert_model_file,
+    upsert_model_pull, ModelFileRecord,
 };
 use crate::models::pull::{self, BlobInfo};
 
@@ -91,8 +92,19 @@ pub enum FileStatus {
 /// all DB reads happen before the first `.await`, all DB writes happen after.
 pub async fn check_for_updates(conn: &Connection, repo_id: &str) -> Result<UpdateCheckResult> {
     // Step 1: SYNC — read from DB (no .await)
-    let pull_record = get_model_pull(conn, repo_id)?;
-    let file_records = get_model_files(conn, repo_id)?;
+    // Look up model_id from repo_id first
+    let model_record = match get_model_config_by_repo_id(conn, repo_id)? {
+        Some(r) => r,
+        None => {
+            return Ok(UpdateCheckResult {
+                repo_id: repo_id.to_string(),
+                status: UpdateStatus::NoPriorRecord,
+                file_updates: vec![],
+            });
+        }
+    };
+    let pull_record = get_model_pull(conn, model_record.id)?;
+    let file_records = get_model_files(conn, model_record.id)?;
 
     // Step 2: handle no prior record
     let Some(pull_record) = pull_record else {
@@ -245,11 +257,27 @@ pub async fn refresh_metadata(conn: &Connection, repo_id: &str) -> Result<()> {
     let blobs = pull::fetch_blob_metadata(&listing.repo_id).await?;
 
     // SYNC — write to DB
-    upsert_model_pull(conn, repo_id, &listing.commit_sha)?;
+    // Look up or create model_id
+    let model_record = match get_model_config_by_repo_id(conn, repo_id)? {
+        Some(r) => r,
+        None => {
+            // Create a placeholder config entry
+            let mc = crate::config::ModelConfig {
+                backend: "llama_cpp".to_string(),
+                ..Default::default()
+            };
+            let config_key = repo_id.to_lowercase().replace('/', "--");
+            let model_id = crate::db::save_model_config(conn, &config_key, &mc)?;
+            crate::db::queries::get_model_config(conn, model_id)?
+                .expect("just-created model config should exist")
+        }
+    };
+    upsert_model_pull(conn, model_record.id, repo_id, &listing.commit_sha)?;
     for file in &listing.files {
         let blob = blobs.get(&file.filename);
         upsert_model_file(
             conn,
+            model_record.id,
             repo_id,
             &file.filename,
             file.quant.as_deref(),
@@ -276,6 +304,8 @@ mod tests {
         size: Option<i64>,
     ) -> ModelFileRecord {
         ModelFileRecord {
+            id: 1,
+            model_id: 1,
             repo_id: "test/repo".to_string(),
             filename: filename.to_string(),
             quant: None,

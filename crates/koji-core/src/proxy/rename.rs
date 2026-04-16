@@ -57,8 +57,16 @@ impl ProxyState {
                     // and DB update is best-effort.
                 } else {
                     // Successfully saved new name, now remove the old config entry to avoid orphans
-                    if let Err(e) = crate::db::queries::delete_model_config(&conn, old_name) {
-                        tracing::error!(name = %old_name, error = %e, "Failed to delete old model config after rename");
+                    // Convert old_name (double-dash config key) to repo_id, then look up model_id
+                    let old_repo_id = crate::db::config_key_to_repo_id(old_name);
+                    if let Some(record) =
+                        crate::db::queries::get_model_config_by_repo_id(&conn, &old_repo_id)
+                            .ok()
+                            .flatten()
+                    {
+                        if let Err(e) = crate::db::queries::delete_model_config(&conn, record.id) {
+                            tracing::error!(name = %old_name, error = %e, "Failed to delete old model config after rename");
+                        }
                     }
                 }
             }

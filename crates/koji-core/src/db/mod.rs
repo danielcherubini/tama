@@ -20,8 +20,25 @@ pub struct OpenResult {
     pub needs_backfill: bool,
 }
 
+/// Convert a config key (double-dash format, e.g. `unsloth--gemma-4-26b-a4b-it-gguf`)
+/// back to the original repo_id stored in the DB (e.g. `unsloth/gemma-4-26b-a4b-it-gguf`).
+///
+/// All external IDs (URLs, JSON responses, CLI args) use the double-dash format.
+/// The DB stores the original HF repo_id with a real slash.
+pub fn config_key_to_repo_id(config_key: &str) -> String {
+    if let Some(idx) = config_key.find("--") {
+        let (prefix, suffix) = config_key.split_at(idx);
+        format!("{}/{}", prefix, &suffix[2..])
+    } else {
+        config_key.to_string()
+    }
+}
+
 /// Load all model_configs rows and return them as a HashMap<config_key, ModelConfig>
 /// where config_key = repo_id.to_lowercase().replace('/', "--").
+///
+/// NOTE: this is only used internally by the proxy to build its in-memory registry.
+/// All external API lookups should use the integer `id` column directly.
 pub fn load_model_configs(conn: &Connection) -> anyhow::Result<HashMap<String, ModelConfig>> {
     let records = queries::get_all_model_configs(conn)?;
     let mut configs = HashMap::new();
@@ -31,7 +48,7 @@ pub fn load_model_configs(conn: &Connection) -> anyhow::Result<HashMap<String, M
         let mut config = ModelConfig::from_db_record(&record);
 
         // Populate quants from model_files table to restore them after restart
-        let files = queries::get_model_files(conn, &record.repo_id)?;
+        let files = queries::get_model_files(conn, record.id)?;
         for file in files {
             let quant_key = file.quant.clone().unwrap_or_else(|| file.filename.clone());
             config.quants.insert(
@@ -52,24 +69,16 @@ pub fn load_model_configs(conn: &Connection) -> anyhow::Result<HashMap<String, M
 }
 
 /// Persist a single ModelConfig entry.
-/// `config_key` is the HashMap key; `repo_id` is derived by reversing the key convention.
+/// `config_key` is the HashMap key (double-dash format); repo_id is derived.
+/// Returns the integer model id from the database.
 pub fn save_model_config(
     conn: &Connection,
     config_key: &str,
     mc: &ModelConfig,
-) -> anyhow::Result<()> {
-    // Reverse the key convention: replace the first "--" with "/"
-    let repo_id = if let Some(idx) = config_key.find("--") {
-        let (prefix, suffix) = config_key.split_at(idx);
-        format!("{}/{}", prefix, &suffix[2..])
-    } else {
-        config_key.to_string()
-    };
-
+) -> anyhow::Result<i64> {
+    let repo_id = config_key_to_repo_id(config_key);
     let record = mc.to_db_record(&repo_id);
-    queries::upsert_model_config(conn, &record)?;
-
-    Ok(())
+    queries::upsert_model_config(conn, &record)
 }
 
 /// Open (or create) the SQLite database at `config_dir/koji.db`

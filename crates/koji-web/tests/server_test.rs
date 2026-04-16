@@ -149,7 +149,7 @@ mod tests {
         let resp = client
             .post(format!("http://{}/api/models", addr))
             .json(&serde_json::json!({
-                "id": "test-model",
+                "repo_id": "test-model",
                 "backend": "llama_cpp",
                 "args": ["--host", "0.0.0.0"],
                 "enabled": true
@@ -164,7 +164,8 @@ mod tests {
         );
 
         // Verify 'test-model' was created via GET /api/models.
-        {
+        // Extract its auto-assigned integer id for subsequent requests.
+        let model_id: i64 = {
             let resp = client
                 .get(format!("http://{}/api/models", addr))
                 .send()
@@ -175,21 +176,23 @@ mod tests {
             let models = body["models"].as_array().unwrap();
             let model = models
                 .iter()
-                .find(|m| m["id"].as_str() == Some("test-model"));
+                .find(|m| m["repo_id"].as_str() == Some("test-model"));
             assert!(
                 model.is_some(),
                 "proxy config should contain 'test-model' after POST /api/models"
             );
+            let model = model.unwrap();
             assert_eq!(
-                model.unwrap()["backend"].as_str(),
+                model["backend"].as_str(),
                 Some("llama_cpp"),
                 "backend should be 'llama_cpp'"
             );
-        }
+            model["id"].as_i64().unwrap()
+        };
 
         // ── PUT /api/models/:id — update ──────────────────────────────────────────
         let resp = client
-            .put(format!("http://{}/api/models/test-model", addr))
+            .put(format!("http://{}/api/models/{}", addr, model_id))
             .json(&serde_json::json!({
                 "backend": "ik_llama",
                 "args": [],
@@ -216,7 +219,7 @@ mod tests {
             let models = body["models"].as_array().unwrap();
             let model = models
                 .iter()
-                .find(|m| m["id"].as_str() == Some("test-model"));
+                .find(|m| m["repo_id"].as_str() == Some("test-model"));
             assert!(model.is_some(), "test-model should still exist after PUT");
             let model = model.unwrap();
             assert_eq!(
@@ -233,7 +236,7 @@ mod tests {
 
         // ── DELETE /api/models/:id ────────────────────────────────────────────────
         let resp = client
-            .delete(format!("http://{}/api/models/test-model", addr))
+            .delete(format!("http://{}/api/models/{}", addr, model_id))
             .send()
             .await
             .unwrap();
@@ -255,7 +258,7 @@ mod tests {
             let models = body["models"].as_array().unwrap();
             let found = models
                 .iter()
-                .any(|m| m["id"].as_str() == Some("test-model"));
+                .any(|m| m["repo_id"].as_str() == Some("test-model"));
             assert!(
                 !found,
                 "proxy config should not contain 'test-model' after DELETE"
@@ -267,7 +270,7 @@ mod tests {
         let resp = client
             .post(format!("http://{}/api/models", addr))
             .json(&serde_json::json!({
-                "id": "hot-reload-model",
+                "repo_id": "hot-reload-model",
                 "backend": "llama_cpp",
                 "args": [],
                 "enabled": true
@@ -293,7 +296,7 @@ mod tests {
             let models = body["models"].as_array().unwrap();
             let found = models
                 .iter()
-                .any(|m| m["id"].as_str() == Some("hot-reload-model"));
+                .any(|m| m["repo_id"].as_str() == Some("hot-reload-model"));
             assert!(
                 found,
                 "proxy config should contain 'hot-reload-model' after POST /api/models"

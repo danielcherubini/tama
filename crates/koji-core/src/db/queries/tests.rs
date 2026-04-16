@@ -182,6 +182,7 @@ mod tests {
     fn test_upsert_and_get_model_config() {
         let OpenResult { conn, .. } = open_in_memory().unwrap();
         let record = ModelConfigRecord {
+            id: 0, // auto-assigned
             repo_id: "test-repo".to_string(),
             display_name: Some("Test Model".to_string()),
             backend: "llama_cpp".to_string(),
@@ -203,7 +204,13 @@ mod tests {
 
         upsert_model_config(&conn, &record).unwrap();
 
-        let retrieved = get_model_config(&conn, "test-repo").unwrap().unwrap();
+        // Look up by repo_id to get auto-assigned id
+        let by_repo = get_model_config_by_repo_id(&conn, "test-repo")
+            .unwrap()
+            .unwrap();
+        let model_id = by_repo.id;
+
+        let retrieved = get_model_config(&conn, model_id).unwrap().unwrap();
         assert_eq!(retrieved.repo_id, record.repo_id);
         assert_eq!(retrieved.display_name, record.display_name);
         assert_eq!(retrieved.backend, record.backend);
@@ -227,6 +234,7 @@ mod tests {
     fn test_get_all_model_configs() {
         let OpenResult { conn, .. } = open_in_memory().unwrap();
         let rec1 = ModelConfigRecord {
+            id: 0,
             repo_id: "repo1".to_string(),
             display_name: None,
             backend: "llama_cpp".to_string(),
@@ -246,6 +254,7 @@ mod tests {
             updated_at: "2024-01-01T00:00:00Z".to_string(),
         };
         let rec2 = ModelConfigRecord {
+            id: 0,
             repo_id: "repo2".to_string(),
             display_name: None,
             backend: "llama_cpp".to_string(),
@@ -276,6 +285,7 @@ mod tests {
     fn test_delete_model_config() {
         let OpenResult { conn, .. } = open_in_memory().unwrap();
         let record = ModelConfigRecord {
+            id: 0, // auto-assigned
             repo_id: "test-repo".to_string(),
             display_name: None,
             backend: "llama_cpp".to_string(),
@@ -296,9 +306,13 @@ mod tests {
         };
 
         upsert_model_config(&conn, &record).unwrap();
-        assert!(get_model_config(&conn, "test-repo").unwrap().is_some());
+        let by_repo = get_model_config_by_repo_id(&conn, "test-repo")
+            .unwrap()
+            .unwrap();
+        let model_id = by_repo.id;
+        assert!(get_model_config(&conn, model_id).unwrap().is_some());
 
-        delete_model_config(&conn, "test-repo").unwrap();
-        assert!(get_model_config(&conn, "test-repo").unwrap().is_none());
+        delete_model_config(&conn, model_id).unwrap();
+        assert!(get_model_config(&conn, model_id).unwrap().is_none());
     }
 }
