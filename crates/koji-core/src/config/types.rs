@@ -264,7 +264,11 @@ impl ModelConfig {
             backend: record.backend.clone(),
             enabled: record.enabled,
             display_name: record.display_name.clone(),
-            api_name: record.api_name.clone(),
+            api_name: record
+                .api_name
+                .clone()
+                .filter(|s| !s.is_empty())
+                .or_else(|| Some(record.repo_id.to_lowercase())),
             port: record.port,
             context_length: record.context_length,
             gpu_layers: record.gpu_layers,
