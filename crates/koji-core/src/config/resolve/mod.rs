@@ -10,10 +10,17 @@ impl Config {
     ) -> Result<(&'a ModelConfig, &'a BackendConfig)> {
         use anyhow::Context;
 
-        // First, search by api_name to avoid config key precedence issues
+        // First, search by api_name to avoid config key precedence issues.
+        // Comparison is case-insensitive (OpenAI API model IDs are
+        // case-insensitive) while the stored api_name preserves the
+        // original case used by the user.
         let mut api_name_matches: Vec<_> = models
             .values()
-            .filter(|s| s.api_name.as_deref() == Some(name))
+            .filter(|s| {
+                s.api_name
+                    .as_deref()
+                    .is_some_and(|n| n.eq_ignore_ascii_case(name))
+            })
             .collect();
 
         let server = if api_name_matches.len() == 1 {

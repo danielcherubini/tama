@@ -70,14 +70,21 @@ pub fn load_model_configs(conn: &Connection) -> anyhow::Result<HashMap<String, M
 }
 
 /// Persist a single ModelConfig entry.
-/// `config_key` is the HashMap key (double-dash format); repo_id is derived.
+/// `config_key` is the HashMap key (double-dash, lowercased). The DB's
+/// `repo_id` preserves the original HF repo case — taken from `mc.model`
+/// when present (carries the exact repo_id the user entered), and only
+/// falling back to deriving from `config_key` when `mc.model` is unset.
 /// Returns the integer model id from the database.
 pub fn save_model_config(
     conn: &Connection,
     config_key: &str,
     mc: &ModelConfig,
 ) -> anyhow::Result<i64> {
-    let repo_id = config_key_to_repo_id(config_key);
+    let repo_id = mc
+        .model
+        .clone()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| config_key_to_repo_id(config_key));
     let record = mc.to_db_record(&repo_id);
     queries::upsert_model_config(conn, &record)
 }
