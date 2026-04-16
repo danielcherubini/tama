@@ -7,7 +7,7 @@ mod types;
 
 use leptos::prelude::*;
 use leptos_router::components::A;
-use leptos_router::hooks::use_params_map;
+use leptos_router::hooks::{use_params_map, use_query_params};
 
 use crate::components::modal::Modal;
 use crate::components::pull_quant_wizard::{CompletedQuant, PullQuantWizard};
@@ -65,7 +65,14 @@ impl Section {
 #[component]
 pub fn ModelEditor() -> impl IntoView {
     let params = use_params_map();
-    let model_id = move || params.get().get("id").unwrap_or_default();
+    let query = use_query_params();
+    // Prefer integer id from query param, fall back to route param (config_key)
+    let model_id = move || {
+        query.get()
+            .ok()
+            .and_then(|q| q.get("id").cloned())
+            .unwrap_or_else(|| params.get().get("id").unwrap_or_default())
+    };
     let is_new = move || model_id() == "new";
 
     let detail: LocalResource<Option<ModelDetail>> = LocalResource::new(move || {
