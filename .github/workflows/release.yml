@@ -43,6 +43,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-release-
             ${{ runner.os }}-cargo-
+          enableCrossOsArchive: true
 
       - name: Add wasm32 target
         run: rustup target add wasm32-unknown-unknown
@@ -106,6 +107,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-release-
             ${{ runner.os }}-cargo-
+          enableCrossOsArchive: true
 
       - name: Add wasm32 target
         run: rustup target add wasm32-unknown-unknown

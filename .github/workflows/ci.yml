@@ -32,6 +32,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
+          enableCrossOsArchive: true
 
       - name: Add wasm32 target
         run: rustup target add wasm32-unknown-unknown
@@ -56,6 +57,49 @@ jobs:
 
       - name: Clippy (koji-web SSR)
         run: cargo clippy --package koji-web --features ssr --all-targets -- -D warnings
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+          enableCrossOsArchive: true
+
+      - name: Add wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install trunk
+        uses: jetli/trunk-action@v0.5.0
+        with:
+          version: latest
+
+      - name: Build Leptos WASM frontend
+        working-directory: crates/koji-web
+        run: trunk build
+
+      - name: Run tests (workspace)
+        run: cargo test --workspace -- --nocapture
+
+      - name: Clippy (workspace)
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Format check
         run: cargo fmt --all --check
