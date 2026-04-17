@@ -112,6 +112,9 @@ pub fn BackendCard(
     /// Called with (backend_type, version) when "Activate" is clicked.
     #[prop(optional)]
     on_activate: Option<Callback<(String, String)>>,
+    /// Called with (backend_type, version) when "Remove Version" is clicked.
+    #[prop(optional)]
+    on_remove_version: Option<Callback<(String, String)>>,
 ) -> impl IntoView {
     let type_install = backend.r#type.clone();
     let type_update = backend.r#type.clone();
@@ -273,7 +276,8 @@ pub fn BackendCard(
                     view! { <span/> }.into_any()
                 }}
 
-                {if installed {
+                // Show "Uninstall" (removes ALL versions) only on the active version card
+                {if installed && is_active {
                     let cb = on_delete;
                     let bt = type_delete.clone();
                     view! {
@@ -294,6 +298,30 @@ pub fn BackendCard(
                     view! { <span/> }.into_any()
                 }}
 
+                // Show "Remove Version" (removes just this version) on inactive versions
+                {if installed && !is_active {
+                    let cb = on_remove_version;
+                    let bt = type_delete.clone();
+                    let ver = activate_version.clone().unwrap_or_default();
+                    view! {
+                        <button
+                            type="button"
+                            class="btn btn-secondary"
+                            style="color:#6b7280;"
+                            on:click=move |_| {
+                                if let Some(c) = cb {
+                                    c.run((bt.clone(), ver.clone()));
+                                }
+                            }
+                        >
+                            "Remove Version"
+                        </button>
+                    }.into_any()
+                } else {
+                    view! { <span/> }.into_any()
+                }}
+
+                // Show "Activate" button on inactive versions (only if not removing)
                 {if installed && !is_active {
                     let cb = on_activate;
                     let bt = type_activate.clone();

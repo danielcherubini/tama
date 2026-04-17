@@ -520,30 +520,46 @@ async fn cmd_list(_config: &Config) -> Result<()> {
         return Ok(());
     }
 
-    // Open a second registry to check active versions for the * marker
-    let active_registry = BackendRegistry::open(&registry_config_dir()?)?;
-
+    // registry.list() only returns active backends, so all shown are active.
+    // Use list_all_versions to show all versions with * active marker.
     println!("Installed backends:\n");
     for backend in &backends {
-        let is_active = active_registry
-            .get(&backend.name)
-            .ok()
-            .flatten()
-            .map(|a| a.version)
-            == Some(backend.version.clone());
-        println!(
-            "  {} [{}]{} (v{})",
-            backend.name,
-            backend.backend_type,
-            if is_active { " * active" } else { "" },
-            backend.version
-        );
-        println!("    Version:  {}", backend.version);
-        println!("    Path:     {}", backend.path.display());
-        if let Some(ref gpu) = backend.gpu_type {
-            println!("    GPU:      {:?}", gpu);
+        let name = backend.name.clone();
+        let all_versions = registry.list_all_versions(&name).unwrap_or(None);
+
+        if let Some(versions) = all_versions {
+            // Show all versions, marking the active one
+            let active_version = backend.version.clone();
+            for v in &versions {
+                let marker = if v.version == active_version {
+                    " * active"
+                } else {
+                    ""
+                };
+                println!(
+                    "  {} [{}]{} (v{})",
+                    v.name, v.backend_type, marker, v.version
+                );
+                println!("    Version:  {}", v.version);
+                println!("    Path:     {}", v.path.display());
+                if let Some(ref gpu) = v.gpu_type {
+                    println!("    GPU:      {:?}", gpu);
+                }
+                println!();
+            }
+        } else {
+            // Fallback if list_all_versions fails
+            println!(
+                "  {} [{}] (v{})",
+                backend.name, backend.backend_type, backend.version
+            );
+            println!("    Version:  {}", backend.version);
+            println!("    Path:     {}", backend.path.display());
+            if let Some(ref gpu) = backend.gpu_type {
+                println!("    GPU:      {:?}", gpu);
+            }
+            println!();
         }
-        println!();
     }
     // Tip using first backend as example
     if let Some(first) = backends.first() {
