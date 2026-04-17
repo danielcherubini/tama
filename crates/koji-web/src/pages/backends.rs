@@ -314,8 +314,8 @@ pub fn Backends() -> impl IntoView {
                     let list = backends_list.get();
                     let mut cards = Vec::new();
                     for backend in list.backends.into_iter().chain(list.custom.into_iter()) {
-                        let activate_cb = on_activate_click.clone();
-                        let remove_version_cb = on_remove_version_click.clone();
+                        let activate_cb = on_activate_click;
+                        let remove_version_cb = on_remove_version_click;
                         cards.push(view! {
                             <BackendCard
                                 backend=backend
