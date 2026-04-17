@@ -14,8 +14,9 @@ use tower_http::cors::CorsLayer;
 
 use crate::api;
 use crate::api::backends::{
-    check_backend_updates, get_job, install_backend, job_events_sse, list_backends, remove_backend,
-    system_capabilities, update_backend, update_backend_default_args, CapabilitiesCache,
+    activate_backend_version, check_backend_updates, get_job, install_backend, job_events_sse,
+    list_backend_versions, list_backends, remove_backend, system_capabilities, update_backend,
+    update_backend_default_args, CapabilitiesCache,
 };
 use crate::api::backup::{create_backup, restore_preview, start_restore};
 use crate::jobs::JobManager;
@@ -158,6 +159,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             post(update_backend_default_args),
         )
         .route("/api/backends/check-updates", post(check_backend_updates))
+        .route("/api/backends/:name/versions", get(list_backend_versions))
+        .route(
+            "/api/backends/:name/activate",
+            post(activate_backend_version),
+        )
         .route("/api/backends/jobs/:id", get(get_job))
         .route("/api/backends/jobs/:id/events", get(job_events_sse))
         // Restore routes (CSRF-protected)
