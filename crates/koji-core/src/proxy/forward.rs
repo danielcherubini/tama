@@ -69,7 +69,7 @@ pub fn rewrite_json_model_name(mut json: JsonValue, model_name: &str) -> JsonVal
 }
 
 /// Build a forward request target URI from the backend URL and request path/query.
-#[expect(dead_code)]
+#[allow(dead_code)]
 pub fn build_forward_uri(backend_url: &str, parts: &Parts) -> Option<String> {
     let path_and_query = parts.uri.path_and_query()?;
     let (path, query) = path_and_query
