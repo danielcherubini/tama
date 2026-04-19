@@ -147,12 +147,9 @@ async fn run_benchmark_inner(
             let job = self.job.clone();
             let data = json.to_string();
             tokio::spawn(async move {
-                // Send benchmark results as a "result" SSE event
-                if let Err(e) = job.log_tx.send(crate::jobs::JobEvent::Log(format!(
-                    "__BENCHMARK_RESULT__:{}",
-                    data
-                ))) {
-                    tracing::warn!("Failed to send benchmark result: {}", e);
+                // Store benchmark results in job state so they're available via API
+                if let Ok(mut results) = job.benchmark_results.try_write() {
+                    *results = Some(data);
                 }
             });
         }
@@ -374,14 +371,8 @@ pub async fn benchmark_events(
                 event = rx.recv() => {
                     match event {
                         Ok(JobEvent::Log(line)) => {
-                            // Check for benchmark result payload
-                            if let Some(result_json) = line.strip_prefix("__BENCHMARK_RESULT__:") {
-                                yield Ok(Event::default().event("result")
-                                    .json_data(json!({ "results": serde_json::from_str::<serde_json::Value>(result_json).unwrap_or_default()}))?);
-                            } else {
-                                yield Ok(Event::default().event("log")
-                                    .json_data(json!({ "line": line}))?);
-                            }
+                            yield Ok(Event::default().event("log")
+                                .json_data(json!({ "line": line}))?);
                         }
                         Ok(JobEvent::Status(s)) => {
                             yield Ok(Event::default().event("status")
