@@ -45,6 +45,7 @@ pub static ACTIVE_DOWNLOADS: LazyLock<RwSignal<Vec<DownloadQueueItemDto>>> =
 pub static HISTORY_ITEMS: LazyLock<RwSignal<Vec<DownloadQueueItemDto>>> =
     LazyLock::new(|| RwSignal::new(Vec::new()));
 pub static HISTORY_TOTAL: LazyLock<RwSignal<i64>> = LazyLock::new(|| RwSignal::new(0));
+pub static HISTORY_PAGE: LazyLock<RwSignal<i64>> = LazyLock::new(|| RwSignal::new(0));
 pub static HISTORY_LIMIT: LazyLock<RwSignal<i64>> = LazyLock::new(|| RwSignal::new(50));
 
 #[component]
@@ -52,6 +53,15 @@ pub fn Downloads() -> impl IntoView {
     let active_tab = RwSignal::new("active".to_string()); // "active" | "history"
     let history_page = RwSignal::new(0i64);
     let history_limit = RwSignal::new(50i64);
+
+    // Sync local history signals with shared signals so the SSE handler
+    // knows which page to refresh on terminal events.
+    Effect::new(move |_| {
+        HISTORY_PAGE.set(history_page.get());
+    });
+    Effect::new(move |_| {
+        HISTORY_LIMIT.set(history_limit.get());
+    });
 
     // Initial fetch of active downloads
     wasm_bindgen_futures::spawn_local(async move {

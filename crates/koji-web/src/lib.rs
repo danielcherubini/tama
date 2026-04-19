@@ -140,17 +140,20 @@ pub fn App() -> impl IntoView {
                         });
                     }
 
-                    // Refresh history on terminal events (Completed/Failed/Cancelled)
-                    // Always refresh page 0 so new items are visible immediately.
+                    // Refresh history on terminal events (Completed/Failed/Cancelled).
+                    // Use the user's current page so they aren't unexpectedly jumped.
                     if matches!(
                         event_json.event.as_str(),
                         "Completed" | "Failed" | "Cancelled"
                     ) {
                         let limit = pages::downloads::HISTORY_LIMIT.get();
+                        let offset = pages::downloads::HISTORY_PAGE
+                            .get()
+                            * pages::downloads::HISTORY_LIMIT.get();
                         wasm_bindgen_futures::spawn_local(async move {
                             if let Ok(resp) = gloo_net::http::Request::get(&format!(
-                                "/api/downloads/history?limit={}&offset=0",
-                                limit
+                                "/api/downloads/history?limit={}&offset={}",
+                                limit, offset
                             ))
                             .send()
                             .await
