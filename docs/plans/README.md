@@ -15,9 +15,9 @@ This directory contains implementation plans for the Koji project. Each plan doc
 ## Quick Stats
 
 - **Total Plans**: 64
-- **Completed**: 61 ✅
-- **In Progress**: 1 🚧
-- **Remaining**: 2 📋
+- **Completed**: 63 ✅
+- **In Progress**: 0 🚧
+- **Remaining**: 0 📋
 
 > **Note**: The Koji Management API Spec (2026-04-03) was removed as it was a design document, not an implementation plan. The functionality it describes is already implemented via other plans.
 
@@ -141,9 +141,7 @@ This directory contains implementation plans for the Koji project. Each plan doc
 
 ## Remaining Work
 
-| Plan | Description |
-|------|-------------|
-| [Downloads Center](2026-04-19-downloads-center.md) | Persistent download queue with active progress, history, and toast notifications |
+*(none)*
 
 ## Roadmap
 
