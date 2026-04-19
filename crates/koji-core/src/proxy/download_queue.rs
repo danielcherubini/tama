@@ -67,9 +67,13 @@ pub struct DownloadQueueService {
 }
 
 impl DownloadQueueService {
-    /// Create a new `DownloadQueueService` with a broadcast channel (capacity 64).
+    /// Create a new `DownloadQueueService` with a broadcast channel.
+    ///
+    /// Capacity is set to 256 to accommodate rapid progress updates during
+    /// large downloads without dropping events. The SSE endpoint handles
+    /// dropped events via the `Lagged` marker event.
     pub fn new(db_dir: Option<PathBuf>) -> Self {
-        let events_tx = broadcast::channel(64).0;
+        let events_tx = broadcast::channel(256).0;
         Self { db_dir, events_tx }
     }
 
