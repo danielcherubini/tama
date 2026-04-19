@@ -268,35 +268,49 @@ pub async fn run_llama_bench(
     let OpenResult { conn, .. } = crate::db::open(&db_dir)?;
     let model_configs = crate::db::load_model_configs(&conn)?;
 
+    // If model_id is an integer db_id, resolve it to the config key first.
+    let resolved_id = if let Ok(db_id) = model_id.parse::<i64>() {
+        model_configs
+            .iter()
+            .find(|(_, mc)| mc.db_id == Some(db_id))
+            .map(|(key, _)| key.as_str())
+            .unwrap_or(model_id)
+    } else {
+        model_id
+    };
+
     let (server_config, _backend_config) = config
-        .resolve_server(&model_configs, model_id)
+        .resolve_server(&model_configs, resolved_id)
         .context("Failed to resolve server config for benchmark")?;
 
     // Get the model file path from the model config's first model file
     let model_path = {
-        // Look up the model by repo_id (lowercase of model_id)
-        let repo_id = model_id.to_lowercase().replace('/', "--");
-        let record = crate::db::queries::get_model_config_by_repo_id(&conn, &repo_id)?;
-        match record {
-            Some(rec) => {
-                // Find the first model file (.gguf extension) for this config
-                let files = crate::db::queries::get_model_files(&conn, rec.id)?;
-                let model_file = files
-                    .into_iter()
-                    .find(|f| f.filename.ends_with(".gguf"))
-                    .context("No .gguf model file found for this config")?;
+        // Look up the model by resolved config key
+        let mc = model_configs
+            .get(resolved_id)
+            .with_context(|| format!("Model config '{}' not found", resolved_id))?;
+        // Use db_id to look up the DB record for file lookup
+        let rec_id = mc.db_id.context("Model config has no db_id")?;
+        let record = crate::db::queries::get_model_config(&conn, rec_id)?.with_context(|| {
+            format!("Model config record (id={}) not found in database", rec_id)
+        })?;
+        // Find the first model file (.gguf extension) for this config
+        let files = crate::db::queries::get_model_files(&conn, record.id)?;
+        let model_file = files
+            .into_iter()
+            .find(|f| f.filename.ends_with(".gguf"))
+            .context("No .gguf model file found for this config")?;
 
-                // Build full path: model storage dir + filename
-                let model_data_dir = db_dir.join("models");
-                let candidate = model_data_dir.join(&rec.repo_id).join(&model_file.filename);
-                if candidate.exists() {
-                    candidate
-                } else {
-                    // Fallback: try parent data dir
-                    db_dir.join(&model_file.filename)
-                }
-            }
-            None => bail!("Model config '{}' not found in database", model_id),
+        // Build full path: model storage dir + filename
+        let model_data_dir = db_dir.join("models");
+        let candidate = model_data_dir
+            .join(&record.repo_id)
+            .join(&model_file.filename);
+        if candidate.exists() {
+            candidate
+        } else {
+            // Fallback: try parent data dir
+            db_dir.join(&model_file.filename)
         }
     };
 
