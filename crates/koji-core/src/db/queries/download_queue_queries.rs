@@ -701,7 +701,7 @@ mod tests {
         .unwrap();
 
         let item = get_item_by_job_id(&conn, "pull-abc123").unwrap().unwrap();
-        assert_eq!(item.id > 0, true);
+        assert!(item.id > 0);
         assert_eq!(item.job_id, "pull-abc123");
         assert_eq!(item.repo_id, "unsloth/Qwen3.6-35B-A3B-GGUF");
         assert_eq!(item.filename, "Qwen3.6-35B-A3B-Q4_K_M.gguf");
