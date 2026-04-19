@@ -189,7 +189,7 @@ pub fn Downloads() -> impl IntoView {
                         <div class="pagination">
                             <button
                                 class="pagination__btn"
-                                disabled=page == 0
+                                prop:disabled=page == 0
                                 on:click=move |_| hp.update(|p| *p = p.saturating_sub(1))
                             >
                                 "← Prev"
@@ -199,7 +199,7 @@ pub fn Downloads() -> impl IntoView {
                             </span>
                             <button
                                 class="pagination__btn"
-                                disabled=page >= total_pages - 1
+                                prop:disabled=page >= total_pages - 1
                                 on:click=move |_| hp.update(|p| *p = p.saturating_add(1))
                             >
                                 "Next →"
