@@ -85,12 +85,22 @@ pub fn Benchmarks() -> impl IntoView {
         });
     }
 
-    // Fetch benchmark results when a job completes.
-    let _results_resource = LocalResource::new(move || {
-        let _ = results_refresh.get(); // track refresh signal
+    // Poll for benchmark results every 2 seconds while a job is running.
+    // Once results appear, stop polling.
+    let _results_poll = Effect::new(move |_| {
+        let _ = results_refresh.get();
         let job_id = current_job_id.get();
-        async move {
-            if let Some(jid) = job_id {
+        if job_id.is_none() || !is_running.get() {
+            return;
+        }
+
+        let jid = job_id.unwrap();
+        spawn_local(async move {
+            loop {
+                gloo_timers::future::TimeoutFuture::new(2000).await;
+                if !is_running.get() {
+                    break; // Job finished, stop polling
+                }
                 if let Ok(resp) =
                     gloo_net::http::Request::get(&format!("/api/benchmarks/jobs/{jid}"))
                         .send()
@@ -99,11 +109,12 @@ pub fn Benchmarks() -> impl IntoView {
                     if let Ok(body) = resp.json::<serde_json::Value>().await {
                         if let Some(results) = body.get("benchmark_results") {
                             benchmark_results.set(Some(results.clone()));
+                            break; // Results found, stop polling
                         }
                     }
                 }
             }
-        }
+        });
     });
 
     // Fetch benchmark history on mount
