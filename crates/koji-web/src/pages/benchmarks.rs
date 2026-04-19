@@ -65,7 +65,7 @@ impl BenchmarkPreset {
                 runs: 3,
                 threads: None,
                 ngl_range: Some("0-99+1"),
-                ctx_override: None,
+                ctx_override: Some(4096),
             },
             Self {
                 label: "Thread Scaling",
