@@ -34,6 +34,7 @@ pub fn Benchmarks() -> impl IntoView {
     let is_running = RwSignal::new(false);
     let current_job_id = RwSignal::new(Option::<String>::None);
     let benchmark_results = RwSignal::new(Option::<serde_json::Value>::None);
+    let results_refresh = RwSignal::new(0u32);
 
     // History state
     let history = RwSignal::new(Vec::<HistoryEntry>::new());
@@ -86,6 +87,7 @@ pub fn Benchmarks() -> impl IntoView {
 
     // Fetch benchmark results when a job completes.
     let _results_resource = LocalResource::new(move || {
+        let _ = results_refresh.get(); // track refresh signal
         let job_id = current_job_id.get();
         async move {
             if let Some(jid) = job_id {
@@ -220,6 +222,7 @@ pub fn Benchmarks() -> impl IntoView {
                             // JobLogPanel component handles SSE automatically
                             // for this job_id.
                             current_job_id.set(Some(job_id.to_string()));
+                            results_refresh.update(|n| *n += 1);
                         }
                     }
                 }
