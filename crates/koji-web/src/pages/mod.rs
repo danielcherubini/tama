@@ -1,4 +1,5 @@
 pub mod backends;
+pub mod benchmarks;
 pub mod config_editor;
 pub mod dashboard;
 pub mod downloads;
