@@ -146,10 +146,14 @@ async fn run_benchmark_inner(
         fn result(&self, json: &str) {
             let job = self.job.clone();
             let data = json.to_string();
+            tracing::info!("BenchmarkProgressSink::result called, job_id={}", job.id);
             tokio::spawn(async move {
                 // Store benchmark results in job state so they're available via API
                 if let Ok(mut results) = job.benchmark_results.try_write() {
                     *results = Some(data);
+                    tracing::info!("Stored benchmark results in job state");
+                } else {
+                    tracing::warn!("Failed to acquire write lock on benchmark_results");
                 }
             });
         }
@@ -285,7 +289,12 @@ pub async fn get_benchmark_result(
     // Get benchmark results if available
     let benchmark_results = {
         let results = job.benchmark_results.read().await;
-        results.clone()
+        let cloned = results.clone();
+        tracing::info!(
+            "get_benchmark_result: benchmark_results={:?}",
+            cloned.is_some()
+        );
+        cloned
     };
 
     (
