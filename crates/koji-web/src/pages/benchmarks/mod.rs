@@ -17,6 +17,10 @@ pub fn Benchmarks() -> impl IntoView {
     let selected_model = RwSignal::new(String::new());
     let available_models = RwSignal::new(Vec::<(String, String, String)>::new());
 
+    // Backend selection — which backend's llama-bench to use
+    let selected_backend = RwSignal::new(String::new());
+    let available_backends = RwSignal::new(Vec::<(String, String)>::new()); // (name, display_name)
+
     // Test configuration
     let pp_sizes_str = RwSignal::new("512".to_string());
     let tg_sizes_str = RwSignal::new("128".to_string());
@@ -56,6 +60,31 @@ pub fn Benchmarks() -> impl IntoView {
             }
         });
     });
+
+    // Fetch available backends for llama-bench selection.
+    {
+        spawn_local(async move {
+            if let Ok(resp) = gloo_net::http::Request::get("/api/backends").send().await {
+                if let Ok(root) = resp.json::<serde_json::Value>().await {
+                    if let Some(backends_arr) = root.get("backends").and_then(|v| v.as_array()) {
+                        let backend_list: Vec<(String, String)> = backends_arr
+                            .iter()
+                            .filter_map(|b| {
+                                let name = b.get("name")?.as_str()?.to_string();
+                                let display = b
+                                    .get("display_name")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or(&name)
+                                    .to_string();
+                                Some((name, display))
+                            })
+                            .collect();
+                        available_backends.update(|list| *list = backend_list);
+                    }
+                }
+            }
+        });
+    }
 
     // Fetch benchmark history on mount
     {
@@ -153,8 +182,14 @@ pub fn Benchmarks() -> impl IntoView {
         let error_message = error_message;
 
         spawn_local(async move {
+            let backend_name = if selected_backend.get().is_empty() {
+                None
+            } else {
+                Some(selected_backend.get())
+            };
             let body = serde_json::json!({
                 "model_id": model_id,
+                "backend_name": backend_name,
                 "pp_sizes": pp,
                 "tg_sizes": tg,
                 "runs": runs_val,
@@ -188,7 +223,8 @@ pub fn Benchmarks() -> impl IntoView {
 
     // Split signals for read-only view access (done before closures above capture them)
     let (available_models_sig, _) = available_models.split();
-    let (selected_model_sig, _) = selected_model.split();
+    let (selected_model_sig, _selected_model_rw) = selected_model.split();
+    let (available_backends_sig, _) = available_backends.split();
     let (pp_sizes_sig, _) = pp_sizes_str.split();
     let (tg_sizes_sig, _) = tg_sizes_str.split();
     let (runs_sig, _) = runs.split();
@@ -237,6 +273,33 @@ pub fn Benchmarks() -> impl IntoView {
                     }).collect::<Vec<_>>()
                 }}
             </select>
+        </section>
+
+        // Backend selection (which llama-bench to use)
+        <section class="card">
+            <h3>"Backend"</h3>
+            <select
+                class="form-select"
+                on:change=move |e| {
+                    let val = e.target().unwrap().dyn_into::<web_sys::HtmlSelectElement>().unwrap().value();
+                    selected_backend.set(val);
+                }
+            >
+                <option value="">"Auto (model's backend)"</option>
+                {move || {
+                    let backends = available_backends_sig.get();
+                    backends.iter().map(|(name, display)| {
+                        let name_clone = name.clone();
+                        let display_clone = display.clone();
+                        view! {
+                            <option value=name_clone>{display_clone}</option>
+                        }.into_any()
+                    }).collect::<Vec<_>>()
+                }}
+            </select>
+            <small class="text-muted mt-1 d-block" style="font-size:0.8rem;">
+                "Select a specific backend's llama-bench, or leave empty to use the model's backend."
+            </small>
         </section>
 
         // Test configuration
