@@ -177,14 +177,13 @@ async fn test_get_active_downloads_returns_correct_dtos() {
     // Should have 2 active items (queued + running)
     assert_eq!(response_obj.items.len(), 2);
 
-    // Check that progress_percent is computed correctly
     let queued_item = response_obj
         .items
         .iter()
         .find(|i| i.job_id == "job-active-1")
         .expect("should find queued item");
     assert_eq!(queued_item.status, "queued");
-    assert_eq!(queued_item.progress_percent, 0.0); // no total_bytes
+    // progress_percent is computed client-side from bytes_downloaded/total_bytes
 
     let running_item = response_obj
         .items
@@ -192,7 +191,7 @@ async fn test_get_active_downloads_returns_correct_dtos() {
         .find(|i| i.job_id == "job-active-2")
         .expect("should find running item");
     assert_eq!(running_item.status, "running");
-    assert_eq!(running_item.progress_percent, 50.0); // 1500/3000 = 50%
+    // progress_percent is computed client-side from bytes_downloaded/total_bytes
 
     // Verify DTO fields are populated
     assert_eq!(queued_item.repo_id, "unsloth/Qwen3.6-35B-A3B-GGUF");

@@ -33,7 +33,6 @@ pub struct DownloadQueueItemDto {
     pub completed_at: Option<String>,
     pub queued_at: String,
     pub kind: String,
-    pub progress_percent: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,13 +52,10 @@ pub struct DownloadCancelResponse {
     pub message: Option<String>,
 }
 
-/// Convert a `koji_core::db::queries::DownloadQueueItem` to a DTO with computed progress.
+/// Convert a `koji_core::db::queries::DownloadQueueItem` to a DTO.
+/// Note: progress_percent is computed client-side from bytes_downloaded
+/// and total_bytes, so it's not included in the API response.
 fn item_to_dto(item: &koji_core::db::queries::DownloadQueueItem) -> DownloadQueueItemDto {
-    let progress_percent = match item.total_bytes {
-        Some(total) if total > 0 => (item.bytes_downloaded as f64 / total as f64) * 100.0,
-        _ => 0.0,
-    };
-
     DownloadQueueItemDto {
         job_id: item.job_id.clone(),
         repo_id: item.repo_id.clone(),
@@ -73,7 +69,6 @@ fn item_to_dto(item: &koji_core::db::queries::DownloadQueueItem) -> DownloadQueu
         completed_at: item.completed_at.clone(),
         queued_at: item.queued_at.clone(),
         kind: item.kind.clone(),
-        progress_percent,
     }
 }
 
