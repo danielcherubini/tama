@@ -134,9 +134,10 @@ pub fn Downloads() -> impl IntoView {
                 </button>
             </div>
 
-            // Active tab content
+            // Tab content — render only the active tab
             {move || {
-                if active_tab.get() == "active" {
+                let tab = active_tab.get();
+                if tab == "active" {
                     view! {
                         <div class="downloads-active">
                             {move || {
