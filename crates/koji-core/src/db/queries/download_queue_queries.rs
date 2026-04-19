@@ -26,6 +26,46 @@ pub struct DownloadQueueItem {
     pub context_length: Option<u32>,
 }
 
+/// Column indices for the download_queue table (used by query helpers).
+mod cols {
+    pub const ID: usize = 0;
+    pub const JOB_ID: usize = 1;
+    pub const REPO_ID: usize = 2;
+    pub const FILENAME: usize = 3;
+    pub const DISPLAY_NAME: usize = 4;
+    pub const STATUS: usize = 5;
+    pub const BYTES_DOWNLOADED: usize = 6;
+    pub const TOTAL_BYTES: usize = 7;
+    pub const ERROR_MESSAGE: usize = 8;
+    pub const STARTED_AT: usize = 9;
+    pub const COMPLETED_AT: usize = 10;
+    pub const QUEUED_AT: usize = 11;
+    pub const KIND: usize = 12;
+    pub const QUANT: usize = 13;
+    pub const CONTEXT_LENGTH: usize = 14;
+}
+
+/// Helper to map a SQL row to a `DownloadQueueItem`.
+pub fn map_queue_item(row: &rusqlite::Row) -> rusqlite::Result<DownloadQueueItem> {
+    Ok(DownloadQueueItem {
+        id: row.get(cols::ID)?,
+        job_id: row.get(cols::JOB_ID)?,
+        repo_id: row.get(cols::REPO_ID)?,
+        filename: row.get(cols::FILENAME)?,
+        display_name: row.get(cols::DISPLAY_NAME)?,
+        status: row.get(cols::STATUS)?,
+        bytes_downloaded: row.get(cols::BYTES_DOWNLOADED)?,
+        total_bytes: row.get(cols::TOTAL_BYTES)?,
+        error_message: row.get(cols::ERROR_MESSAGE)?,
+        started_at: row.get(cols::STARTED_AT)?,
+        completed_at: row.get(cols::COMPLETED_AT)?,
+        queued_at: row.get(cols::QUEUED_AT)?,
+        kind: row.get(cols::KIND)?,
+        quant: row.get(cols::QUANT)?,
+        context_length: row.get(cols::CONTEXT_LENGTH)?,
+    })
+}
+
 /// Insert a new item into the download queue.
 /// Returns the new row id.
 #[allow(clippy::too_many_arguments)]
@@ -67,25 +107,7 @@ pub fn get_queued_item(conn: &Connection) -> Result<Option<DownloadQueueItem>> {
          ORDER BY queued_at ASC \
          LIMIT 1",
     )?;
-    let mut rows = stmt.query_map([], |row| {
-        Ok(DownloadQueueItem {
-            id: row.get(0)?,
-            job_id: row.get(1)?,
-            repo_id: row.get(2)?,
-            filename: row.get(3)?,
-            display_name: row.get(4)?,
-            status: row.get(5)?,
-            bytes_downloaded: row.get(6)?,
-            total_bytes: row.get(7)?,
-            error_message: row.get(8)?,
-            started_at: row.get(9)?,
-            completed_at: row.get(10)?,
-            queued_at: row.get(11)?,
-            kind: row.get(12)?,
-            quant: row.get(13)?,
-            context_length: row.get(14)?,
-        })
-    })?;
+    let mut rows = stmt.query_map([], map_queue_item)?;
     match rows.next() {
         Some(row) => Ok(Some(row?)),
         None => Ok(None),
@@ -171,25 +193,7 @@ pub fn get_item_by_job_id(conn: &Connection, job_id: &str) -> Result<Option<Down
          WHERE job_id = ?1 \
          LIMIT 1",
     )?;
-    let mut rows = stmt.query_map((job_id,), |row| {
-        Ok(DownloadQueueItem {
-            id: row.get(0)?,
-            job_id: row.get(1)?,
-            repo_id: row.get(2)?,
-            filename: row.get(3)?,
-            display_name: row.get(4)?,
-            status: row.get(5)?,
-            bytes_downloaded: row.get(6)?,
-            total_bytes: row.get(7)?,
-            error_message: row.get(8)?,
-            started_at: row.get(9)?,
-            completed_at: row.get(10)?,
-            queued_at: row.get(11)?,
-            kind: row.get(12)?,
-            quant: row.get(13)?,
-            context_length: row.get(14)?,
-        })
-    })?;
+    let mut rows = stmt.query_map((job_id,), map_queue_item)?;
     match rows.next() {
         Some(row) => Ok(Some(row?)),
         None => Ok(None),
@@ -207,25 +211,7 @@ pub fn get_active_items(conn: &Connection) -> Result<Vec<DownloadQueueItem>> {
          ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'verifying' THEN 1 ELSE 2 END, \
                   queued_at ASC",
     )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(DownloadQueueItem {
-            id: row.get(0)?,
-            job_id: row.get(1)?,
-            repo_id: row.get(2)?,
-            filename: row.get(3)?,
-            display_name: row.get(4)?,
-            status: row.get(5)?,
-            bytes_downloaded: row.get(6)?,
-            total_bytes: row.get(7)?,
-            error_message: row.get(8)?,
-            started_at: row.get(9)?,
-            completed_at: row.get(10)?,
-            queued_at: row.get(11)?,
-            kind: row.get(12)?,
-            quant: row.get(13)?,
-            context_length: row.get(14)?,
-        })
-    })?;
+    let rows = stmt.query_map([], map_queue_item)?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .map_err(Into::into)
 }
@@ -245,25 +231,7 @@ pub fn get_history_items(
          ORDER BY completed_at DESC \
          LIMIT ?1 OFFSET ?2",
     )?;
-    let rows = stmt.query_map((limit, offset), |row| {
-        Ok(DownloadQueueItem {
-            id: row.get(0)?,
-            job_id: row.get(1)?,
-            repo_id: row.get(2)?,
-            filename: row.get(3)?,
-            display_name: row.get(4)?,
-            status: row.get(5)?,
-            bytes_downloaded: row.get(6)?,
-            total_bytes: row.get(7)?,
-            error_message: row.get(8)?,
-            started_at: row.get(9)?,
-            completed_at: row.get(10)?,
-            queued_at: row.get(11)?,
-            kind: row.get(12)?,
-            quant: row.get(13)?,
-            context_length: row.get(14)?,
-        })
-    })?;
+    let rows = stmt.query_map((limit, offset), map_queue_item)?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .map_err(Into::into)
 }
@@ -301,25 +269,7 @@ pub fn get_running_item(conn: &Connection) -> Result<Option<DownloadQueueItem>> 
          WHERE status IN ('running', 'verifying') \
          LIMIT 1",
     )?;
-    let mut rows = stmt.query_map([], |row| {
-        Ok(DownloadQueueItem {
-            id: row.get(0)?,
-            job_id: row.get(1)?,
-            repo_id: row.get(2)?,
-            filename: row.get(3)?,
-            display_name: row.get(4)?,
-            status: row.get(5)?,
-            bytes_downloaded: row.get(6)?,
-            total_bytes: row.get(7)?,
-            error_message: row.get(8)?,
-            started_at: row.get(9)?,
-            completed_at: row.get(10)?,
-            queued_at: row.get(11)?,
-            kind: row.get(12)?,
-            quant: row.get(13)?,
-            context_length: row.get(14)?,
-        })
-    })?;
+    let mut rows = stmt.query_map([], map_queue_item)?;
     match rows.next() {
         Some(row) => Ok(Some(row?)),
         None => Ok(None),
@@ -335,25 +285,7 @@ pub fn get_all_running_items(conn: &Connection) -> Result<Vec<DownloadQueueItem>
          FROM download_queue \
          WHERE status IN ('running', 'verifying')",
     )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(DownloadQueueItem {
-            id: row.get(0)?,
-            job_id: row.get(1)?,
-            repo_id: row.get(2)?,
-            filename: row.get(3)?,
-            display_name: row.get(4)?,
-            status: row.get(5)?,
-            bytes_downloaded: row.get(6)?,
-            total_bytes: row.get(7)?,
-            error_message: row.get(8)?,
-            started_at: row.get(9)?,
-            completed_at: row.get(10)?,
-            queued_at: row.get(11)?,
-            kind: row.get(12)?,
-            quant: row.get(13)?,
-            context_length: row.get(14)?,
-        })
-    })?;
+    let rows = stmt.query_map([], map_queue_item)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
