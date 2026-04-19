@@ -58,6 +58,11 @@ name = "config_structured_test"
 path = "tests/config_structured_test.rs"
 required-features = ["ssr"]
 
+[[test]]
+name = "downloads_api"
+path = "tests/downloads_api.rs"
+required-features = ["ssr"]
+
 [dev-dependencies]
 tokio = { workspace = true }
 reqwest = { workspace = true }

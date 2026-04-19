@@ -14,9 +14,10 @@ use crate::db::OpenResult;
 // Re-export query types for use in tests and the service.
 // These are re-exported via `crate::db::queries::*`.
 use crate::db::queries::{
-    cancel_queue_item, get_active_items, get_item_by_job_id, get_queued_item, get_running_item,
-    insert_queue_item, mark_stale_running_as_failed, try_mark_running as db_try_mark_running,
-    update_queue_status, DownloadQueueItem,
+    cancel_queue_item, count_history_items, get_active_items, get_history_items,
+    get_item_by_job_id, get_queued_item, get_running_item, insert_queue_item,
+    mark_stale_running_as_failed, try_mark_running as db_try_mark_running, update_queue_status,
+    DownloadQueueItem,
 };
 
 /// Events emitted by the download queue service during lifecycle transitions.
@@ -73,7 +74,7 @@ impl DownloadQueueService {
     }
 
     /// Open a database connection using the configured db_dir.
-    fn open_conn(&self) -> Result<rusqlite::Connection> {
+    pub fn open_conn(&self) -> Result<rusqlite::Connection> {
         let dir = self
             .db_dir
             .as_ref()
@@ -213,6 +214,18 @@ impl DownloadQueueService {
     pub fn get_active_items(&self) -> Result<Vec<DownloadQueueItem>> {
         let conn = self.open_conn()?;
         get_active_items(&conn)
+    }
+
+    /// Get history items (completed, failed, cancelled), sorted newest first.
+    pub fn get_history_items(&self, limit: i64, offset: i64) -> Result<Vec<DownloadQueueItem>> {
+        let conn = self.open_conn()?;
+        get_history_items(&conn, limit, offset)
+    }
+
+    /// Count total history items (completed, failed, cancelled).
+    pub fn count_history_items(&self) -> Result<i64> {
+        let conn = self.open_conn()?;
+        count_history_items(&conn)
     }
 
     /// Subscribe to download events via a broadcast channel receiver.
