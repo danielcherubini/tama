@@ -46,7 +46,21 @@ pub fn find_llama_bench(backend_path: &std::path::Path) -> Result<PathBuf> {
         }
     }
 
-    // 2. Check backend tools directory
+    // 2. Check same directory as backend binary
+    // llama-bench may be placed alongside llama-server (e.g. ~/.config/koji/backends/.../llama-bench)
+    let bench_name = if cfg!(target_os = "windows") {
+        "llama-bench.exe"
+    } else {
+        "llama-bench"
+    };
+    if let Some(parent_dir) = backend_path.parent() {
+        let direct_path = parent_dir.join(bench_name);
+        if direct_path.exists() {
+            return Ok(direct_path);
+        }
+    }
+
+    // 3. Check grandparent's tools directory
     // Backend path is typically: /path/to/llama-server (binary)
     // Parent is: /path/to/ (bin dir)
     // Grandparent is: /path/to/llama.cpp/ or similar
@@ -55,11 +69,6 @@ pub fn find_llama_bench(backend_path: &std::path::Path) -> Result<PathBuf> {
 
     if let Some(parent_dir) = grandparent {
         let tools_dir = parent_dir.join("tools");
-        let bench_name = if cfg!(target_os = "windows") {
-            "llama-bench.exe"
-        } else {
-            "llama-bench"
-        };
         let bench_path = tools_dir.join(bench_name);
         if bench_path.exists() {
             return Ok(bench_path);
@@ -253,11 +262,16 @@ fn detect_gpu_type(backend_path: &std::path::Path) -> String {
 
 /// Run a benchmark using llama-bench and return the report.
 ///
+/// `backend_name` is an optional override — if provided, llama-bench is
+/// resolved from that backend's installation path instead of the model's
+/// configured backend.
+///
 /// This function is designed to be called from a background job — it streams
 /// progress via the provided ProgressSink.
 pub async fn run_llama_bench(
     config: &Config,
     model_id: &str,
+    backend_name: Option<&str>,
     bench_config: &LlamaBenchConfig,
     progress: &dyn ProgressSink,
 ) -> Result<BenchReport> {
@@ -314,14 +328,20 @@ pub async fn run_llama_bench(
         }
     };
 
-    // Resolve backend binary path
+    // Resolve backend binary path — use explicit backend_name if provided,
+    // otherwise fall back to the model's configured backend.
+    let target_backend = backend_name.unwrap_or(&server_config.backend);
     let backend_path = {
         let conn = Config::open_db();
-        config.resolve_backend_path(&server_config.backend, &conn)?
+        config.resolve_backend_path(target_backend, &conn)?
     };
 
     // Find llama-bench binary
-    let bench_binary = find_llama_bench(&backend_path).context("llama-bench not found")?;
+    let bench_binary =
+        find_llama_bench(&backend_path).context(format!(
+            "llama-bench not found for backend '{}'. Install llama.cpp from source or set LLAMA_BENCH_PATH",
+            target_backend
+        ))?;
 
     // Get llama-bench version for reporting
     let _version_output = Command::new(&bench_binary)

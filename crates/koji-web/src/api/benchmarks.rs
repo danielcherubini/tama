@@ -25,6 +25,10 @@ use crate::server::AppState;
 #[derive(Debug, Clone, Deserialize)]
 pub struct BenchmarkRunRequest {
     pub model_id: String,
+    /// Optional backend name to use for llama-bench. If not provided, the
+    /// backend is resolved from the model config.
+    #[serde(default)]
+    pub backend_name: Option<String>,
     pub pp_sizes: Vec<u32>,
     pub tg_sizes: Vec<u32>,
     pub runs: u32,
@@ -157,7 +161,14 @@ async fn run_benchmark_inner(
     };
 
     // Run benchmark
-    let report = llama_bench::run_llama_bench(&config, &req.model_id, &bench_config, &sink).await?;
+    let report = llama_bench::run_llama_bench(
+        &config,
+        &req.model_id,
+        req.backend_name.as_deref(),
+        &bench_config,
+        &sink,
+    )
+    .await?;
 
     // Store results in database
     let db_dir = koji_core::config::Config::config_dir()?;
