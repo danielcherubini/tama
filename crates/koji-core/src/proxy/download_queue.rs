@@ -16,8 +16,8 @@ use crate::db::OpenResult;
 use crate::db::queries::{
     cancel_queue_item, count_history_items, get_active_items, get_all_running_items,
     get_history_items, get_item_by_job_id, get_queued_item, insert_queue_item,
-    mark_stale_running_as_failed, try_mark_running as db_try_mark_running,
-    update_progress_only, update_queue_status, DownloadQueueItem,
+    mark_stale_running_as_failed, try_mark_running as db_try_mark_running, update_progress_only,
+    update_queue_status, DownloadQueueItem,
 };
 
 /// Events emitted by the download queue service during lifecycle transitions.
@@ -75,7 +75,11 @@ impl DownloadQueueService {
     /// dropped events via the `Lagged` marker event.
     pub fn new(db_dir: Option<PathBuf>, poll_interval_secs: u64) -> Self {
         let events_tx = broadcast::channel(256).0;
-        Self { db_dir, events_tx, poll_interval_secs }
+        Self {
+            db_dir,
+            events_tx,
+            poll_interval_secs,
+        }
     }
 
     /// Open a database connection using the configured db_dir.

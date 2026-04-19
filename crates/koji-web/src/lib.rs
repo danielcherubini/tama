@@ -107,8 +107,9 @@ pub fn App() -> impl IntoView {
                                     // Recalculate progress
                                     if let Some(total) = item.total_bytes {
                                         if total > 0 {
-                                            item.progress_percent =
-                                                (item.bytes_downloaded as f64 / total as f64) * 100.0;
+                                            item.progress_percent = (item.bytes_downloaded as f64
+                                                / total as f64)
+                                                * 100.0;
                                         }
                                     }
                                 }
@@ -120,10 +121,9 @@ pub fn App() -> impl IntoView {
                     if event_json.event.as_str() == "Queued" {
                         let job_id = event_json.job_id.clone();
                         wasm_bindgen_futures::spawn_local(async move {
-                            if let Ok(resp) =
-                                gloo_net::http::Request::get("/api/downloads/active")
-                                    .send()
-                                    .await
+                            if let Ok(resp) = gloo_net::http::Request::get("/api/downloads/active")
+                                .send()
+                                .await
                             {
                                 if let Ok(data) = resp
                                     .json::<pages::downloads::DownloadsActiveResponse>()
@@ -147,8 +147,7 @@ pub fn App() -> impl IntoView {
                         "Completed" | "Failed" | "Cancelled"
                     ) {
                         let limit = pages::downloads::HISTORY_LIMIT.get();
-                        let offset = pages::downloads::HISTORY_PAGE
-                            .get()
+                        let offset = pages::downloads::HISTORY_PAGE.get()
                             * pages::downloads::HISTORY_LIMIT.get();
                         wasm_bindgen_futures::spawn_local(async move {
                             if let Ok(resp) = gloo_net::http::Request::get(&format!(
@@ -158,9 +157,9 @@ pub fn App() -> impl IntoView {
                             .send()
                             .await
                             {
-                                if let Ok(data) =
-                                    resp.json::<pages::downloads::DownloadsHistoryResponse>()
-                                        .await
+                                if let Ok(data) = resp
+                                    .json::<pages::downloads::DownloadsHistoryResponse>()
+                                    .await
                                 {
                                     pages::downloads::HISTORY_ITEMS.set(data.items);
                                     pages::downloads::HISTORY_TOTAL.set(data.total);
