@@ -15,8 +15,7 @@ use leptos_router::{
     components::{Route, Router, Routes},
     path,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::LazyLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 mod components;
@@ -26,8 +25,29 @@ pub mod utils;
 
 use crate::components::toast::{DownloadEvent, ToastStore};
 
-/// Debounce flag for progress event processing — prevents spawning too many async tasks.
-static PROGRESS_DEBOUNCE: LazyLock<AtomicBool> = LazyLock::new(|| AtomicBool::new(false));
+/// Timestamp (in ms) of the last processed progress event.
+/// Used to throttle SSE progress updates — only process events that are
+/// at least 200ms apart, preventing dozens of async tasks from being spawned.
+static LAST_PROGRESS_TS: AtomicU64 = AtomicU64::new(0);
+
+/// Get current timestamp in milliseconds.
+pub fn now_ms() -> u64 {
+    web_sys::js_sys::Date::now() as u64
+}
+
+/// Check if enough time has passed since the last progress event to process a new one.
+/// Returns true if this event should be processed, false if it should be throttled.
+fn should_process_progress_event() -> bool {
+    let now = now_ms();
+    let last_ts = LAST_PROGRESS_TS.load(Ordering::Relaxed);
+    if now - last_ts >= 200 {
+        // Update the timestamp and allow this event through
+        LAST_PROGRESS_TS.store(now, Ordering::Relaxed);
+        true
+    } else {
+        false
+    }
+}
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -52,21 +72,20 @@ pub fn App() -> impl IntoView {
                 if let Ok(event_json) = serde_json::from_str::<DownloadEvent>(&data) {
                     // Update active downloads from progress/started events
                     // by updating the specific item in-place instead of a full refresh.
-                    // Debounce progress events to avoid spawning too many async tasks.
+                    // Throttle Progress events to 1 per 200ms to avoid spawning too many async tasks.
                     if matches!(
                         event_json.event.as_str(),
                         "Started" | "Progress" | "Verifying"
                     ) {
-                        let is_debounced = PROGRESS_DEBOUNCE.swap(true, Ordering::SeqCst);
-                        // Skip this progress update if one is already in flight.
-                        if event_json.event.as_str() == "Progress" && is_debounced {
-                            // Reset debounce flag after a short delay so the next batch
-                            // of progress events can be processed.
-                            wasm_bindgen_futures::spawn_local(async move {
-                                gloo_timers::future::TimeoutFuture::new(200).await;
-                                PROGRESS_DEBOUNCE.store(false, Ordering::SeqCst);
-                            });
+                        // Only throttle 'Progress' events — Started/Verifying are infrequent
+                        // and should always be processed immediately.
+                        let should_process = if event_json.event.as_str() == "Progress" {
+                            should_process_progress_event()
                         } else {
+                            true
+                        };
+
+                        if should_process {
                             let job_id = event_json.job_id.clone();
                             let status_label = match event_json.event.as_str() {
                                 "Started" => "running",
@@ -93,12 +112,6 @@ pub fn App() -> impl IntoView {
                                         }
                                     }
                                 }
-                            });
-                            // Reset debounce flag after a short delay so the next batch
-                            // of progress events can be processed.
-                            wasm_bindgen_futures::spawn_local(async move {
-                                gloo_timers::future::TimeoutFuture::new(200).await;
-                                PROGRESS_DEBOUNCE.store(false, Ordering::SeqCst);
                             });
                         }
                     }
