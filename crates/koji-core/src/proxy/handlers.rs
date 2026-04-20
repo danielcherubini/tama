@@ -344,10 +344,18 @@ pub async fn handle_forward_post(
     let (parts, body) = req.into_parts();
     let body_bytes = match to_bytes(body, MAX_REQUEST_BODY_SIZE).await {
         Ok(b) => b,
-        Err(_) => return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": {"message": "Request body too large", "type": "BadRequestError"}})),
-        ).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": {
+                        "message": "Request body too large",
+                        "type": "BadRequestError"
+                    }
+                })),
+            )
+                .into_response()
+        }
     };
 
     // Try to extract model for auto-loading
@@ -362,10 +370,18 @@ pub async fn handle_forward_post(
                 let card = state.get_model_card(model).await;
                 match state.load_model(model, card.as_ref()).await {
                     Ok(s) => s,
-                    Err(e) => return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({"error": {"message": format!("Failed to load model: {}", e), "type": "LoadModelError"}})),
-                    ).into_response(),
+                    Err(e) => {
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(serde_json::json!({
+                                "error": {
+                                    "message": format!("Failed to load model: {}", e),
+                                    "type": "LoadModelError"
+                                }
+                            })),
+                        )
+                            .into_response()
+                    }
                 }
             }
         }
@@ -378,8 +394,14 @@ pub async fn handle_forward_post(
         } else {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
-                Json(serde_json::json!({"error": {"message": "No backend server available", "type": "ServiceUnavailableError"}})),
-            ).into_response();
+                Json(serde_json::json!({
+                    "error": {
+                        "message": "No backend server available",
+                        "type": "ServiceUnavailableError"
+                    }
+                })),
+            )
+                .into_response();
         }
     };
 
@@ -416,9 +438,16 @@ pub async fn handle_forward_get(
     drop(models);
 
     if server_name.is_empty() {
-        return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
-            "error": {"message": "No backend server available", "type": "ServiceUnavailableError"}
-        }))).into_response();
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": {
+                    "message": "No backend server available",
+                    "type": "ServiceUnavailableError"
+                }
+            })),
+        )
+            .into_response();
     }
 
     forward_request(&state, &server_name, &parts, &body_bytes, "").await
