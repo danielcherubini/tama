@@ -82,8 +82,8 @@ pub fn App() -> impl IntoView {
     // Open SSE connection on app mount to receive download events.
     // Handle creation failure gracefully — show offline indicator and retry periodically.
     let es_result = web_sys::EventSource::new("/api/downloads/events");
-    let es = match es_result {
-        Ok(es) => es,
+    let es: Option<web_sys::EventSource> = match es_result {
+        Ok(es) => Some(es),
         Err(err) => {
             sse_connected.set(false);
             let err_msg = err
@@ -117,138 +117,136 @@ pub fn App() -> impl IntoView {
                     }
                 }
             });
-            // Create a minimal stub EventSource so the rest of the app doesn't panic.
-            // We use about:blank which will immediately error, but that's acceptable
-            // since we won't attach meaningful listeners to it.
-            web_sys::EventSource::new("about:blank").unwrap_or_else(|_| {
-                // If even about:blank fails (extremely unlikely), create a raw stub.
-                // This is a last-resort fallback — the app UI continues rendering.
-                unsafe { std::mem::zeroed() }
-            })
+            // EventSource creation failed — None means no listeners will be attached.
+            // The offline indicator banner is already shown; the app continues normally.
+            None
         }
     };
 
-    for event_name in [
-        "Started",
-        "Progress",
-        "Verifying",
-        "Completed",
-        "Failed",
-        "Cancelled",
-        "Queued",
-    ] {
-        let toast_store = toast_store.clone();
-        let handler = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
-            if let Some(data) = event.data().as_string() {
-                if let Ok(event_json) = serde_json::from_str::<DownloadEvent>(&data) {
-                    // Update active downloads from progress/started events
-                    // by updating the specific item in-place instead of a full refresh.
-                    // Throttle Progress events to 1 per 200ms to avoid spawning too many async tasks.
-                    if matches!(
-                        event_json.event.as_str(),
-                        "Started" | "Progress" | "Verifying"
-                    ) {
-                        // Only throttle 'Progress' events — Started/Verifying are infrequent
-                        // and should always be processed immediately.
-                        let should_process = if event_json.event.as_str() == "Progress" {
-                            should_process_progress_event()
-                        } else {
-                            true
-                        };
-
-                        if should_process {
-                            let job_id = event_json.job_id.clone();
-                            let status_label = match event_json.event.as_str() {
-                                "Started" => "running",
-                                "Progress" => "running",
-                                "Verifying" => "verifying",
-                                _ => "running",
+    if let Some(es) = es {
+        for event_name in [
+            "Started",
+            "Progress",
+            "Verifying",
+            "Completed",
+            "Failed",
+            "Cancelled",
+            "Queued",
+        ] {
+            let toast_store = toast_store.clone();
+            let handler = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
+                if let Some(data) = event.data().as_string() {
+                    if let Ok(event_json) = serde_json::from_str::<DownloadEvent>(&data) {
+                        // Update active downloads from progress/started events
+                        // by updating the specific item in-place instead of a full refresh.
+                        // Throttle Progress events to 1 per 200ms to avoid spawning too many async tasks.
+                        if matches!(
+                            event_json.event.as_str(),
+                            "Started" | "Progress" | "Verifying"
+                        ) {
+                            // Only throttle 'Progress' events — Started/Verifying are infrequent
+                            // and should always be processed immediately.
+                            let should_process = if event_json.event.as_str() == "Progress" {
+                                should_process_progress_event()
+                            } else {
+                                true
                             };
-                            let bytes_down = event_json.bytes_downloaded;
-                            let total_bytes = event_json.total_bytes;
-                            // Use .set() with a new Vec so ArcRwSignal detects the change.
-                            // .update() mutates in-place but doesn't trigger re-renders.
-                            let current = pages::downloads::ACTIVE_DOWNLOADS.get_untracked();
-                            let updated: Vec<_> = current
-                                .into_iter()
-                                .map(|mut item| {
-                                    if item.job_id == job_id {
-                                        item.status = status_label.to_string();
-                                        if let Some(bytes) = bytes_down {
-                                            item.bytes_downloaded = bytes as i64;
-                                        }
-                                        if let Some(total) = total_bytes {
-                                            item.total_bytes = Some(total as i64);
-                                        }
-                                    }
-                                    item
-                                })
-                                .collect();
-                            pages::downloads::ACTIVE_DOWNLOADS.set(updated);
-                        }
-                    }
 
-                    // For Queued events, fetch full details to get missing fields
-                    if event_json.event.as_str() == "Queued" {
-                        let job_id = event_json.job_id.clone();
-                        wasm_bindgen_futures::spawn_local(async move {
-                            if let Ok(resp) = gloo_net::http::Request::get("/api/downloads/active")
+                            if should_process {
+                                let job_id = event_json.job_id.clone();
+                                let status_label = match event_json.event.as_str() {
+                                    "Started" => "running",
+                                    "Progress" => "running",
+                                    "Verifying" => "verifying",
+                                    _ => "running",
+                                };
+                                let bytes_down = event_json.bytes_downloaded;
+                                let total_bytes = event_json.total_bytes;
+                                // Use .set() with a new Vec so ArcRwSignal detects the change.
+                                // .update() mutates in-place but doesn't trigger re-renders.
+                                let current = pages::downloads::ACTIVE_DOWNLOADS.get_untracked();
+                                let updated: Vec<_> = current
+                                    .into_iter()
+                                    .map(|mut item| {
+                                        if item.job_id == job_id {
+                                            item.status = status_label.to_string();
+                                            if let Some(bytes) = bytes_down {
+                                                item.bytes_downloaded = bytes as i64;
+                                            }
+                                            if let Some(total) = total_bytes {
+                                                item.total_bytes = Some(total as i64);
+                                            }
+                                        }
+                                        item
+                                    })
+                                    .collect();
+                                pages::downloads::ACTIVE_DOWNLOADS.set(updated);
+                            }
+                        }
+
+                        // For Queued events, fetch full details to get missing fields
+                        if event_json.event.as_str() == "Queued" {
+                            let job_id = event_json.job_id.clone();
+                            wasm_bindgen_futures::spawn_local(async move {
+                                if let Ok(resp) =
+                                    gloo_net::http::Request::get("/api/downloads/active")
+                                        .send()
+                                        .await
+                                {
+                                    if let Ok(data) = resp
+                                        .json::<pages::downloads::DownloadsActiveResponse>()
+                                        .await
+                                    {
+                                        // Only replace if this job isn't already in the list
+                                        pages::downloads::ACTIVE_DOWNLOADS.update(|items| {
+                                            if !items.iter().any(|i| i.job_id == job_id) {
+                                                pages::downloads::ACTIVE_DOWNLOADS.set(data.items);
+                                            }
+                                        });
+                                    }
+                                }
+                            });
+                        }
+
+                        // Refresh history on terminal events (Completed/Failed/Cancelled).
+                        // Use the user's current page so they aren't unexpectedly jumped.
+                        if matches!(
+                            event_json.event.as_str(),
+                            "Completed" | "Failed" | "Cancelled"
+                        ) {
+                            let limit = pages::downloads::HISTORY_LIMIT.get();
+                            let offset = pages::downloads::HISTORY_PAGE.get()
+                                * pages::downloads::HISTORY_LIMIT.get();
+                            wasm_bindgen_futures::spawn_local(async move {
+                                if let Ok(resp) = gloo_net::http::Request::get(&format!(
+                                    "/api/downloads/history?limit={}&offset={}",
+                                    limit, offset
+                                ))
                                 .send()
                                 .await
-                            {
-                                if let Ok(data) = resp
-                                    .json::<pages::downloads::DownloadsActiveResponse>()
-                                    .await
                                 {
-                                    // Only replace if this job isn't already in the list
-                                    pages::downloads::ACTIVE_DOWNLOADS.update(|items| {
-                                        if !items.iter().any(|i| i.job_id == job_id) {
-                                            pages::downloads::ACTIVE_DOWNLOADS.set(data.items);
-                                        }
-                                    });
+                                    if let Ok(data) = resp
+                                        .json::<pages::downloads::DownloadsHistoryResponse>()
+                                        .await
+                                    {
+                                        pages::downloads::HISTORY_ITEMS.set(data.items);
+                                        pages::downloads::HISTORY_TOTAL.set(data.total);
+                                    }
                                 }
-                            }
-                        });
-                    }
+                            });
+                        }
 
-                    // Refresh history on terminal events (Completed/Failed/Cancelled).
-                    // Use the user's current page so they aren't unexpectedly jumped.
-                    if matches!(
-                        event_json.event.as_str(),
-                        "Completed" | "Failed" | "Cancelled"
-                    ) {
-                        let limit = pages::downloads::HISTORY_LIMIT.get();
-                        let offset = pages::downloads::HISTORY_PAGE.get()
-                            * pages::downloads::HISTORY_LIMIT.get();
-                        wasm_bindgen_futures::spawn_local(async move {
-                            if let Ok(resp) = gloo_net::http::Request::get(&format!(
-                                "/api/downloads/history?limit={}&offset={}",
-                                limit, offset
-                            ))
-                            .send()
-                            .await
-                            {
-                                if let Ok(data) = resp
-                                    .json::<pages::downloads::DownloadsHistoryResponse>()
-                                    .await
-                                {
-                                    pages::downloads::HISTORY_ITEMS.set(data.items);
-                                    pages::downloads::HISTORY_TOTAL.set(data.total);
-                                }
-                            }
-                        });
-                    }
-
-                    // Emit toasts for relevant events
-                    if let Some(toast) = ToastStore::from_download_event(&event_json) {
-                        toast_store.add(toast);
+                        // Emit toasts for relevant events
+                        if let Some(toast) = ToastStore::from_download_event(&event_json) {
+                            toast_store.add(toast);
+                        }
                     }
                 }
-            }
-        }) as Box<dyn FnMut(_)>);
-        es.add_event_listener_with_callback(event_name, handler.as_ref().unchecked_ref())
-            .unwrap();
-        handler.forget();
+            }) as Box<dyn FnMut(_)>);
+            es.add_event_listener_with_callback(event_name, handler.as_ref().unchecked_ref())
+                .unwrap();
+            handler.forget();
+        }
     }
 
     view! {
