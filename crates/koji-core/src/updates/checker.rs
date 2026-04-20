@@ -312,16 +312,16 @@ impl UpdateChecker {
             None => pull::list_gguf_files(repo_id).await?,
         };
 
-        // After successful fetch, store in cache (only if not already cached)
-        if self.gguf_listing_cache.get(repo_id).await.is_none() {
-            self.gguf_listing_cache
-                .insert(
-                    repo_id.to_string(),
-                    remote_listing.commit_sha.clone(),
-                    remote_listing.files.clone(),
-                )
-                .await;
-        }
+        // After successful fetch, store in cache.
+        // No need to check if already cached here — we only reach this branch
+        // when the match above produced a fresh fetch (cache was empty at that point).
+        self.gguf_listing_cache
+            .insert(
+                repo_id.to_string(),
+                remote_listing.commit_sha.clone(),
+                remote_listing.files.clone(),
+            )
+            .await;
 
         // Tier 1 — quick check: commit SHA match?
         if remote_listing.commit_sha == pull_record.commit_sha {

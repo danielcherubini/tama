@@ -14,9 +14,7 @@ use crate::config::default_num_parallel;
 use crate::models::repo_path;
 use crate::proxy::download_queue::DownloadQueueService;
 
-use super::types::{
-    is_safe_path_component, max_concurrent_pulls, PullRequest, QuantDownloadSpec, CONFIG_WRITE_LOCK,
-};
+use super::types::{is_safe_path_component, max_concurrent_pulls, PullRequest, QuantDownloadSpec};
 use crate::proxy::pull_jobs::{PullJob, PullJobStatus};
 use crate::proxy::ProxyState;
 
@@ -1013,7 +1011,7 @@ pub(crate) async fn setup_model_after_pull(
     spec: &QuantDownloadSpec,
     dest_dir: &std::path::Path,
 ) -> Option<i64> {
-    let _guard = CONFIG_WRITE_LOCK.lock().await;
+    let _permit = state.config_write_semaphore.acquire().await.ok()?;
     let config = state.config.read().await;
     let mut model_configs = state.model_configs.write().await;
     let model_key =
