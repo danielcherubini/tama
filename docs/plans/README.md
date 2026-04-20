@@ -14,8 +14,8 @@ This directory contains implementation plans for the Koji project. Each plan doc
 
 ## Quick Stats
 
-- **Total Plans**: 68
-- **Completed**: 67 ✅
+- **Total Plans**: 69
+- **Completed**: 68 ✅
 - **In Progress**: 0 🚧
 - **Remaining**: 0 📋
 
@@ -137,6 +137,7 @@ This directory contains implementation plans for the Koji project. Each plan doc
 | Plan | Description | PR / Git References |
 |------|-------------|---------------------|
 | [OpenCode Koji Plugin](2026-04-12-opencode-koji-plugin.md) | Auto-discover models via /v1/models, provide modalities and config | `f4530d6`, `dbf1e51`, `b1260e4` |
+| [Proxy API Endpoints](2026-04-20-proxy-api-endpoints.md) | Add all missing llama.cpp-compatible API endpoints using wildcard forwarding | #68 `3e1d180` ✅ COMPLETED |
 
 ---
 
