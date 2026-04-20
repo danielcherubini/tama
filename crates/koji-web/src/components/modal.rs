@@ -1,8 +1,19 @@
 use leptos::prelude::*;
-use std::sync::{Arc, Mutex};
+use std::boxed::Box;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use web_sys::KeyboardEvent;
+
+/// Helper to convert a raw pointer to usize and back.
+/// SAFETY: The caller must ensure the pointer is valid for the lifetime of usage.
+unsafe fn ptr_to_usize<T>(ptr: *mut T) -> usize {
+    ptr as usize
+}
+
+/// SAFETY: The returned pointer must be valid and not yet consumed.
+unsafe fn usize_to_ptr<T>(val: usize) -> *mut T {
+    val as *mut T
+}
 
 /// A general-purpose modal overlay.
 ///
@@ -29,37 +40,34 @@ pub fn Modal(
     /// always-rendered tree.
     children: ChildrenFn,
 ) -> impl IntoView {
-    // Store the callback as a JsValue for cleanup on unmount.
-    // The closure itself is leaked via forget(), but we keep a reference
-    // to remove the event listener when the modal is destroyed.
-    let callback_ref = Arc::new(Mutex::new(None::<wasm_bindgen::JsValue>));
+    // Store the closure on the heap so it stays alive for the event listener.
+    // The Closure is kept alive without calling forget() — it will be
+    // deallocated when Box::from_raw is called during cleanup.
     let window = web_sys::window().expect("window");
-
-    {
-        let on_close_clone = on_close;
-        let closure = Closure::<dyn Fn(KeyboardEvent)>::new(move |e: KeyboardEvent| {
+    let closure: Box<Closure<dyn Fn(KeyboardEvent)>> =
+        Box::new(Closure::new(move |e: KeyboardEvent| {
             if e.key() == "Escape" && open.get_untracked() {
-                on_close_clone.run(());
+                on_close.run(());
             }
-        });
-        let cb_ref = closure.as_ref();
-        *callback_ref.lock().unwrap() = Some(cb_ref.clone().unchecked_into());
-        window
-            .add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref())
-            .expect("add keydown listener");
-        // Keep the closure alive so the JS event listener remains functional.
-        closure.forget();
-    }
+        }));
+    window
+        .add_event_listener_with_callback("keydown", (*closure).as_ref().unchecked_ref())
+        .expect("add keydown listener");
+    // Store as usize (Send + Sync) for cleanup — Box::from_raw deallocates on drop.
+    let ptr = unsafe { ptr_to_usize(Box::into_raw(closure)) };
 
-    // Clean up the keydown listener when the modal unmounts.
+    // Clean up the keydown listener and deallocate the Closure when the modal unmounts.
     on_cleanup(move || {
-        if let Some(js_value) = callback_ref.lock().unwrap().take() {
-            window
-                .remove_event_listener_with_callback(
-                    "keydown",
-                    js_value.dyn_ref().expect("event target"),
-                )
-                .ok();
+        let raw_ptr: *mut Closure<dyn Fn(KeyboardEvent)> = unsafe { usize_to_ptr(ptr) };
+        window
+            .remove_event_listener_with_callback(
+                "keydown",
+                unsafe { &*raw_ptr }.as_ref().unchecked_ref(),
+            )
+            .ok();
+        // Reconstruct and drop the Box — this deallocates the Closure.
+        unsafe {
+            drop(Box::from_raw(raw_ptr));
         }
     });
 
