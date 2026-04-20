@@ -598,7 +598,57 @@ pub async fn delete_model(
             })?;
         let _model_config = koji_core::config::ModelConfig::from_db_record(&model_record);
 
-        // File cleanup (mirrors CLI model rm logic)
+        // Step 1: Delete DB records within a transaction — all-or-nothing semantics.
+        // This ensures that if the transaction fails, no files are touched yet
+        // and the DB remains consistent.
+        {
+            let repo_id = model_record.repo_id.clone();
+
+            // Start transaction
+            let tx = match open.conn.transaction() {
+                Ok(tx) => tx,
+                Err(e) => {
+                    tracing::error!("Failed to start transaction for model deletion: {e}");
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        serde_json::json!({"error": "Failed to delete model records from database"}),
+                    ));
+                }
+            };
+
+            // Delete the model config record — CASCADE handles model_files and model_pulls.
+            tracing::debug!("Deleting model config for id={}", model_id);
+            if let Err(e) =
+                koji_core::db::queries::delete_model_config(&tx, model_id)
+            {
+                tracing::error!("Failed to delete model config: {e}");
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    serde_json::json!({"error": format!("Failed to delete model records from database: {e}")}),
+                ));
+            }
+
+            // Delete update check record (best-effort, non-fatal)
+            if let Err(e) =
+                koji_core::db::queries::delete_update_check(&tx, "model", &repo_id)
+            {
+                tracing::warn!("Failed to delete update check (non-fatal): {e}");
+            }
+
+            // Commit the transaction — after this point, DB is clean.
+            if let Err(e) = tx.commit() {
+                tracing::error!("Failed to commit transaction for model deletion: {e}");
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    serde_json::json!({"error": "Failed to delete model records from database"}),
+                ));
+            }
+        }
+
+        // Step 2: File cleanup (best-effort) — after successful DB commit.
+        // If file deletion fails, the DB is already clean; orphaned files are
+        // a benign cleanup issue. If it had succeeded before the DB commit,
+        // a failed transaction would leave files deleted but DB records intact.
         let repo_id = model_record.repo_id.clone();
         if !repo_id.is_empty() {
             // 1. Delete model directory: models_dir / repo_id
@@ -631,49 +681,6 @@ pub async fn delete_model(
                 if card_path.exists() {
                     let _ = std::fs::remove_file(&card_path);
                 }
-            }
-        }
-
-        // 3. Delete DB records within a transaction — all-or-nothing semantics
-        {
-            // Start transaction
-            let tx = match open.conn.transaction() {
-                Ok(tx) => tx,
-                Err(e) => {
-                    tracing::error!("Failed to start transaction for model deletion: {e}");
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        serde_json::json!({"error": "Failed to delete model records from database"}),
-                    ));
-                }
-            };
-
-            // Delete the model config record — CASCADE handles model_files and model_pulls.
-            tracing::debug!("Deleting model config for id={}", model_id);
-            if let Err(e) =
-                koji_core::db::queries::delete_model_config(&tx, model_id)
-            {
-                tracing::error!("Failed to delete model config: {e}");
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    serde_json::json!({"error": format!("Failed to delete model records from database: {e}")}),
-                ));
-            }
-
-            // Delete update check record (best-effort, non-fatal)
-            if let Err(e) =
-                koji_core::db::queries::delete_update_check(&tx, "model", &repo_id)
-            {
-                tracing::warn!("Failed to delete update check (non-fatal): {e}");
-            }
-
-            // Commit the transaction
-            if let Err(e) = tx.commit() {
-                tracing::error!("Failed to commit transaction for model deletion: {e}");
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    serde_json::json!({"error": "Failed to delete model records from database"}),
-                ));
             }
         }
 
