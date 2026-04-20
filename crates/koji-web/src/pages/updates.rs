@@ -103,9 +103,7 @@ fn render_quant_list(
                 }
                 on:click=move |_| on_update_selected(mid.clone())
             >
-                {let mid_ref = mid.clone(); move || update_busy.with(|b| b.as_ref().map(|id| id == &mid_ref).unwrap_or(false))
-                    .then(|| "Updating...".to_string())
-                    .unwrap_or_else(|| "Update Selected".to_string())}
+                {let mid_ref = mid.clone(); move || if update_busy.with(|b| b.as_ref().map(|id| id == &mid_ref).unwrap_or(false)) { "Updating...".to_string() } else { "Update Selected".to_string() }}
             </button>
         </div>
     }
