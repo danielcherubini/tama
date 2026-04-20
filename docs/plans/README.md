@@ -14,8 +14,8 @@ This directory contains implementation plans for the Koji project. Each plan doc
 
 ## Quick Stats
 
-- **Total Plans**: 69
-- **Completed**: 68 ✅
+- **Total Plans**: 70
+- **Completed**: 69 ✅
 - **In Progress**: 0 🚧
 - **Remaining**: 0 📋
 
