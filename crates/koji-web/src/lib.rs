@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 #[cfg(feature = "ssr")]
 pub mod server;
 
