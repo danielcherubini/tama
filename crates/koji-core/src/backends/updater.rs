@@ -136,8 +136,9 @@ pub async fn update_backend_with_progress(
     // Clone backend_type before install_backend moves options
     let backend_type = options.backend_type.clone();
 
-    // Install the new version with progress
-    let new_binary_path = install_backend_with_progress(options, progress).await?;
+    // Install the new version with progress, using the registry's shared client
+    let new_binary_path =
+        install_backend_with_progress(options, progress, Some(&registry.client)).await?;
 
     // Resolve "latest" to actual tag before storing in registry
     let resolved_version = if latest_version.to_lowercase() == "latest" {

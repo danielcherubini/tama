@@ -293,6 +293,7 @@ pub async fn install_backend(
         let result = match koji_core::backends::installer::install_backend_with_progress(
             options,
             Some(adapter),
+            None, // No registry client available in background job
         )
         .await
         {

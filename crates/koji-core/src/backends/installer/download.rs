@@ -26,6 +26,7 @@ const BASE_BACKOFF: Duration = Duration::from_secs(1);
 /// When `progress.is_none()`, preserves the existing `indicatif` TTY bar behavior.
 ///
 /// After the stream completes, verifies downloaded bytes match Content-Length when known.
+#[allow(dead_code)]
 pub async fn download_file(
     url: &str,
     dest: &Path,
