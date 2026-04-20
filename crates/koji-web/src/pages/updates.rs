@@ -487,7 +487,7 @@ pub fn Updates() -> impl IntoView {
                                             model_selections,
                                             model_update_busy,
                                             on_select_all_cb,
-                                            move |id| on_update_selected(id),
+                                            on_update_selected,
                                         ).into_any()
                                     } else {
                                         view! { <span/> }.into_any()
