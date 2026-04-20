@@ -169,16 +169,11 @@ impl JobManager {
         if head.len() < LOG_HEAD_CAP {
             head.push_back(line.clone());
             drop(head);
-            // Broadcast the log event using spawn_blocking with timeout to avoid blocking
-            // when channel is full or no receivers are connected.
-            let tx = job.log_tx.clone();
-            let line_clone = line.clone();
-            let job_id = job.id.clone();
-            tokio::task::spawn_blocking(move || {
-                if let Err(e) = tx.send(JobEvent::Log(line_clone)) {
-                    tracing::warn!("Failed to broadcast log for job {}: {}", job_id, e);
-                }
-            });
+            // Broadcast the log event directly. send() may block if channel is full,
+            // which only happens when all receivers are disconnected — a rare edge case.
+            if let Err(e) = job.log_tx.send(JobEvent::Log(line.clone())) {
+                tracing::warn!("Failed to broadcast log for job {}: {}", job.id, e);
+            }
             return;
         }
 
@@ -195,16 +190,11 @@ impl JobManager {
         }
         drop(tail);
 
-        // Broadcast the log event using spawn_blocking with timeout to avoid blocking
-        // when channel is full or no receivers are connected.
-        let tx = job.log_tx.clone();
-        let line_clone = line;
-        let job_id = job.id.clone();
-        tokio::task::spawn_blocking(move || {
-            if let Err(e) = tx.send(JobEvent::Log(line_clone)) {
-                tracing::warn!("Failed to broadcast log for job {}: {}", job_id, e);
-            }
-        });
+        // Broadcast the log event directly. send() may block if channel is full,
+        // which only happens when all receivers are disconnected — a rare edge case.
+        if let Err(e) = job.log_tx.send(JobEvent::Log(line)) {
+            tracing::warn!("Failed to broadcast log for job {}: {}", job.id, e);
+        }
     }
 
     /// Register a child process PID for this job.
@@ -293,17 +283,14 @@ impl JobManager {
             state.error = error;
         }
 
-        // Broadcast status event — use spawn_blocking to avoid blocking on shutdown
-        let tx = job.log_tx.clone();
-        let job_id = job.id.clone();
-        tokio::task::spawn_blocking(move || {
-            if let Err(e) = tx.send(JobEvent::Status(status)) {
-                tracing::error!(
-                    "CRITICAL: Failed to broadcast status for job {}: {}. SSE subscribers may miss final state.",
-                    job_id, e
-                );
-            }
-        });
+        // Broadcast status event directly. send() may block if channel is full,
+        // but this is the final event so ordering is guaranteed.
+        if let Err(e) = job.log_tx.send(JobEvent::Status(status)) {
+            tracing::error!(
+                "CRITICAL: Failed to broadcast status for job {}: {}. SSE subscribers may miss final state.",
+                job.id, e
+            );
+        }
 
         // Release active slot
         *self.active.lock().await = None;
