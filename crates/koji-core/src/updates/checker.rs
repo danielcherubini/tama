@@ -12,14 +12,13 @@ use crate::models::pull;
 use crate::models::pull::BlobInfo;
 use crate::models::update::FileStatus;
 
+/// Cache entry: (commit_sha, files, epoch_timestamp)
+type CacheEntry = (String, Vec<crate::models::pull::RemoteGguf>, i64);
+
 /// In-memory LRU cache for HuggingFace GGUF file listings.
 /// Reduces API calls by caching (commit_sha, files) per repo_id for 5 minutes.
 pub struct GgufListingCache {
-    cache: std::sync::Arc<
-        tokio::sync::Mutex<
-            lru::LruCache<String, (String, Vec<crate::models::pull::RemoteGguf>, i64)>,
-        >,
-    >,
+    cache: std::sync::Arc<tokio::sync::Mutex<lru::LruCache<String, CacheEntry>>>,
 }
 
 impl Clone for GgufListingCache {

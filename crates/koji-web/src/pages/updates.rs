@@ -1,6 +1,9 @@
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
+/// Detail tuple for quantization info: (quant_name, filename, current_hash, latest_hash, update_available)
+type QuantDetail<'a> = (&'a str, &'a str, Option<&'a str>, Option<&'a str>, bool);
+
 use crate::components::job_log_panel::JobLogPanel;
 use crate::components::self_update_section::SelfUpdateSection;
 
@@ -393,7 +396,7 @@ pub fn Updates() -> impl IntoView {
                                 .unwrap_or_else(|| m.item_id.clone());
 
                             // Parse quants from details_json (same pattern as get_updates in api/updates.rs)
-                            let quants_with_updates: Vec<(&str, &str, Option<&str>, Option<&str>, bool)> = m.details_json
+                            let quants_with_updates: Vec<QuantDetail<'_>> = m.details_json
                                 .as_ref()
                                 .and_then(|d| d.get("quants"))
                                 .and_then(|v| v.as_array())
