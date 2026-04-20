@@ -297,8 +297,7 @@ impl UpdateChecker {
         let remote_listing = match self.gguf_listing_cache.get(repo_id).await {
             Some((cached_sha, cached_files)) => {
                 tracing::debug!("GGUF listing cache hit for '{}'", repo_id);
-                // Use cached file list — still need LFS hashes from fetch_blob_metadata
-                let _blobs = pull::fetch_blob_metadata(repo_id).await?;
+                // Use cached file list — no extra fetch needed; LFS hashes don't change for the same commit
                 crate::models::pull::RepoGgufListing {
                     repo_id: repo_id.to_string(),
                     commit_sha: cached_sha,
