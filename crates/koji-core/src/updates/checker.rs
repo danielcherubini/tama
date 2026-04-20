@@ -8,10 +8,9 @@ use crate::db::queries::{
     get_active_backend, get_all_model_configs, get_all_update_checks, get_model_pull,
     get_oldest_check_time,
 };
-use crate::models::{
-    pull,
-    update::{compare_files, FileStatus},
-};
+use crate::models::pull;
+use crate::models::pull::BlobInfo;
+use crate::models::update::FileStatus;
 
 /// In-memory LRU cache for HuggingFace GGUF file listings.
 /// Reduces API calls by caching (commit_sha, files) per repo_id for 5 minutes.
@@ -360,40 +359,84 @@ impl UpdateChecker {
             }
         };
 
-        // Phase 3 — PURE: compare local vs remote (testable, no I/O)
-        let file_updates = compare_files(&file_records, &remote_blobs);
+        // Phase 3 — PURE: per-quant comparison (testable, no I/O)
+        // Build a map of remote blobs by filename for quick lookup
+        let remote_map: std::collections::HashMap<&str, &BlobInfo> =
+            remote_blobs.iter().map(|(k, v)| (k.as_str(), v)).collect();
 
-        let has_unknown = file_updates
-            .iter()
-            .any(|f| matches!(f.status, FileStatus::Unknown));
+        // Track which local filenames we've seen for new-quant detection
+        let mut local_filenames: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut quants_array: Vec<serde_json::Value> = Vec::new();
+        let mut any_update_available = false;
 
-        let has_changes = file_updates
-            .iter()
-            .any(|f| matches!(f.status, FileStatus::Changed { .. } | FileStatus::NewRemote));
+        // Iterate each local file record and compare against remote
+        for local in &file_records {
+            local_filenames.insert(local.filename.as_str());
 
-        let (update_available, status, error_message) = if has_unknown {
-            (
-                false,
-                "verification_failed",
-                Some("No stored hashes — run `model update --refresh`"),
-            )
-        } else if has_changes {
-            (true, "update_available", None)
+            match remote_map.get(local.filename.as_str()) {
+                Some(remote) => {
+                    let current_hash = local.lfs_oid.clone();
+                    let latest_hash = remote.lfs_sha256.clone();
+
+                    let (update_available, status_val) = match (&current_hash, &latest_hash) {
+                        (Some(c), Some(l)) if c == l => (false, "up_to_date"),
+                        (Some(_), Some(_)) => (true, "update_available"),
+                        _ => (false, "no_hash"),
+                    };
+
+                    if update_available {
+                        any_update_available = true;
+                    }
+
+                    quants_array.push(serde_json::json!({
+                        "quant_name": local.quant,
+                        "filename": local.filename,
+                        "current_hash": current_hash,
+                        "latest_hash": latest_hash,
+                        "update_available": update_available,
+                        "status": status_val,
+                    }));
+                }
+                None => {
+                    // File no longer exists on remote
+                    quants_array.push(serde_json::json!({
+                        "quant_name": local.quant,
+                        "filename": local.filename,
+                        "current_hash": local.lfs_oid.clone(),
+                        "latest_hash": null,
+                        "update_available": false,
+                        "status": "removed_from_remote",
+                    }));
+                }
+            }
+        }
+
+        // Check for new quants: remote files not in local records
+        for (filename, remote) in &remote_blobs {
+            if !local_filenames.contains(filename.as_str()) {
+                any_update_available = true;
+                quants_array.push(serde_json::json!({
+                    "quant_name": None::<String>,
+                    "filename": filename,
+                    "current_hash": null,
+                    "latest_hash": remote.lfs_sha256.clone(),
+                    "update_available": true,
+                    "status": "new_quant",
+                }));
+            }
+        }
+
+        // Determine overall status from quant-level results
+        let (update_available, status) = if any_update_available {
+            (true, "update_available")
         } else {
-            (false, "up_to_date", None)
+            (false, "up_to_date")
         };
 
         let details_json = serde_json::json!({
             "repo_id": remote_listing.repo_id,
             "commit_sha": remote_listing.commit_sha,
-            "file_count": file_updates.len(),
-            "files": file_updates.iter().map(|f| {
-                serde_json::json!({
-                    "filename": f.filename,
-                    "status": format!("{:?}", f.status),
-                    "quant": f.quant,
-                })
-            }).collect::<Vec<_>>(),
+            "quants": quants_array,
         })
         .to_string();
 
@@ -405,7 +448,7 @@ impl UpdateChecker {
             Some(&remote_listing.commit_sha),
             update_available,
             status,
-            error_message,
+            None,
             Some(&details_json),
         )
         .await

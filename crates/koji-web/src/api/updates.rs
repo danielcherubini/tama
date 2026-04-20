@@ -41,6 +41,19 @@ pub struct CheckResponse {
     pub message: String,
 }
 
+/// Internal helper for parsing per-quant detail objects from `details_json`.
+/// The frontend parses `details_json` directly; this struct exists so the
+/// API layer can extract quant-level data when needed (e.g. for logging).
+#[derive(Debug, Clone, Deserialize)]
+pub struct QuantDetailJson {
+    pub quant_name: Option<String>,
+    pub filename: String,
+    pub current_hash: Option<String>,
+    pub latest_hash: Option<String>,
+    pub update_available: bool,
+    pub status: String,
+}
+
 /// GET /api/updates - Returns cached results from DB
 pub async fn get_updates(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let config_dir = match state.config_path.as_ref().and_then(|p| p.parent()) {
@@ -62,12 +75,26 @@ pub async fn get_updates(State(state): State<Arc<AppState>>) -> impl IntoRespons
             for r in records {
                 let details: Option<serde_json::Value> =
                     r.details_json.and_then(|j| serde_json::from_str(&j).ok());
+
                 // Extract repo_id from details JSON if present (for models)
                 let repo_id = details
                     .as_ref()
                     .and_then(|d| d.get("repo_id"))
                     .and_then(|v| v.as_str())
                     .map(String::from);
+
+                // Parse per-quant details from details_json (internal use only;
+                // frontend parses details_json directly).
+                let _quants: Vec<QuantDetailJson> = details
+                    .as_ref()
+                    .and_then(|d| d.get("quants"))
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|q| serde_json::from_value(q.clone()).ok())
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 // For models, look up display_name from the model config table.
                 // item_id for models is the integer model ID as a string.
                 let display_name = if r.item_type == "model" {
