@@ -183,7 +183,7 @@ impl TtsEngine for KokoroEngine {
 
     async fn synthesize(&self, req: &TtsRequest) -> Result<Vec<u8>> {
         // Initialize kokoro-micro engine (downloads model on first run if needed)
-        let mut tts = kokoro_micro::TtsEngine::new()
+        let mut tts = koji_kokoro::TtsEngine::new()
             .await
             .map_err(|e| anyhow!("Failed to initialize Kokoro engine: {}", e))?;
 

@@ -12,12 +12,13 @@ base64 = "0.22"
 async-stream.workspace = true
 
 # Kokoro TTS engine (optional, enabled by default)
-kokoro-micro = { version = "1.0", optional = true }
+# Local fork with ROCm GPU support for AMD GPUs
+koji-kokoro = { path = "../koji-kokoro", optional = true }
 
 # Piper TTS engine (optional, enabled by default)
 piper-rs = { version = "0.1", optional = true }
 
 [features]
 default = ["kokoro"]
-kokoro = ["dep:kokoro-micro"]
+kokoro = ["dep:koji-kokoro"]
 piper = ["dep:piper-rs"]
