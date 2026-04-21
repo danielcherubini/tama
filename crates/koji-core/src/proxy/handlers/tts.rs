@@ -91,6 +91,57 @@ pub async fn handle_audio_voices(State(state): State<Arc<ProxyState>>) -> impl I
     }
 }
 
+/// GET /v1/audio/models - List available audio models.
+pub async fn handle_audio_models(State(state): State<Arc<ProxyState>>) -> impl IntoResponse {
+    // Check if any TTS engine is installed in the registry
+    let base_dir = match crate::config::Config::base_dir() {
+        Ok(d) => d,
+        Err(_) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"object":"list","data":[]})),
+            )
+                .into_response();
+        }
+    };
+    let registry = match BackendRegistry::open(&base_dir) {
+        Ok(r) => r,
+        Err(_) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"object":"list","data":[]})),
+            )
+                .into_response();
+        }
+    };
+
+    let mut models: Vec<serde_json::Value> = Vec::new();
+
+    // Check if Kokoro is installed
+    if registry.get("tts_kokoro").ok().flatten().is_some() {
+        models.push(serde_json::json!({
+            "id": "kokoro",
+            "object": "model",
+            "created": 0,
+            "owned_by": "kokoro",
+            "ready": true
+        }));
+    }
+
+    // Check if Piper is installed
+    if registry.get("tts_piper").ok().flatten().is_some() {
+        models.push(serde_json::json!({
+            "id": "piper",
+            "object": "model",
+            "created": 0,
+            "owned_by": "piper",
+            "ready": true
+        }));
+    }
+
+    Json(serde_json::json!({"object": "list", "data": models})).into_response()
+}
+
 /// POST /v1/audio/speech - Synthesize speech (non-streaming).
 pub async fn handle_audio_speech(
     State(state): State<Arc<ProxyState>>,

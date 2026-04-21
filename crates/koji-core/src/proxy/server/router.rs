@@ -5,7 +5,9 @@ use axum::{
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
-use crate::proxy::handlers::tts::{handle_audio_speech, handle_audio_stream, handle_audio_voices};
+use crate::proxy::handlers::tts::{
+    handle_audio_models, handle_audio_speech, handle_audio_stream, handle_audio_voices,
+};
 use crate::proxy::handlers::{
     handle_chat_completions, handle_fallback, handle_forward_get, handle_forward_post,
     handle_get_model, handle_health, handle_list_models, handle_metrics, handle_reload_configs,
@@ -65,6 +67,7 @@ pub fn build_router(state: Arc<ProxyState>) -> Router {
         )
         .route("/koji/v1/system/restart", post(handle_koji_system_restart))
         // TTS (Text-to-Speech) endpoints - OpenAI-compatible
+        .route("/v1/audio/models", get(handle_audio_models))
         .route("/v1/audio/speech", post(handle_audio_speech))
         .route("/v1/audio/speech/stream", post(handle_audio_stream))
         .route("/v1/audio/voices", get(handle_audio_voices))
