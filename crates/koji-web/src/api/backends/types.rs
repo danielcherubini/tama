@@ -317,6 +317,17 @@ pub(super) const KNOWN_BACKENDS: &[(&str, &str, Option<&str>)] = &[
         "ik_llama.cpp",
         Some("https://github.com/ikawrakow/ik_llama.cpp/commits/main"),
     ),
+    // TTS backends — installed via HuggingFace model downloads (no GPU needed)
+    (
+        "tts_kokoro",
+        "Kokoro TTS",
+        Some("https://huggingface.co/hexgrad/Kokoro-82M"),
+    ),
+    (
+        "tts_piper",
+        "Piper TTS",
+        Some("https://huggingface.co/rhasspy/piper-voices"),
+    ),
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+use anyhow::{anyhow, Result};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -84,6 +85,8 @@ pub async fn install_backend(
     let backend_type = match req.backend_type.as_str() {
         "llama_cpp" => koji_core::backends::BackendType::LlamaCpp,
         "ik_llama" => koji_core::backends::BackendType::IkLlama,
+        "tts_kokoro" => koji_core::backends::BackendType::TtsKokoro,
+        "tts_piper" => koji_core::backends::BackendType::TtsPiper,
         "custom" => {
             return (
                 StatusCode::BAD_REQUEST,
@@ -99,6 +102,122 @@ pub async fn install_backend(
                 .into_response();
         }
     };
+
+    // TTS backends use a dedicated installer (downloads model files from HuggingFace).
+    // They skip the normal prebuilt/source install flow entirely.
+    let is_tts = matches!(
+        backend_type,
+        koji_core::backends::BackendType::TtsKokoro | koji_core::backends::BackendType::TtsPiper
+    );
+
+    if is_tts {
+        // For TTS backends: submit job first, then spawn the install task.
+        let job = match jobs
+            .submit(crate::jobs::JobKind::Install, Some(backend_type.clone()))
+            .await
+        {
+            Ok(j) => j,
+            Err(crate::jobs::JobError::AlreadyRunning(existing_id)) => {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(serde_json::json!({
+                        "error": "another backend job is already running",
+                        "job_id": existing_id
+                    })),
+                )
+                    .into_response();
+            }
+            Err(_) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "failed to create job"})),
+                )
+                    .into_response();
+            }
+        };
+
+        let backend_name = match &backend_type {
+            koji_core::backends::BackendType::TtsKokoro => "tts_kokoro",
+            koji_core::backends::BackendType::TtsPiper => "tts_piper",
+            _ => unreachable!(),
+        };
+
+        // Capture config_path for the background task
+        let config_dir = state
+            .config_path
+            .as_ref()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+
+        let jobs_clone = jobs.clone();
+        let job_clone = job.clone();
+        let bt = backend_type.clone();
+        tokio::spawn(async move {
+            let adapter = Arc::new(JobAdapter {
+                jobs: jobs_clone.clone(),
+                job: job_clone.clone(),
+            });
+
+            // Open registry and run TTS installer
+            let result = match config_dir {
+                Some(ref config_dir) => {
+                    let reg_result = tokio::task::spawn_blocking(move || {
+                        koji_core::backends::BackendRegistry::open(config_dir)
+                    })
+                    .await
+                    .map_err(|e| anyhow::anyhow!("spawn error: {}", e))
+                    .and_then(|r| r);
+
+                    let mut registry = match reg_result {
+                        Ok(r) => r,
+                        Err(e) => return Err(anyhow::anyhow!("Failed to open registry: {}", e)),
+                    };
+
+                    let progress = Box::new(adapter);
+                    match bt {
+                        koji_core::backends::BackendType::TtsKokoro => {
+                            koji_core::backends::install_tts_kokoro(&mut registry, progress).await
+                        }
+                        koji_core::backends::BackendType::TtsPiper => {
+                            koji_core::backends::install_tts_piper(&mut registry, progress).await
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                None => Err(anyhow::anyhow!("config_path not configured")),
+            };
+
+            match result {
+                Ok(()) => {
+                    let _ = jobs_clone
+                        .finish(&job_clone, crate::jobs::JobStatus::Succeeded, None)
+                        .await;
+                }
+                Err(e) => {
+                    jobs_clone
+                        .append_log(&job_clone, format!("Error: {}", e))
+                        .await;
+                    let _ = jobs_clone
+                        .finish(
+                            &job_clone,
+                            crate::jobs::JobStatus::Failed,
+                            Some(e.to_string()),
+                        )
+                        .await;
+                }
+            }
+        });
+
+        return Json(InstallResponse {
+            job_id: job.id.to_string(),
+            kind: "install".to_string(),
+            backend_type: req.backend_type,
+            notices: vec![format!(
+                "Downloading {} model files from HuggingFace...",
+                backend_name
+            )],
+        })
+        .into_response();
+    }
 
     // Convert GPU type
     let gpu_type = match &req.gpu_type {
