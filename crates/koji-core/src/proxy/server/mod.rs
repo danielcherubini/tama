@@ -415,8 +415,8 @@ mod tests {
         assert_eq!(sample.models[0].id, "alpha");
         assert_eq!(sample.models[0].backend, "llama_cpp");
         assert!(
-            !sample.models[0].loaded,
-            "Expected the configured model to be reported as loaded == false since no backend was started, got: {:?}",
+            sample.models[0].state != "ready",
+            "Expected the configured model to be reported as not ready since no backend was started, got: {:?}",
             sample.models[0]
         );
         assert_eq!(
@@ -653,8 +653,8 @@ mod tests {
         assert_eq!(models[0].id, "alpha");
         assert_eq!(models[0].backend, "llama_cpp");
         assert!(
-            !models[0].loaded,
-            "Expected the configured model to be reported as loaded == false since no backend was started, got: {:?}",
+            models[0].state != "ready",
+            "Expected the configured model to be reported as not ready since no backend was started, got: {:?}",
             models[0]
         );
         assert_eq!(
