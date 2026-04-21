@@ -290,9 +290,8 @@ pub async fn load_or_get_engine(
     // Need to load/switch — find installed backend from registry
     let base_dir =
         crate::config::Config::base_dir().with_context(|| "Failed to get config directory")?;
-    let db_path = base_dir.join("koji.db");
     let registry =
-        BackendRegistry::open(&db_path).with_context(|| "Failed to open backend registry")?;
+        BackendRegistry::open(&base_dir).with_context(|| "Failed to open backend registry")?;
 
     let backend_name = match kind {
         koji_tts::EngineKind::Kokoro => "tts_kokoro",

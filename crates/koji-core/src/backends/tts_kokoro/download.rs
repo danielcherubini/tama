@@ -4,33 +4,66 @@ use std::sync::Arc;
 use super::paths::*;
 use crate::backends::ProgressSink;
 
-/// List of available Kokoro voice IDs (26 voices from hexgrad/Kokoro-82M).
+/// List of available Kokoro voice IDs (48 voices from hexgrad/Kokoro-82M).
 pub const VOICE_IDS: &[&str] = &[
-    "af_heart",
+    // Female American
+    "af_alloy",
+    "af_aoede",
     "af_bella",
+    "af_heart",
+    "af_jessica",
+    "af_kore",
     "af_nicole",
     "af_nova",
     "af_river",
     "af_sarah",
     "af_sky",
+    // Male American
     "am_adam",
+    "am_echo",
+    "am_eric",
+    "am_fenrir",
+    "am_liam",
     "am_michael",
+    "am_onyx",
+    "am_puck",
+    "am_santa",
+    // Female British
+    "bf_alice",
     "bf_emma",
     "bf_isabella",
+    "bf_lily",
+    // Male British
+    "bm_daniel",
+    "bm_fable",
     "bm_george",
     "bm_lewis",
-    "am_sarah",
-    "am_santa",
-    "af_jessica",
-    "bm_daniel",
-    "af_scout",
-    "am_sky",
-    "am_wren",
-    "bf_sarah",
-    "bm_sage",
-    "af_robin",
-    "am_sage",
-    "bm_scout",
+    // Female Extra
+    "ef_dora",
+    "em_santa",
+    "ff_siwis",
+    // Male Extra
+    "em_alex",
+    "hf_alpha",
+    "hf_beta",
+    "hm_omega",
+    "hm_psi",
+    "if_sara",
+    "im_nicola",
+    "jf_alpha",
+    "jf_gongitsune",
+    "jf_nezumi",
+    "jf_tebukuro",
+    "jm_kumo",
+    // Female Extra 2
+    "pf_dora",
+    "pm_alex",
+    "pm_santa",
+    // Japanese
+    "zf_xiaobei",
+    "zf_xiaoni",
+    "zf_xiaoxiao",
+    "zf_xiaoyi",
 ];
 
 /// Download the Kokoro 82M PyTorch model from HuggingFace.
