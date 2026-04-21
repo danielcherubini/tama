@@ -71,7 +71,8 @@ impl From<MetricsHistoryEntry> for MetricSample {
 /// Kept private to this module so the dashboard owns its wire shape; the only
 /// contract with the backend is the JSON field names, which must match the
 /// server-side struct exactly.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[allow(deprecated)]
 struct ModelStatus {
     id: String,
     #[serde(default)]
@@ -82,6 +83,7 @@ struct ModelStatus {
     display_name: Option<String>,
     backend: String,
     #[deprecated(since = "1.45.0", note = "use state field instead")]
+    #[serde(default)]
     loaded: bool,
     /// Lifecycle state: idle, loading, ready, unloading, failed.
     #[serde(default)]
@@ -671,10 +673,8 @@ mod tests {
                 api_name: None,
                 display_name: None,
                 backend: "llama_cpp".into(),
-                loaded: true,
                 state: "ready".into(),
-                quant: None,
-                context_length: None,
+                ..Default::default()
             },
             ModelStatus {
                 id: "b".into(),
@@ -682,10 +682,8 @@ mod tests {
                 api_name: None,
                 display_name: None,
                 backend: "llama_cpp".into(),
-                loaded: false,
                 state: "idle".into(),
-                quant: None,
-                context_length: None,
+                ..Default::default()
             },
             ModelStatus {
                 id: "c".into(),
@@ -693,10 +691,8 @@ mod tests {
                 api_name: None,
                 display_name: None,
                 backend: "ik_llama".into(),
-                loaded: true,
                 state: "ready".into(),
-                quant: None,
-                context_length: None,
+                ..Default::default()
             },
             ModelStatus {
                 id: "d".into(),
@@ -704,10 +700,8 @@ mod tests {
                 api_name: None,
                 display_name: None,
                 backend: "ik_llama".into(),
-                loaded: false,
                 state: "idle".into(),
-                quant: None,
-                context_length: None,
+                ..Default::default()
             },
         ];
 

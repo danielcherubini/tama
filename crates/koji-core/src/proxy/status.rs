@@ -299,8 +299,8 @@ mod tests {
 
         // Every entry is reported as not loaded.
         assert!(
-            statuses.iter().all(|s| !s.loaded),
-            "expected every status to have loaded == false, got: {:?}",
+            statuses.iter().all(|s| s.state != "ready"),
+            "expected every status to not be ready, got: {:?}",
             statuses
         );
 
@@ -386,7 +386,7 @@ mod tests {
         assert_eq!(ids, vec!["alpha", "zephyr"]);
 
         // Exactly one model is reported as loaded.
-        let loaded_count = statuses.iter().filter(|s| s.loaded).count();
+        let loaded_count = statuses.iter().filter(|s| s.state == "ready").count();
         assert_eq!(
             loaded_count, 1,
             "expected exactly one loaded model, got: {:?}",
@@ -395,12 +395,12 @@ mod tests {
 
         // alpha is loaded with the configured backend.
         assert_eq!(statuses[0].id, "alpha");
-        assert!(statuses[0].loaded, "expected alpha to be loaded");
+        assert_eq!(statuses[0].state, "ready", "expected alpha to be ready");
         assert_eq!(statuses[0].backend, "vllm");
 
         // zephyr is not loaded but still carries its configured backend.
         assert_eq!(statuses[1].id, "zephyr");
-        assert!(!statuses[1].loaded, "expected zephyr to not be loaded");
+        assert_eq!(statuses[1].state, "idle", "expected zephyr to not be ready");
         assert_eq!(statuses[1].backend, "llama_cpp");
     }
 
@@ -456,9 +456,9 @@ mod tests {
             .iter()
             .find(|s| s.id == "alpha")
             .expect("alpha entry missing from collect_model_statuses output");
-        assert!(
-            !alpha.loaded,
-            "ModelState::Starting must not be reported as loaded, got: {:?}",
+        assert_eq!(
+            alpha.state, "loading",
+            "ModelState::Starting must not be reported as ready, got: {:?}",
             alpha
         );
 
@@ -486,9 +486,9 @@ mod tests {
             .iter()
             .find(|s| s.id == "alpha")
             .expect("alpha entry missing from collect_model_statuses output");
-        assert!(
-            !alpha.loaded,
-            "ModelState::Failed must not be reported as loaded, got: {:?}",
+        assert_eq!(
+            alpha.state, "failed",
+            "ModelState::Failed must not be reported as ready, got: {:?}",
             alpha
         );
     }
