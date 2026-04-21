@@ -296,6 +296,9 @@ async fn cmd_install(
     let git_url = match backend_type {
         BackendType::LlamaCpp => "https://github.com/ggml-org/llama.cpp.git",
         BackendType::IkLlama => "https://github.com/ikawrakow/ik_llama.cpp.git",
+        BackendType::TtsKokoro | BackendType::TtsPiper => {
+            anyhow::bail!("TTS backends cannot be installed via this command");
+        }
         BackendType::Custom => {
             anyhow::bail!("Custom backends cannot be installed via this command");
         }
@@ -428,6 +431,9 @@ async fn cmd_update(_config: &Config, name: &str, force: bool) -> Result<()> {
                 BackendType::LlamaCpp => BackendSource::Prebuilt {
                     version: update_check.latest_version.clone(),
                 },
+                BackendType::TtsKokoro | BackendType::TtsPiper => {
+                    return Err(anyhow!("Cannot update TTS backends via this command"))
+                }
                 BackendType::Custom => return Err(anyhow!("Cannot update custom backends")),
             }
         }

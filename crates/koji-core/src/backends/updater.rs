@@ -84,6 +84,9 @@ pub async fn check_latest_version(backend: &BackendType) -> Result<String> {
             // but we clone "main" branch for source builds
             Ok(format!("main@{}", &commit.sha[..8]))
         }
+        BackendType::TtsKokoro | BackendType::TtsPiper => {
+            Err(anyhow!("Cannot check updates for TTS backends"))
+        }
         BackendType::Custom => Err(anyhow!("Cannot check updates for custom backends")),
     }
 }
@@ -186,7 +189,7 @@ pub fn has_update(current: &str, latest: &str) -> bool {
 
 /// Check if a backend type supports update checking.
 pub fn supports_update_check(backend_type: &BackendType) -> bool {
-    !matches!(backend_type, BackendType::Custom)
+    matches!(backend_type, BackendType::LlamaCpp | BackendType::IkLlama)
 }
 
 #[cfg(test)]

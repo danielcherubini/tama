@@ -184,6 +184,8 @@ pub(super) fn job_to_active_dto(j: &crate::jobs::Job) -> ActiveJobDto {
         backend_type: match j.backend_type.as_ref() {
             Some(koji_core::backends::BackendType::LlamaCpp) => "llama_cpp".to_string(),
             Some(koji_core::backends::BackendType::IkLlama) => "ik_llama".to_string(),
+            Some(koji_core::backends::BackendType::TtsKokoro) => "tts_kokoro".to_string(),
+            Some(koji_core::backends::BackendType::TtsPiper) => "tts_piper".to_string(),
             Some(koji_core::backends::BackendType::Custom) => "custom".to_string(),
             None => String::new(),
         },
