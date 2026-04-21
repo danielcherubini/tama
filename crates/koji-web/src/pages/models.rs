@@ -14,6 +14,9 @@ struct ModelEntry {
     enabled: bool,
     #[serde(default)]
     loaded: bool,
+    /// Lifecycle state: idle, loading, ready, unloading, failed.
+    #[serde(default)]
+    state: String,
     #[serde(default)]
     api_name: Option<String>,
     #[serde(default)]
@@ -47,6 +50,17 @@ fn model_display_name(m: &ModelEntry) -> String {
         .clone()
         .or(m.api_name.clone())
         .unwrap_or_else(|| m.id.to_string())
+}
+
+/// Map a model's state string to (display label, CSS badge class).
+fn model_state_badge(state: &str) -> (&'static str, &'static str) {
+    match state {
+        "ready" => ("Loaded", "badge-success"),
+        "loading" => ("Loading", "badge-info"),
+        "unloading" => ("Unloading", "badge-warning"),
+        "failed" => ("Failed", "badge-error"),
+        _ => ("Idle", "badge-muted"),
+    }
 }
 
 #[component]
@@ -227,7 +241,7 @@ pub fn Models() -> impl IntoView {
                                                         let id_unload = m.id.to_string();
                                                         let id_edit = m.id.to_string();
                                                         let enabled_class = if m.enabled { "badge badge-success" } else { "badge badge-warning" };
-                                                        let loaded_class = if m.loaded { "badge badge-success" } else { "badge badge-muted" };
+                                                        let (state_label, state_class) = model_state_badge(&m.state);
                                                         view! {
                                                             <div class="model-card card">
                                                                 <div class="model-card__header">
@@ -236,8 +250,8 @@ pub fn Models() -> impl IntoView {
                                                                         <span class=enabled_class>
                                                                             {if m.enabled { "Enabled" } else { "Disabled" }}
                                                                         </span>
-                                                                        <span class=loaded_class>
-                                                                            {if m.loaded { "Loaded" } else { "Idle" }}
+                                                                        <span class={format!("badge {}", state_class)}>
+                                                                            {state_label}
                                                                         </span>
                                                                     </div>
                                                                 </div>
@@ -309,7 +323,7 @@ pub fn Models() -> impl IntoView {
                                                         let id_unload = m.id.to_string();
                                                         let id_edit = m.id.to_string();
                                                         let enabled_class = if m.enabled { "badge badge-success" } else { "badge badge-warning" };
-                                                        let loaded_class = if m.loaded { "badge badge-success" } else { "badge badge-muted" };
+                                                        let (state_label, state_class) = model_state_badge(&m.state);
                                                         view! {
                                                             <div class="model-card card">
                                                                 <div class="model-card__header">
@@ -318,8 +332,8 @@ pub fn Models() -> impl IntoView {
                                                                         <span class=enabled_class>
                                                                             {if m.enabled { "Enabled" } else { "Disabled" }}
                                                                         </span>
-                                                                        <span class=loaded_class>
-                                                                            {if m.loaded { "Loaded" } else { "Idle" }}
+                                                                        <span class={format!("badge {}", state_class)}>
+                                                                            {state_label}
                                                                         </span>
                                                                     </div>
                                                                 </div>
@@ -427,6 +441,7 @@ mod tests {
                 quant: None,
                 enabled: true,
                 loaded: true,
+                state: "ready".into(),
                 api_name: None,
                 display_name: None,
             },
@@ -437,6 +452,7 @@ mod tests {
                 quant: None,
                 enabled: true,
                 loaded: true,
+                state: "ready".into(),
                 api_name: None,
                 display_name: None,
             },
@@ -456,6 +472,7 @@ mod tests {
                 quant: None,
                 enabled: true,
                 loaded: false,
+                state: "idle".into(),
                 api_name: None,
                 display_name: None,
             },
@@ -466,6 +483,7 @@ mod tests {
                 quant: None,
                 enabled: true,
                 loaded: false,
+                state: "idle".into(),
                 api_name: None,
                 display_name: None,
             },
@@ -485,6 +503,7 @@ mod tests {
                 quant: None,
                 enabled: true,
                 loaded: true,
+                state: "ready".into(),
                 api_name: None,
                 display_name: None,
             },
@@ -495,6 +514,7 @@ mod tests {
                 quant: None,
                 enabled: true,
                 loaded: false,
+                state: "idle".into(),
                 api_name: None,
                 display_name: None,
             },
@@ -505,6 +525,7 @@ mod tests {
                 quant: None,
                 enabled: true,
                 loaded: true,
+                state: "ready".into(),
                 api_name: None,
                 display_name: None,
             },
@@ -532,6 +553,7 @@ mod tests {
                 quant: None,
                 enabled: true,
                 loaded: true,
+                state: "ready".into(),
                 api_name: None,
                 display_name: None,
             },
@@ -542,6 +564,7 @@ mod tests {
                 quant: None,
                 enabled: true,
                 loaded: true,
+                state: "ready".into(),
                 api_name: None,
                 display_name: None,
             },
@@ -552,6 +575,7 @@ mod tests {
                 quant: None,
                 enabled: true,
                 loaded: false,
+                state: "idle".into(),
                 api_name: None,
                 display_name: None,
             },
@@ -562,6 +586,7 @@ mod tests {
                 quant: None,
                 enabled: true,
                 loaded: false,
+                state: "idle".into(),
                 api_name: None,
                 display_name: None,
             },

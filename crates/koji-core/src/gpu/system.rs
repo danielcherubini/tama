@@ -45,7 +45,13 @@ pub struct ModelStatus {
     pub api_name: Option<String>,
     pub display_name: Option<String>,
     pub backend: String,
+    /// Deprecated: use `state` instead. True iff the model is in the Ready state.
+    #[deprecated(since = "1.45.0", note = "use state field instead")]
     pub loaded: bool,
+    /// Current lifecycle state of the model's backend.
+    /// One of: `idle`, `loading`, `ready`, `unloading`, `failed`.
+    #[serde(default)]
+    pub state: String,
     /// Quantization name (e.g. "Q4_K_M", "Q8_0"). Display-only on dashboard.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quant: Option<String>,
