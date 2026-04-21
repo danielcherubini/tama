@@ -34,7 +34,7 @@ impl Drop for FkGuard<'_> {
 pub type Migration = (i32, &'static str);
 
 /// Version number for the latest migration
-pub const LATEST_VERSION: i32 = 14;
+pub const LATEST_VERSION: i32 = 15;
 
 /// Migrations that rebuild a parent table via DROP + RENAME. SQLite with
 /// `foreign_keys=ON` performs an implicit DELETE on the dropped table which
@@ -421,6 +421,21 @@ pub(crate) fn run_up_to(conn: &Connection, target_version: i32) -> anyhow::Resul
             14,
             r#"
                 ALTER TABLE model_configs ADD COLUMN num_parallel INTEGER DEFAULT 1 CHECK(num_parallel >= 1);
+            "#,
+        ),
+        (
+            15,
+            r#"
+                CREATE TABLE tts_configs (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    engine       TEXT NOT NULL UNIQUE COLLATE NOCASE,  -- 'kokoro' or 'piper'
+                    default_voice TEXT,                                -- e.g., 'af_sky'
+                    speed        REAL   NOT NULL DEFAULT 1.0,          -- 0.5 to 2.0
+                    format       TEXT   NOT NULL DEFAULT 'mp3',        -- mp3, wav, ogg
+                    enabled      INTEGER NOT NULL DEFAULT 1,
+                    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                );
             "#,
         ),
     ];
