@@ -19,11 +19,19 @@ pub struct KokoroEngine {
 }
 
 impl KokoroEngine {
-    /// Create a new KokoroEngine from a models directory.
-    ///
-    /// Scans the `voices/` subdirectory to discover available voices.
+    /// Create a new KokoroEngine from a model file path.
+    /// The voices directory is expected at the same level as the model file.
     pub async fn new(model_path: &Path) -> Result<Self> {
-        let voices_path = model_path.join("voices");
+        // model_path may be a file (e.g., kokoro-v1_0.pth) or a directory
+        let base = if model_path.is_dir() {
+            model_path.to_path_buf()
+        } else {
+            model_path
+                .parent()
+                .ok_or_else(|| anyhow!("Failed to get parent of model path"))?
+                .to_path_buf()
+        };
+        let voices_path = base.join("voices");
         let mut voices = Vec::new();
 
         if voices_path.is_dir() {

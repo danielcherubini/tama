@@ -22,20 +22,27 @@ pub struct PiperEngine {
 }
 
 impl PiperEngine {
-    /// Create a new PiperEngine from a models directory.
+    /// Create a new PiperEngine from a model file path or directory.
     pub async fn new(model_path: &Path) -> Result<Self> {
+        // model_path may be a file (e.g., en_US-lessac-medium.onnx) or a directory
+        let base = if model_path.is_dir() {
+            model_path.to_path_buf()
+        } else {
+            model_path
+                .parent()
+                .ok_or_else(|| anyhow!("Failed to get parent of model path"))?
+                .to_path_buf()
+        };
+
         // Piper files are named {voice_id}.onnx and {voice_id}.onnx.json
         // Search for .onnx file in the model directory
-        let mut onnx_files: Vec<_> = std::fs::read_dir(model_path)?
+        let mut onnx_files: Vec<_> = std::fs::read_dir(&base)?
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().map_or(false, |ext| ext == "onnx"))
             .collect();
 
         if onnx_files.is_empty() {
-            return Err(anyhow!(
-                "No Piper ONNX model found in {}",
-                model_path.display()
-            ));
+            return Err(anyhow!("No Piper ONNX model found in {}", base.display()));
         }
 
         let model_file = onnx_files.remove(0).path();
@@ -47,7 +54,7 @@ impl PiperEngine {
             .to_string();
 
         // Try to load voice config from JSON if available
-        let _config_file = model_path.join(format!("{}.onnx.json", voice_name));
+        let _config_file = base.join(format!("{}.onnx.json", voice_name));
 
         Ok(Self {
             model_path: model_path.to_path_buf(),

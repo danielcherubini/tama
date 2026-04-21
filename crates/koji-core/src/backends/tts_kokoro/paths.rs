@@ -1,8 +1,16 @@
 use std::path::{Path, PathBuf};
 
+/// Kokoro model version used for versioned directory naming.
+pub const MODEL_VERSION: &str = "kokoro-v1_0";
+
 /// Return the base directory for tts_kokoro models: `<backends_dir>/tts_kokoro`.
-pub fn models_dir(base: &Path) -> PathBuf {
+pub fn base_dir(base: &Path) -> PathBuf {
     base.join("tts_kokoro")
+}
+
+/// Return the versioned model directory: `<backends_dir>/tts_kokoro/<MODEL_VERSION>/`.
+pub fn models_dir(base: &Path) -> PathBuf {
+    base_dir(base).join(MODEL_VERSION)
 }
 
 /// Return the path to the Kokoro PyTorch model file.
