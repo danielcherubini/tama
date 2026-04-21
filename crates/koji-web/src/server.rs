@@ -237,7 +237,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                 ])
                 .allow_headers(tower_http::cors::Any)
                 // Expose X-CSRF-Token so JS can read it from GET responses
-                .expose_headers(["X-CSRF-Token"]),
+                .expose_headers([axum::http::HeaderName::from_static("x-csrf-token")]),
         )
         .layer(middleware::from_fn(api::middleware::enforce_same_origin));
 
@@ -305,7 +305,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                 ])
                 .allow_headers(tower_http::cors::Any)
                 // Expose X-CSRF-Token so JS can read it from GET responses
-                .expose_headers(["X-CSRF-Token"]),
+                .expose_headers([axum::http::HeaderName::from_static("x-csrf-token")]),
         )
         .layer(middleware::from_fn(api::middleware::enforce_same_origin));
 
