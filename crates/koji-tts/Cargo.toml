@@ -1,0 +1,23 @@
+[package]
+name = "koji-tts"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+futures-core.workspace = true
+async-trait = "0.1"
+base64 = "0.22"
+async-stream.workspace = true
+
+# Kokoro TTS engine (optional, enabled by default)
+kokoro-micro = { version = "1.0", optional = true }
+
+# Piper TTS engine (optional, enabled by default)
+piper-rs = { version = "0.1", optional = true }
+
+[features]
+default = ["kokoro", "piper"]
+kokoro = ["dep:kokoro-micro"]
+piper = ["dep:piper-rs"]
