@@ -1,4 +1,3 @@
-use anyhow::{anyhow, Result};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -152,16 +151,17 @@ pub async fn install_backend(
         let job_clone = job.clone();
         let bt = backend_type.clone();
         tokio::spawn(async move {
-            let adapter = Arc::new(JobAdapter {
+            let adapter = JobAdapter {
                 jobs: jobs_clone.clone(),
                 job: job_clone.clone(),
-            });
+            };
 
             // Open registry and run TTS installer
             let result = match config_dir {
                 Some(ref config_dir) => {
+                    let config_dir_clone = config_dir.clone();
                     let reg_result = tokio::task::spawn_blocking(move || {
-                        koji_core::backends::BackendRegistry::open(config_dir)
+                        koji_core::backends::BackendRegistry::open(&config_dir_clone)
                     })
                     .await
                     .map_err(|e| anyhow::anyhow!("spawn error: {}", e))
@@ -169,7 +169,20 @@ pub async fn install_backend(
 
                     let mut registry = match reg_result {
                         Ok(r) => r,
-                        Err(e) => return Err(anyhow::anyhow!("Failed to open registry: {}", e)),
+                        Err(e) => {
+                            // Log the error and finish the job as failed
+                            jobs_clone
+                                .append_log(&job_clone, format!("Error: {}", e))
+                                .await;
+                            let _ = jobs_clone
+                                .finish(
+                                    &job_clone,
+                                    crate::jobs::JobStatus::Failed,
+                                    Some("Failed to open registry".to_string()),
+                                )
+                                .await;
+                            return;
+                        }
                     };
 
                     let progress = Box::new(adapter);
