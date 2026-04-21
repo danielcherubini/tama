@@ -89,7 +89,8 @@ impl ProxyServer {
                     .map(|d| d.as_millis() as i64)
                     .unwrap_or(0);
                 let model_statuses = metrics_state.collect_model_statuses().await;
-                let models_loaded = model_statuses.iter().filter(|m| m.loaded).count() as u64;
+                let models_loaded =
+                    model_statuses.iter().filter(|m| m.state == "ready").count() as u64;
                 let sample = crate::gpu::MetricSample {
                     ts_unix_ms,
                     cpu_usage_pct: snapshot.cpu_usage_pct,

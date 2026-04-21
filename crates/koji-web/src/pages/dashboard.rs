@@ -81,7 +81,11 @@ struct ModelStatus {
     #[serde(default)]
     display_name: Option<String>,
     backend: String,
+    #[deprecated(since = "1.45.0", note = "use state field instead")]
     loaded: bool,
+    /// Lifecycle state: idle, loading, ready, unloading, failed.
+    #[serde(default)]
+    state: String,
     #[serde(default)]
     quant: Option<String>,
     #[serde(default)]
@@ -108,47 +112,54 @@ fn format_number(n: u64) -> String {
 /// "Active Models" summary line, and the tests assert the counting logic
 /// without needing to render Leptos components.
 fn loaded_model_count(models: &[ModelStatus]) -> usize {
-    models.iter().filter(|m| m.loaded).count()
+    models.iter().filter(|m| m.state == "ready").count()
 }
 
 /// CSS class string used for the per-model status badge in the
-/// "Active Models" grid. Loaded models get the success colour, idle ones
-/// get the muted colour. Extracted so the rendering branch and the unit
-/// tests share a single source of truth.
-fn model_status_badge_class(loaded: bool) -> &'static str {
-    if loaded {
-        "badge badge-success"
-    } else {
-        "badge badge-muted"
+/// "Active Models" grid. Maps lifecycle states to colour classes.
+fn model_status_badge_class(state: &str) -> &'static str {
+    match state {
+        "ready" => "badge badge-success",
+        "loading" => "badge badge-info",
+        "unloading" => "badge badge-warning",
+        "failed" => "badge badge-error",
+        _ => "badge badge-muted",
     }
 }
 
 /// Human-readable label that pairs with [`model_status_badge_class`].
-fn model_status_badge_label(loaded: bool) -> &'static str {
-    if loaded {
-        "Loaded"
-    } else {
-        "Idle"
+fn model_status_badge_label(state: &str) -> &'static str {
+    match state {
+        "ready" => "Loaded",
+        "loading" => "Loading",
+        "unloading" => "Unloading",
+        "failed" => "Failed",
+        _ => "Idle",
     }
 }
 
 /// CSS class string for the load/unload action button in a model card.
-/// Loaded models render a destructive "Unload" button (`btn-danger`),
-/// idle models render an affirmative "Load" button (`btn-success`).
-fn model_action_button_class(loaded: bool) -> &'static str {
-    if loaded {
-        "btn btn-danger btn-sm"
-    } else {
-        "btn btn-success btn-sm"
+/// Ready models render an "Unload" button (btn-danger),
+/// loading/unloading/failed show muted buttons,
+/// idle shows a "Load" button (btn-success).
+fn model_action_button_class(state: &str) -> &'static str {
+    match state {
+        "ready" => "btn btn-danger btn-sm",
+        "loading" => "btn btn-secondary btn-sm",
+        "unloading" => "btn btn-secondary btn-sm",
+        "failed" => "btn btn-warning btn-sm",
+        _ => "btn btn-success btn-sm",
     }
 }
 
 /// Human-readable label that pairs with [`model_action_button_class`].
-fn model_action_button_label(loaded: bool) -> &'static str {
-    if loaded {
-        "Unload"
-    } else {
-        "Load"
+fn model_action_button_label(state: &str) -> &'static str {
+    match state {
+        "ready" => "Unload",
+        "loading" => "Loading…",
+        "unloading" => "Unloading…",
+        "failed" => "Retry",
+        _ => "Load",
     }
 }
 
@@ -449,10 +460,10 @@ pub fn Dashboard() -> impl IntoView {
                                         let id_edit = m.db_id
                                             .map(|n| n.to_string())
                                             .unwrap_or_else(|| m.id.clone());
-                                        let badge_class = model_status_badge_class(m.loaded);
-                                        let badge_label = model_status_badge_label(m.loaded);
-                                        let button_class = model_action_button_class(m.loaded);
-                                        let button_label = model_action_button_label(m.loaded);
+                                        let badge_class = model_status_badge_class(&m.state);
+                                        let badge_label = model_status_badge_label(&m.state);
+                                        let button_class = model_action_button_class(&m.state);
+                                        let button_label = model_action_button_label(&m.state);
                                         let display_name = model_display_name(&m);
                                         let quant_display: String = m
                                             .quant
@@ -476,7 +487,7 @@ pub fn Dashboard() -> impl IntoView {
                                                 <span class="model-row__backend text-mono">{m.backend}</span>
                                                 <div class="model-row__actions">
                                                     <span class={badge_class}>{badge_label}</span>
-                                                    {if m.loaded {
+                                                    {if matches!(m.state.as_str(), "ready") {
                                                         view! {
                                                             <button
                                                                 class={button_class}
@@ -486,7 +497,17 @@ pub fn Dashboard() -> impl IntoView {
                                                                 {button_label}
                                                             </button>
                                                         }.into_any()
+                                                    } else if matches!(m.state.as_str(), "loading" | "unloading") {
+                                                        view! {
+                                                            <button
+                                                                class={button_class}
+                                                                prop:disabled=true
+                                                            >
+                                                                {button_label}
+                                                            </button>
+                                                        }.into_any()
                                                     } else {
+                                                        // idle, failed → Load or Retry
                                                         view! {
                                                             <button
                                                                 class={button_class}
@@ -651,6 +672,7 @@ mod tests {
                 display_name: None,
                 backend: "llama_cpp".into(),
                 loaded: true,
+                state: "ready".into(),
                 quant: None,
                 context_length: None,
             },
@@ -661,6 +683,7 @@ mod tests {
                 display_name: None,
                 backend: "llama_cpp".into(),
                 loaded: false,
+                state: "idle".into(),
                 quant: None,
                 context_length: None,
             },
@@ -671,6 +694,7 @@ mod tests {
                 display_name: None,
                 backend: "ik_llama".into(),
                 loaded: true,
+                state: "ready".into(),
                 quant: None,
                 context_length: None,
             },
@@ -681,6 +705,7 @@ mod tests {
                 display_name: None,
                 backend: "ik_llama".into(),
                 loaded: false,
+                state: "idle".into(),
                 quant: None,
                 context_length: None,
             },
@@ -696,11 +721,11 @@ mod tests {
         assert_eq!(loaded_model_count(&[]), 0);
     }
 
-    /// Loaded models must use the success badge class so they visually pop
+    /// Loaded (ready) models must use the success badge class so they visually pop
     /// against idle entries in the Active Models grid.
     #[test]
-    fn model_status_badge_class_uses_success_when_loaded() {
-        assert_eq!(model_status_badge_class(true), "badge badge-success");
+    fn model_status_badge_class_uses_success_when_ready() {
+        assert_eq!(model_status_badge_class("ready"), "badge badge-success");
     }
 
     /// Idle models must use the muted badge class so they recede compared to
@@ -708,44 +733,90 @@ mod tests {
     /// `/models` page.
     #[test]
     fn model_status_badge_class_uses_muted_when_idle() {
-        assert_eq!(model_status_badge_class(false), "badge badge-muted");
+        assert_eq!(model_status_badge_class("idle"), "badge badge-muted");
     }
 
-    /// Badge text mirrors the badge colour: "Loaded" for loaded models,
+    /// Badge text mirrors the badge colour: "Loaded" for ready models,
     /// "Idle" for everything else. Tests both branches so a future renaming
     /// can't silently drift one of them.
     #[test]
-    fn model_status_badge_label_distinguishes_loaded_and_idle() {
-        assert_eq!(model_status_badge_label(true), "Loaded");
-        assert_eq!(model_status_badge_label(false), "Idle");
+    fn model_status_badge_label_distinguishes_ready_and_idle() {
+        assert_eq!(model_status_badge_label("ready"), "Loaded");
+        assert_eq!(model_status_badge_label("idle"), "Idle");
     }
 
-    /// Loaded models surface an Unload action — destructive styling so the
+    /// Ready models surface an Unload action — destructive styling so the
     /// user understands clicking it tears down a running server.
     #[test]
-    fn model_action_button_class_uses_danger_when_loaded() {
-        assert_eq!(model_action_button_class(true), "btn btn-danger btn-sm");
+    fn model_action_button_class_uses_danger_when_ready() {
+        assert_eq!(model_action_button_class("ready"), "btn btn-danger btn-sm");
     }
 
     /// Idle models surface a Load action — affirmative styling so the user
     /// understands clicking it spins up a server.
     #[test]
     fn model_action_button_class_uses_success_when_idle() {
-        assert_eq!(model_action_button_class(false), "btn btn-success btn-sm");
+        assert_eq!(model_action_button_class("idle"), "btn btn-success btn-sm");
     }
 
-    /// Action button labels must match their visual styling: "Unload" for
-    /// loaded models, "Load" for idle ones. Tests both branches so the
-    /// label and class helpers stay in lockstep.
+    /// Loading models get a disabled secondary button.
     #[test]
-    fn model_action_button_label_distinguishes_loaded_and_idle() {
-        assert_eq!(model_action_button_label(true), "Unload");
-        assert_eq!(model_action_button_label(false), "Load");
+    fn model_action_button_class_uses_secondary_when_loading() {
+        assert_eq!(
+            model_action_button_class("loading"),
+            "btn btn-secondary btn-sm"
+        );
+    }
+
+    /// Unloading models get a disabled secondary button.
+    #[test]
+    fn model_action_button_class_uses_secondary_when_unloading() {
+        assert_eq!(
+            model_action_button_class("unloading"),
+            "btn btn-secondary btn-sm"
+        );
+    }
+
+    /// Failed models get a warning button (Retry).
+    #[test]
+    fn model_action_button_class_uses_warning_when_failed() {
+        assert_eq!(
+            model_action_button_class("failed"),
+            "btn btn-warning btn-sm"
+        );
+    }
+
+    /// Action button labels must match their visual styling.
+    #[test]
+    fn model_action_button_label_distinguishes_states() {
+        assert_eq!(model_action_button_label("ready"), "Unload");
+        assert_eq!(model_action_button_label("idle"), "Load");
+        assert_eq!(model_action_button_label("loading"), "Loading…");
+        assert_eq!(model_action_button_label("unloading"), "Unloading…");
+        assert_eq!(model_action_button_label("failed"), "Retry");
+    }
+
+    /// Status badge class and label helpers map states correctly.
+    #[test]
+    fn model_status_badge_class_and_label_map_all_states() {
+        assert_eq!(model_status_badge_class("ready"), "badge badge-success");
+        assert_eq!(model_status_badge_label("ready"), "Loaded");
+
+        assert_eq!(model_status_badge_class("loading"), "badge badge-info");
+        assert_eq!(model_status_badge_label("loading"), "Loading");
+
+        assert_eq!(model_status_badge_class("unloading"), "badge badge-warning");
+        assert_eq!(model_status_badge_label("unloading"), "Unloading");
+
+        assert_eq!(model_status_badge_class("failed"), "badge badge-error");
+        assert_eq!(model_status_badge_label("failed"), "Failed");
+
+        assert_eq!(model_status_badge_class("idle"), "badge badge-muted");
+        assert_eq!(model_status_badge_label("idle"), "Idle");
     }
 
     /// When the backend includes a populated `models` array, every `ModelStatus`
-    /// must round-trip with its `id`, `backend`, and `loaded` fields preserved.
-    /// This is the wire format the dashboard's UI rendering depends on.
+    /// must round-trip with its `id`, `backend`, and `state` fields preserved.
     #[test]
     fn metric_sample_deserializes_models_field() {
         let json = r#"{
@@ -757,8 +828,8 @@ mod tests {
             "vram": null,
             "models_loaded": 1,
             "models": [
-                { "id": "alpha", "api_name": "org/alpha", "backend": "llama_cpp", "loaded": true },
-                { "id": "beta",  "api_name": "org/beta",  "backend": "ik_llama",  "loaded": false }
+                { "id": "alpha", "api_name": "org/alpha", "backend": "llama_cpp", "loaded": true, "state": "ready" },
+                { "id": "beta",  "api_name": "org/beta",  "backend": "ik_llama",  "loaded": false, "state": "idle" }
             ]
         }"#;
 
@@ -770,11 +841,11 @@ mod tests {
         assert_eq!(sample.models[0].id, "alpha");
         assert_eq!(sample.models[0].api_name, Some("org/alpha".to_string()));
         assert_eq!(sample.models[0].backend, "llama_cpp");
-        assert!(sample.models[0].loaded);
+        assert_eq!(sample.models[0].state, "ready");
 
         assert_eq!(sample.models[1].id, "beta");
         assert_eq!(sample.models[1].api_name, Some("org/beta".to_string()));
         assert_eq!(sample.models[1].backend, "ik_llama");
-        assert!(!sample.models[1].loaded);
+        assert_eq!(sample.models[1].state, "idle");
     }
 }

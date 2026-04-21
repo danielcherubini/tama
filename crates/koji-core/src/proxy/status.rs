@@ -10,24 +10,42 @@ impl ProxyState {
     /// `Config::resolve_servers_for_model` is in `ModelState::Ready`. The
     /// returned vector is sorted by `id` so dashboard rows do not shuffle
     /// between SSE samples.
+    #[allow(deprecated)]
     pub async fn collect_model_statuses(&self) -> Vec<crate::gpu::ModelStatus> {
         let config = self.config.read().await;
         let model_configs = self.model_configs.read().await;
         let runtime = self.models.read().await;
         let mut out: Vec<crate::gpu::ModelStatus> = Vec::with_capacity(model_configs.len());
         for (model_id, model_cfg) in model_configs.iter() {
-            // A model is "loaded" iff at least one of its server entries
-            // in `state.models` is in the Ready state. Mirrors the logic
-            // used by build_status_response().
-            let loaded = config
-                .resolve_servers_for_model(&model_configs, model_id)
-                .into_iter()
-                .any(|(server_name, _, _)| {
-                    runtime
-                        .get(&server_name)
-                        .map(|s| s.is_ready())
-                        .unwrap_or(false)
-                });
+            // Determine the model's lifecycle state from its server entries.
+            let servers = config.resolve_servers_for_model(&model_configs, model_id);
+            let mut best_state: Option<&ModelState> = None;
+            for (server_name, _, _) in servers {
+                if let Some(state) = runtime.get(&server_name) {
+                    match state {
+                        ModelState::Ready { .. } => {
+                            best_state = Some(state);
+                            break; // Ready is the best possible state
+                        }
+                        ModelState::Starting { .. }
+                        | ModelState::Unloading { .. }
+                        | ModelState::Failed { .. } => {
+                            if best_state.is_none() {
+                                best_state = Some(state);
+                            }
+                        }
+                    }
+                }
+            }
+
+            let (loaded, state_str) = match best_state {
+                Some(ModelState::Ready { .. }) => (true, "ready".to_string()),
+                Some(ModelState::Starting { .. }) => (false, "loading".to_string()),
+                Some(ModelState::Unloading { .. }) => (false, "unloading".to_string()),
+                Some(ModelState::Failed { .. }) => (false, "failed".to_string()),
+                None => (false, "idle".to_string()),
+            };
+
             out.push(crate::gpu::ModelStatus {
                 id: model_id.clone(),
                 db_id: model_cfg.db_id,
@@ -35,6 +53,7 @@ impl ProxyState {
                 display_name: model_cfg.display_name.clone(),
                 backend: model_cfg.backend.clone(),
                 loaded,
+                state: state_str,
                 quant: model_cfg.quant.clone(),
                 context_length: model_cfg.context_length,
             });
@@ -101,6 +120,7 @@ impl ProxyState {
                         "enabled": model_config.enabled,
                         "api_name": model_config.api_name,
                         "loaded": true,
+                        "state": "ready",
                         "backend_pid": *backend_pid,
                         "load_time_secs": load_time_secs,
                         "last_accessed_secs_ago": last_accessed_secs_ago,
@@ -123,11 +143,52 @@ impl ProxyState {
                         "enabled": model_config.enabled,
                         "api_name": model_config.api_name,
                         "loaded": false,
+                        "state": "loading",
                         "backend_pid": null,
                         "load_time_secs": null,
                         "last_accessed_secs_ago": null,
                         "idle_timeout_remaining_secs": null,
                         "consecutive_failures": consecutive_failures.load(Relaxed),
+                    })
+                }
+                Some(ModelState::Unloading { .. }) => {
+                    serde_json::json!({
+                        "id": model_config.db_id,
+                        "display_name": model_config.display_name,
+                        "backend": model_config.backend,
+                        "backend_path": backend_path,
+                        "model": model_config.model,
+                        "quant": model_config.quant,
+                        "context_length": model_config.context_length,
+                        "enabled": model_config.enabled,
+                        "api_name": model_config.api_name,
+                        "loaded": false,
+                        "state": "unloading",
+                        "backend_pid": null,
+                        "load_time_secs": null,
+                        "last_accessed_secs_ago": null,
+                        "idle_timeout_remaining_secs": null,
+                        "consecutive_failures": null,
+                    })
+                }
+                Some(ModelState::Failed { .. }) => {
+                    serde_json::json!({
+                        "id": model_config.db_id,
+                        "display_name": model_config.display_name,
+                        "backend": model_config.backend,
+                        "backend_path": backend_path,
+                        "model": model_config.model,
+                        "quant": model_config.quant,
+                        "context_length": model_config.context_length,
+                        "enabled": model_config.enabled,
+                        "api_name": model_config.api_name,
+                        "loaded": false,
+                        "state": "failed",
+                        "backend_pid": null,
+                        "load_time_secs": null,
+                        "last_accessed_secs_ago": null,
+                        "idle_timeout_remaining_secs": null,
+                        "consecutive_failures": null,
                     })
                 }
                 _ => {
@@ -143,6 +204,7 @@ impl ProxyState {
                         "enabled": model_config.enabled,
                         "api_name": model_config.api_name,
                         "loaded": false,
+                        "state": "idle",
                         "backend_pid": null,
                         "load_time_secs": null,
                         "last_accessed_secs_ago": null,
