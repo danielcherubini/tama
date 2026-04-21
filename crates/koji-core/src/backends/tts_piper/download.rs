@@ -15,7 +15,7 @@ pub async fn download_piper_model(progress: &Arc<dyn ProgressSink>) -> Result<()
 
     // Piper voices are organized by language/region/voice/quality on HF
     // The default voice is en_US-lessac-medium
-    let voice_path = format!("en/en_US/lessac/medium");
+    let voice_path: &str = "en/en_US/lessac/medium";
 
     progress.log(&format!("Downloading Piper voice: {}...", DEFAULT_VOICE_ID));
 

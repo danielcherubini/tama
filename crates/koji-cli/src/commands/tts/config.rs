@@ -116,7 +116,6 @@ fn print_config(c: &TtsConfigRecord) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn test_speed_validation() {

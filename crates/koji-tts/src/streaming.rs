@@ -18,7 +18,7 @@ pub fn audio_chunk_to_sse(chunk: &AudioChunk) -> String {
 
 /// Convert an error to an SSE-formatted error string.
 pub fn error_chunk_to_sse(error: &anyhow::Error) -> String {
-    format!("event: error\ndata: {}\n\n", error.to_string())
+    format!("event: error\ndata: {}\n\n", error)
 }
 
 #[cfg(test)]

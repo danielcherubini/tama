@@ -103,11 +103,10 @@ pub async fn load_engine(kind: EngineKind, model_path: &Path) -> Result<Engine> 
 
 /// Check if a given Engine is of the specified kind.
 pub fn engine_matches_kind(engine: &Engine, kind: &EngineKind) -> bool {
-    match (engine, kind) {
-        (Engine::Kokoro(_), EngineKind::Kokoro) => true,
-        (Engine::Piper(_), EngineKind::Piper) => true,
-        _ => false,
-    }
+    matches!(
+        (engine, kind),
+        (Engine::Kokoro(_), EngineKind::Kokoro) | (Engine::Piper(_), EngineKind::Piper)
+    )
 }
 
 #[cfg(test)]

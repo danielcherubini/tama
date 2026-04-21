@@ -58,7 +58,7 @@ pub fn verify_tts_kokoro(info: &BackendInfo) -> anyhow::Result<()> {
     // Check that at least one voice file exists
     let voice_count = std::fs::read_dir(&voices)?
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "onnx"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "onnx"))
         .count();
 
     if voice_count == 0 {

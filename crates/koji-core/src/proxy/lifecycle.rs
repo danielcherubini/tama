@@ -244,9 +244,9 @@ impl ProxyState {
         let llm_count = ready_servers
             .iter()
             .filter(|server_name| {
-                model_configs
+                !model_configs
                     .get(server_name.as_str())
-                    .map_or(true, |mc| !mc.backend.starts_with("tts_"))
+                    .is_some_and(|mc| mc.backend.starts_with("tts_"))
             })
             .count();
 
@@ -259,9 +259,9 @@ impl ProxyState {
         let lru_name = ready_servers
             .iter()
             .filter(|server_name| {
-                model_configs
+                !model_configs
                     .get(server_name.as_str())
-                    .map_or(true, |mc| !mc.backend.starts_with("tts_"))
+                    .is_some_and(|mc| mc.backend.starts_with("tts_"))
             })
             .filter_map(|server_name| models.get(server_name).map(|s| (server_name, s)))
             .min_by_key(|(_, s)| s.last_accessed())
@@ -1002,7 +1002,7 @@ mod tests {
         );
 
         // Add a TTS backend (tts_kokoro) — should NOT count toward limit
-        let mut tts_state = make_ready_state("model.gguf", "tts_kokoro");
+        let tts_state = make_ready_state("model.gguf", "tts_kokoro");
         state
             .models
             .write()

@@ -44,7 +44,7 @@ pub async fn download_kokoro_model(progress: &Arc<dyn ProgressSink>) -> Result<(
         std::fs::create_dir_all(parent).with_context(|| "Failed to create model directory")?;
     }
 
-    progress.log(&format!("Downloading Kokoro 82M model from HuggingFace..."));
+    progress.log("Downloading Kokoro 82M model from HuggingFace...");
     crate::backends::installer::download_with_client(url, &dest, Some(progress), None)
         .await
         .with_context(|| "Failed to download Kokoro model")?;
