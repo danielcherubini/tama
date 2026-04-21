@@ -1,3 +1,4 @@
+pub mod api_docs;
 pub mod backends;
 pub mod benchmarks;
 pub mod config_editor;
