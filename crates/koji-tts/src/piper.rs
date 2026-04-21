@@ -24,23 +24,30 @@ pub struct PiperEngine {
 impl PiperEngine {
     /// Create a new PiperEngine from a models directory.
     pub async fn new(model_path: &Path) -> Result<Self> {
-        let model_file = model_path.join("piper.onnx");
+        // Piper files are named {voice_id}.onnx and {voice_id}.onnx.json
+        // Search for .onnx file in the model directory
+        let mut onnx_files: Vec<_> = std::fs::read_dir(model_path)?
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().map_or(false, |ext| ext == "onnx"))
+            .collect();
 
-        if !model_file.exists() {
+        if onnx_files.is_empty() {
             return Err(anyhow!(
-                "Piper model file not found at {}",
-                model_file.display()
+                "No Piper ONNX model found in {}",
+                model_path.display()
             ));
         }
 
+        let model_file = onnx_files.remove(0).path();
+        let voice_name = model_file
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .trim_end_matches(".onnx")
+            .to_string();
+
         // Try to load voice config from JSON if available
-        let config_file = model_path.join("piper.json");
-        let voice_name = if config_file.exists() {
-            // Could parse the JSON for the actual voice name
-            "en_US-lessac-medium".to_string()
-        } else {
-            "unknown".to_string()
-        };
+        let _config_file = model_path.join(format!("{}.onnx.json", voice_name));
 
         Ok(Self {
             model_path: model_path.to_path_buf(),
