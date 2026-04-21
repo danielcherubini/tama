@@ -1,4 +1,6 @@
 mod download;
+pub use download::download_with_client;
+
 mod extract;
 mod prebuilt;
 mod source;
