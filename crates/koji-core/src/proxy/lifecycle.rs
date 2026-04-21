@@ -391,6 +391,19 @@ mod tests {
         }
     }
 
+    /// Helper to create an Unloading ModelState for testing.
+    fn make_unloading_state(model_name: &str, backend: &str) -> ModelState {
+        ModelState::Unloading {
+            model_name: model_name.to_string(),
+            backend: backend.to_string(),
+            backend_pid: 54321,
+            backend_url: "http://127.0.0.1:9000".to_string(),
+            last_accessed: Instant::now(),
+            consecutive_failures: Arc::new(AtomicU32::new(0)),
+            failure_timestamp: None,
+        }
+    }
+
     /// Test that idle timeout of 0 disables auto-unload.
     #[tokio::test]
     async fn test_idle_timeout_zero_disables_auto_unload() {
@@ -574,5 +587,86 @@ mod tests {
             *failure_timestamp = Some(std::time::SystemTime::now());
         }
         assert!(!ready.can_reload(60));
+    }
+
+    /// Test that Unloading state model_name() returns the correct name.
+    #[test]
+    fn test_unloading_model_name() {
+        let unloading = make_unloading_state("unload-model", "llama-cpp");
+        assert_eq!(unloading.model_name(), "unload-model");
+    }
+
+    /// Test that Unloading state backend() returns the correct backend.
+    #[test]
+    fn test_unloading_backend() {
+        let unloading = make_unloading_state("m", "vllm");
+        assert_eq!(unloading.backend(), "vllm");
+    }
+
+    /// Test that Unloading state is_ready() returns false.
+    #[test]
+    fn test_unloading_is_not_ready() {
+        let unloading = make_unloading_state("m", "llama-cpp");
+        assert!(!unloading.is_ready());
+    }
+
+    /// Test that Unloading state backend_url() returns None.
+    #[test]
+    fn test_unloading_backend_url_none() {
+        let unloading = make_unloading_state("m", "llama-cpp");
+        assert!(unloading.backend_url().is_none());
+    }
+
+    /// Test that Unloading state backend_pid() returns the PID.
+    #[test]
+    fn test_unloading_backend_pid() {
+        let unloading = make_unloading_state("m", "llama-cpp");
+        assert_eq!(unloading.backend_pid(), Some(54321));
+    }
+
+    /// Test that Unloading state consecutive_failures() returns the counter.
+    #[test]
+    fn test_unloading_consecutive_failures() {
+        let unloading = make_unloading_state("m", "llama-cpp");
+        let failures = unloading.consecutive_failures();
+        assert!(failures.is_some());
+        assert_eq!(failures.unwrap().load(Ordering::Relaxed), 0);
+    }
+
+    /// Test that Unloading state load_time() returns None.
+    #[test]
+    fn test_unloading_load_time_none() {
+        let unloading = make_unloading_state("m", "llama-cpp");
+        assert!(unloading.load_time().is_none());
+    }
+
+    /// Test that Unloading state last_accessed() returns Some.
+    #[test]
+    fn test_unloading_last_accessed() {
+        let unloading = make_unloading_state("m", "llama-cpp");
+        assert!(unloading.last_accessed().is_some());
+    }
+
+    /// Test that Unloading state can_reload() returns false.
+    #[test]
+    fn test_unloading_can_reload_false() {
+        let unloading = make_unloading_state("m", "llama-cpp");
+        assert!(!unloading.can_reload(60));
+    }
+
+    /// Test that ModelState::Default produces a Failed state with empty strings.
+    #[test]
+    fn test_model_state_default_is_failed() {
+        let default_state = ModelState::default();
+        assert!(!default_state.is_ready());
+        assert_eq!(default_state.model_name(), "");
+        assert_eq!(default_state.backend(), "");
+    }
+
+    /// Test that Unloading state matches correctly.
+    #[test]
+    fn test_unloading_variant_match() {
+        let unloading = make_unloading_state("m", "llama-cpp");
+        assert!(matches!(unloading, ModelState::Unloading { .. }));
     }
 }
