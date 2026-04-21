@@ -54,17 +54,20 @@ pub fn backends_dir() -> Result<PathBuf> {
 ///
 /// On Windows, if removal fails with PermissionDenied, it retries once after a short delay.
 pub fn safe_remove_installation(info: &BackendInfo) -> Result<()> {
-    let parent = info
-        .path
-        .parent()
-        .ok_or_else(|| anyhow!("Failed to get parent directory of backend path"))?;
+    // Determine what to remove:
+    // - If path is a directory (TTS backends), remove the path itself
+    // - If path is a binary file (llama_cpp, ik_llama), remove its parent directory
+    let target = if info.path.is_dir() {
+        info.path.clone()
+    } else {
+        info.path
+            .parent()
+            .ok_or_else(|| anyhow!("Failed to get parent directory of backend path"))?
+            .to_path_buf()
+    };
 
-    let canonical_parent = std::fs::canonicalize(parent).with_context(|| {
-        format!(
-            "Failed to canonicalize backend parent path: {}",
-            parent.display()
-        )
-    })?;
+    let canonical_target = std::fs::canonicalize(&target)
+        .with_context(|| format!("Failed to canonicalize backend path: {}", target.display()))?;
 
     let managed = backends_dir().with_context(|| "Failed to get backends directory")?;
     let canonical_managed = std::fs::canonicalize(&managed).with_context(|| {
@@ -74,7 +77,7 @@ pub fn safe_remove_installation(info: &BackendInfo) -> Result<()> {
         )
     })?;
 
-    if !canonical_parent.starts_with(&canonical_managed) {
+    if !canonical_target.starts_with(&canonical_managed) {
         return Err(anyhow!("path is outside the managed backends directory"));
     }
 
@@ -82,14 +85,14 @@ pub fn safe_remove_installation(info: &BackendInfo) -> Result<()> {
     #[cfg(windows)]
     {
         use std::io::ErrorKind;
-        match std::fs::remove_dir_all(parent) {
+        match std::fs::remove_dir_all(&target) {
             Ok(_) => {
                 tracing::info!("Files removed.");
             }
             Err(e) if e.kind() == ErrorKind::PermissionDenied => {
                 tracing::warn!("Skipping file removal: backend may still be running. Retrying...");
                 std::thread::sleep(std::time::Duration::from_millis(500));
-                match std::fs::remove_dir_all(parent) {
+                match std::fs::remove_dir_all(&target) {
                     Ok(_) => {
                         tracing::info!("Files removed.");
                     }
@@ -109,7 +112,7 @@ pub fn safe_remove_installation(info: &BackendInfo) -> Result<()> {
     // On Unix, remove_dir_all will fail if directory is in use
     #[cfg(not(windows))]
     {
-        match std::fs::remove_dir_all(parent) {
+        match std::fs::remove_dir_all(&target) {
             Ok(_) => {
                 tracing::info!("Files removed.");
             }
