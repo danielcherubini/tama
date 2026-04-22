@@ -51,20 +51,20 @@ pub fn check_disk_space(base: &Path) -> Result<u64> {
 async fn create_venv(venv_path: &Path, progress: &Arc<dyn ProgressSink>) -> Result<()> {
     progress.log("Creating Python virtualenv...");
 
-    // kokoro-fastapi requires kokoro==0.9.2 which doesn't support Python 3.14+
-    // Prefer python3.13, fall back to python3.12, then python3
-    let python_cmd = if std::process::Command::new("python3.13")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-    {
-        "python3.13"
-    } else if std::process::Command::new("python3.12")
+    // kokoro-fastapi requires kokoro==0.9.2 which only supports Python 3.10-3.12
+    // Prefer python3.12, fall back to python3.13 (may work with overrides), then python3
+    let python_cmd = if std::process::Command::new("python3.12")
         .arg("--version")
         .output()
         .is_ok_and(|o| o.status.success())
     {
         "python3.12"
+    } else if std::process::Command::new("python3.13")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        "python3.13"
     } else {
         "python3"
     };
