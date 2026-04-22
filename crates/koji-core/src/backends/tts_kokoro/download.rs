@@ -187,12 +187,26 @@ fn ensure_openblas(progress: &Arc<dyn ProgressSink>) -> Result<()> {
     // Create openblas.pc symlink if it doesn't exist.
     // Many distros ship blas.pc but not openblas.pc, and scipy's meson build
     // specifically looks for "openblas" via pkg-config.
-    let pc_dir = "/usr/lib64/pkgconfig";
-    let pc_path = Path::new(pc_dir).join("openblas.pc");
+    let pc_path = Path::new("/usr/lib64/pkgconfig/openblas.pc");
     if !pc_path.exists() {
         progress.log("Creating openblas.pc symlink for scipy build...");
-        std::os::unix::fs::symlink("blas.pc", &pc_path)
+        let sudo = if std::env::var("SUDO_USER").is_ok() {
+            "sudo "
+        } else {
+            ""
+        };
+        let status = std::process::Command::new(format!("{sudo}ln"))
+            .args(["-sf", "/usr/lib64/pkgconfig/blas.pc", "/usr/lib64/pkgconfig/openblas.pc"])
+            .status()
             .with_context(|| "Failed to create openblas.pc symlink")?;
+
+        if !status.success() {
+            return Err(anyhow!(
+                "Failed to create openblas.pc symlink. \
+                 Please create it manually: sudo ln -sf /usr/lib64/pkgconfig/blas.pc \
+                 /usr/lib64/pkgconfig/openblas.pc"
+            ));
+        }
     }
 
     Ok(())
