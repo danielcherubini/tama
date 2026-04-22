@@ -29,10 +29,11 @@ pub fn python_bin(base: &Path) -> PathBuf {
     venv_dir(base).join("bin").join("python")
 }
 
-/// Return the model directory where download_model.py places files:
-/// `<install_dir>/api/src/models/v1_0/`.
+/// Return the model directory where download_model.py places files.
+/// The script downloads to `<repo>/api/api/src/models/v1_0/` relative to repo root.
 pub fn model_dir(base: &Path) -> PathBuf {
     install_dir(base)
+        .join("api")
         .join("api")
         .join("src")
         .join("models")
