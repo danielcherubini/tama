@@ -16,13 +16,13 @@ These invariants are referenced by multiple tasks; read them before starting any
 
 1. **`build_full_args` MUST always return flat tokens** (one CLI token per `Vec` element). This is its existing contract. `proxy/lifecycle.rs`, `bench/runner.rs`, `proxy/process.rs::override_arg`, and `bench/runner.rs::_override_arg` all depend on this. The very last operation in `build_full_args` must therefore be `flatten_args(&grouped)`.
 
-2. **`build_args` returns flat tokens** for consistency with `build_full_args`. (Currently has no in-workspace callers but is public API and may be used by external consumers of `koji-core`. The two new tests added in Task 2a are the primary regression guard.)
+2. **`build_args` returns flat tokens** for consistency with `build_full_args`. (Currently has no in-workspace callers but is public API and may be used by external consumers of `tama-core`. The two new tests added in Task 2a are the primary regression guard.)
 
-3. **Helper visibility**: `koji-cli` (a separate crate) imports things via `use koji_core::config::...`. So the helpers must be `pub use`-d from `crates/koji-core/src/config/mod.rs`, not just declared as a private/`pub(crate)` submodule.
+3. **Helper visibility**: `tama-cli` (a separate crate) imports things via `use tama_core::config::...`. So the helpers must be `pub use`-d from `crates/tama-core/src/config/mod.rs`, not just declared as a private/`pub(crate)` submodule.
 
 4. **`shlex::try_quote` is the modern API**. `shlex::quote` is deprecated (since 1.3.0). Use `try_quote` and `?`/`unwrap_or_else` on its `Result<Cow<'_, str>, QuoteError>` return type.
 
-5. **Migrating on load must persist to disk** if anything changed, otherwise the verification checklist's "inspect config.toml after running koji status" step will silently fail. Use a `(migrated_args, did_change)` return tuple from the helper so we can detect changes without a separate compare pass.
+5. **Migrating on load must persist to disk** if anything changed, otherwise the verification checklist's "inspect config.toml after running tama status" step will silently fail. Use a `(migrated_args, did_change)` return tuple from the helper so we can detect changes without a separate compare pass.
 
 ---
 
@@ -33,9 +33,9 @@ This task sets up the foundation. We add the `shlex` crate, create a new `args_h
 
 **Files:**
 - Modify: `Cargo.toml` (workspace root) — add `shlex` to `[workspace.dependencies]`
-- Modify: `crates/koji-core/Cargo.toml` — add `shlex = { workspace = true }` under `[dependencies]`
-- Create: `crates/koji-core/src/config/args_helpers.rs` (new file, ~280 lines including tests)
-- Modify: `crates/koji-core/src/config/mod.rs` — add `mod args_helpers;` and `pub use args_helpers::{...};`
+- Modify: `crates/tama-core/Cargo.toml` — add `shlex = { workspace = true }` under `[dependencies]`
+- Create: `crates/tama-core/src/config/args_helpers.rs` (new file, ~280 lines including tests)
+- Modify: `crates/tama-core/src/config/mod.rs` — add `mod args_helpers;` and `pub use args_helpers::{...};`
 
 **What to implement:**
 
@@ -47,7 +47,7 @@ Add to the existing `[workspace.dependencies]` table (alphabetical order):
 shlex = "1.3"
 ```
 
-### 1.2 — `crates/koji-core/Cargo.toml`
+### 1.2 — `crates/tama-core/Cargo.toml`
 
 Add under `[dependencies]` (alphabetical order):
 
@@ -55,7 +55,7 @@ Add under `[dependencies]` (alphabetical order):
 shlex = { workspace = true }
 ```
 
-### 1.3 — `crates/koji-core/src/config/args_helpers.rs` (new file)
+### 1.3 — `crates/tama-core/src/config/args_helpers.rs` (new file)
 
 Create the file with this exact content:
 
@@ -671,7 +671,7 @@ mod tests {
 }
 ```
 
-### 1.4 — `crates/koji-core/src/config/mod.rs`
+### 1.4 — `crates/tama-core/src/config/mod.rs`
 
 Replace the existing file contents with:
 
@@ -700,30 +700,30 @@ pub use types::{
 - [ ] Add `shlex = "1.3"` under `[workspace.dependencies]` in `Cargo.toml`.
 - [ ] Run `cargo metadata --format-version 1 > /dev/null`
   - Did it succeed (exit 0)? If not, the workspace dependency syntax is wrong; fix before continuing.
-- [ ] Read `crates/koji-core/Cargo.toml` to find the `[dependencies]` section.
-- [ ] Add `shlex = { workspace = true }` under `[dependencies]` in `crates/koji-core/Cargo.toml`.
-- [ ] Run `cargo check -p koji-core`
+- [ ] Read `crates/tama-core/Cargo.toml` to find the `[dependencies]` section.
+- [ ] Add `shlex = { workspace = true }` under `[dependencies]` in `crates/tama-core/Cargo.toml`.
+- [ ] Run `cargo check -p tama-core`
   - Did it succeed? If not, check the dependency syntax and re-run.
-- [ ] Create `crates/koji-core/src/config/args_helpers.rs` with the exact content from section 1.3 above.
-- [ ] Replace `crates/koji-core/src/config/mod.rs` with the exact content from section 1.4 above.
-- [ ] Run `cargo check -p koji-core`
+- [ ] Create `crates/tama-core/src/config/args_helpers.rs` with the exact content from section 1.3 above.
+- [ ] Replace `crates/tama-core/src/config/mod.rs` with the exact content from section 1.4 above.
+- [ ] Run `cargo check -p tama-core`
   - Did it succeed? If not, fix module declarations or syntax errors.
-- [ ] Run `cargo test -p koji-core --lib -- config::args_helpers::tests`
+- [ ] Run `cargo test -p tama-core --lib -- config::args_helpers::tests`
   - Did all 42 tests in the `args_helpers::tests` module pass? If not, fix the implementations to match the test expectations.
-- [ ] Run `cargo clippy -p koji-core -- -D warnings`
+- [ ] Run `cargo clippy -p tama-core -- -D warnings`
   - Did it succeed? Fix any warnings.
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo fmt --all -- --check`
   - Did it succeed? If not, run `cargo fmt --all` again.
-- [ ] Verify external import works by running `cargo check -p koji-cli` (smoke test that the `pub use` makes the helpers reachable from another crate).
+- [ ] Verify external import works by running `cargo check -p tama-cli` (smoke test that the `pub use` makes the helpers reachable from another crate).
 - [ ] Commit with message: `feat(config): add shlex and grouped-args helper functions with tests`
 
 **Acceptance criteria:**
-- [ ] `crates/koji-core/Cargo.toml` declares `shlex` as a dependency.
-- [ ] `crates/koji-core/src/config/args_helpers.rs` exists and contains all five public helpers (`split_arg_entry`, `flag_name`, `flatten_args`, `quote_value`, `merge_args`, `group_legacy_flat_args`) plus the private `is_flag_token`.
+- [ ] `crates/tama-core/Cargo.toml` declares `shlex` as a dependency.
+- [ ] `crates/tama-core/src/config/args_helpers.rs` exists and contains all five public helpers (`split_arg_entry`, `flag_name`, `flatten_args`, `quote_value`, `merge_args`, `group_legacy_flat_args`) plus the private `is_flag_token`.
 - [ ] All 42 unit tests in `args_helpers::tests` pass (10 `flag_name`, 5 `split_arg_entry`, 2 `flatten_args`, 12 `merge_args`, 13 `group_legacy_flat_args` — including `group_user_real_world_example` (canonical mix of standalone booleans + flag/value pairs: `--no-mmap`, `--cpu-moe`, `-b 4096`, `-ub 4096`, `-ctk q4_0`, `-ctv q4_0`), `group_long_flag_with_zero_value` and `group_long_flag_with_zero_value_followed_by_boolean` (regression for `--ctx-checkpoints 0` — a long flag whose explicit value happens to be `0`), `merge_long_flag_with_zero_value_overridden`, and `merge_overrides_with_internal_duplicates_preserved`).
-- [ ] `pub use args_helpers::{...}` is in `config/mod.rs` so external crates can import via `koji_core::config::merge_args` etc.
-- [ ] `cargo clippy -p koji-core -- -D warnings` passes.
+- [ ] `pub use args_helpers::{...}` is in `config/mod.rs` so external crates can import via `tama_core::config::merge_args` etc.
+- [ ] `cargo clippy -p tama-core -- -D warnings` passes.
 - [ ] `cargo fmt --all -- --check` passes.
 
 ---
@@ -734,12 +734,12 @@ pub use types::{
 With the helpers in place, this task wires them into `Config::build_args` (the simpler of the two arg builders) and converts `SamplingParams::to_args` to emit grouped form so it composes with `merge_args`. `Config::build_full_args` is intentionally left for Task 2b — it has more complex injection logic for `-m`/`-c`/`-ngl` and deserves its own commit so the diff is reviewable.
 
 **The four existing `SamplingParams::to_args` callers** that this task will affect:
-- `crates/koji-core/src/config/resolve.rs::build_args` (rewritten in this task)
-- `crates/koji-core/src/config/resolve.rs::build_full_args` (will be rewritten in Task 2b — for now, the existing skip_next dedup logic still works because it consumes flat tokens; we leave it untouched)
-- `crates/koji-core/src/profiles.rs` test `test_to_args_coding` (line 217) — assertion needs updating
+- `crates/tama-core/src/config/resolve.rs::build_args` (rewritten in this task)
+- `crates/tama-core/src/config/resolve.rs::build_full_args` (will be rewritten in Task 2b — for now, the existing skip_next dedup logic still works because it consumes flat tokens; we leave it untouched)
+- `crates/tama-core/src/profiles.rs` test `test_to_args_coding` (line 217) — assertion needs updating
 - (no other callers — verified via grep for `to_args(`)
 
-**The existing test that needs an updated assertion** is `test_to_args_coding` at `crates/koji-core/src/profiles.rs:217`. Its current assertion is:
+**The existing test that needs an updated assertion** is `test_to_args_coding` at `crates/tama-core/src/profiles.rs:217`. Its current assertion is:
 ```rust
 assert_eq!(args, vec!["--temp", "0.30", "--top-k", "50"]);
 ```
@@ -751,12 +751,12 @@ assert_eq!(args, vec!["--temp 0.30", "--top-k 50"]);
 `test_to_args_empty` at line 228 still passes unchanged (empty vec).
 
 **Files:**
-- Modify: `crates/koji-core/src/profiles.rs` — rewrite `SamplingParams::to_args` and update `test_to_args_coding`
-- Modify: `crates/koji-core/src/config/resolve.rs` — rewrite `Config::build_args`
+- Modify: `crates/tama-core/src/profiles.rs` — rewrite `SamplingParams::to_args` and update `test_to_args_coding`
+- Modify: `crates/tama-core/src/config/resolve.rs` — rewrite `Config::build_args`
 
 **What to implement:**
 
-### 2a.1 — `crates/koji-core/src/profiles.rs`
+### 2a.1 — `crates/tama-core/src/profiles.rs`
 
 Replace `SamplingParams::to_args` (currently lines 106–139) with:
 
@@ -806,7 +806,7 @@ Update `test_to_args_coding` (line 217):
     }
 ```
 
-### 2a.2 — `crates/koji-core/src/config/resolve.rs`
+### 2a.2 — `crates/tama-core/src/config/resolve.rs`
 
 Replace `Config::build_args` (currently lines 144–181) with:
 
@@ -932,23 +932,23 @@ Add this test to the existing `mod tests` block at the bottom of `resolve.rs`:
 ```
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/profiles.rs` lines 106–140 to confirm the current `to_args` shape.
+- [ ] Read `crates/tama-core/src/profiles.rs` lines 106–140 to confirm the current `to_args` shape.
 - [ ] Update `test_to_args_coding` in `profiles.rs` to assert `vec!["--temp 0.30", "--top-k 50"]` (this is the failing-test step — the current implementation would still produce `vec!["--temp", "0.30", "--top-k", "50"]`).
-- [ ] Run `cargo test -p koji-core --lib -- profiles::tests::test_to_args_coding`
+- [ ] Run `cargo test -p tama-core --lib -- profiles::tests::test_to_args_coding`
   - Did it fail with an assertion mismatch? If not, stop and investigate why.
 - [ ] Replace `SamplingParams::to_args` in `profiles.rs` with the grouped-form implementation from section 2a.1.
-- [ ] Run `cargo test -p koji-core --lib -- profiles::tests`
+- [ ] Run `cargo test -p tama-core --lib -- profiles::tests`
   - Did all `profiles::tests` pass (including `test_to_args_coding`, `test_to_args_empty`, and the preset_label tests which don't touch `to_args`)? If not, fix.
-- [ ] Read `crates/koji-core/src/config/resolve.rs` lines 144–181 to confirm the current `build_args` shape.
+- [ ] Read `crates/tama-core/src/config/resolve.rs` lines 144–181 to confirm the current `build_args` shape.
 - [ ] Add the two new tests `build_args_dedupes_backend_vs_model_flags` and `build_args_sampling_overrides_inline_temp_in_args` to `resolve.rs`'s existing `mod tests`.
-- [ ] Run `cargo test -p koji-core --lib -- config::resolve::tests::build_args_dedupes_backend_vs_model_flags`
+- [ ] Run `cargo test -p tama-core --lib -- config::resolve::tests::build_args_dedupes_backend_vs_model_flags`
   - Did it fail (the current `build_args` does naive `extend` and won't dedup)? If not, stop and investigate.
 - [ ] Replace `Config::build_args` in `resolve.rs` with the implementation from section 2a.2.
-- [ ] Run `cargo test -p koji-core --lib -- config::resolve::tests`
+- [ ] Run `cargo test -p tama-core --lib -- config::resolve::tests`
   - Did all `resolve::tests` pass, including the two new ones? If not, fix.
-- [ ] Run `cargo test -p koji-core --lib`
-  - Did the full koji-core test suite pass? If not, investigate any other tests that depended on the old `to_args` flat format.
-- [ ] Run `cargo clippy -p koji-core -- -D warnings`
+- [ ] Run `cargo test -p tama-core --lib`
+  - Did the full tama-core test suite pass? If not, investigate any other tests that depended on the old `to_args` flat format.
+- [ ] Run `cargo clippy -p tama-core -- -D warnings`
   - Did it succeed? Fix any warnings.
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo fmt --all -- --check`
@@ -961,8 +961,8 @@ Add this test to the existing `mod tests` block at the bottom of `resolve.rs`:
 - [ ] `Config::build_args` returns flat tokens via `flatten_args`.
 - [ ] `build_args_dedupes_backend_vs_model_flags` passes: backend `[-b 2048, -ub 512, -t 14]` + model `[-b 4096, -ub 4096]` → flat output contains exactly one `-b 4096`, one `-ub 4096`, preserves `-t 14`, and contains no `2048` or `512` tokens.
 - [ ] `build_args_sampling_overrides_inline_temp_in_args` passes: inline `--temp 0.10` in args is fully replaced by `sampling.temperature = 0.5`, producing exactly one `--temp 0.50`.
-- [ ] `cargo test -p koji-core --lib` passes overall.
-- [ ] `cargo clippy -p koji-core -- -D warnings` passes.
+- [ ] `cargo test -p tama-core --lib` passes overall.
+- [ ] `cargo clippy -p tama-core -- -D warnings` passes.
 - [ ] `cargo fmt --all -- --check` passes.
 
 ---
@@ -975,8 +975,8 @@ This is the main bug-fix task. `Config::build_full_args` currently does naive `d
 **Why the contract preservation matters:** `proxy/lifecycle.rs:76-77` and `bench/runner.rs:106-107` call `override_arg`/`_override_arg` on the result of `build_full_args`, and those helpers operate on flat tokens. If `build_full_args` ever started returning grouped form, those callers would silently break. We add a `debug_assert!` at the end of `build_full_args` pinning the invariant.
 
 **Files:**
-- Modify: `crates/koji-core/src/config/resolve.rs` — rewrite `Config::build_full_args`
-- Modify: `crates/koji-core/src/config/resolve.rs` — update existing tests if needed (`test_build_full_args_unified`, `test_build_full_args_ctx_override`, `test_build_full_args_no_sampling`, `test_build_full_args_no_quants`)
+- Modify: `crates/tama-core/src/config/resolve.rs` — rewrite `Config::build_full_args`
+- Modify: `crates/tama-core/src/config/resolve.rs` — update existing tests if needed (`test_build_full_args_unified`, `test_build_full_args_ctx_override`, `test_build_full_args_no_sampling`, `test_build_full_args_no_quants`)
 
 **What to implement:**
 
@@ -1243,15 +1243,15 @@ Add this test alongside the existing `build_full_args` tests in `resolve.rs`:
 ```
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/config/resolve.rs` lines 186–270 to understand the current `build_full_args`.
+- [ ] Read `crates/tama-core/src/config/resolve.rs` lines 186–270 to understand the current `build_full_args`.
 - [ ] Add the two new tests `build_full_args_dedupes_backend_vs_model_flags` and `build_full_args_returns_flat_tokens_with_quoted_path` to the existing `mod tests` block in `resolve.rs`.
-- [ ] Run `cargo test -p koji-core --lib -- config::resolve::tests::build_full_args_dedupes_backend_vs_model_flags`
+- [ ] Run `cargo test -p tama-core --lib -- config::resolve::tests::build_full_args_dedupes_backend_vs_model_flags`
   - Did it fail (the current implementation has duplicate `-b` tokens)? If not, stop and investigate.
 - [ ] Replace `Config::build_full_args` in `resolve.rs` with the implementation from section 2b.1.
-- [ ] Run `cargo test -p koji-core --lib -- config::resolve::tests`
+- [ ] Run `cargo test -p tama-core --lib -- config::resolve::tests`
   - Did all `resolve::tests` pass, including the two new ones AND the existing `test_build_full_args_unified`, `test_build_full_args_ctx_override`, `test_build_full_args_no_sampling`, `test_build_full_args_no_quants`? If any of the existing tests fail, investigate whether the failure is due to `flatten_args` ordering or sampling format and fix accordingly.
-- [ ] Run `cargo test -p koji-core --lib`
-  - Did the full koji-core suite pass?
+- [ ] Run `cargo test -p tama-core --lib`
+  - Did the full tama-core suite pass?
 - [ ] Run `cargo test --workspace`
   - Did the full workspace test suite pass? (This catches any incidental regressions in `bench/runner.rs` or `proxy/lifecycle.rs` that depend on `build_full_args`.)
 - [ ] Run `cargo clippy --workspace -- -D warnings`
@@ -1279,8 +1279,8 @@ Add this test alongside the existing `build_full_args` tests in `resolve.rs`:
 Existing user configs have flat args like `[-fa, 1, -b, 2048, ...]`. After this task, the loader detects flat form, converts it to grouped form via `group_legacy_flat_args`, logs a one-time info message, and writes the migrated config back to disk **only if** something actually changed (so we don't churn already-grouped files). The `Config::default()` impl in `loader.rs` is also updated to use grouped form so freshly-created configs are correct from the start. A `Config::default()` round-trip test pins the invariant that defaults pass through `normalize_grouped_args` unchanged.
 
 **Files:**
-- Modify: `crates/koji-core/src/config/loader.rs` — add `normalize_grouped_args` helper, call it in `load_from`, save on change, update the `Default` impl
-- Add tests: `crates/koji-core/src/config/loader.rs` (new `mod tests` if absent, or extend if present)
+- Modify: `crates/tama-core/src/config/loader.rs` — add `normalize_grouped_args` helper, call it in `load_from`, save on change, update the `Default` impl
+- Add tests: `crates/tama-core/src/config/loader.rs` (new `mod tests` if absent, or extend if present)
 
 **What to implement:**
 
@@ -1319,7 +1319,7 @@ In `loader.rs`, find `Config::load_from` (currently around lines 58–83). After
 ```rust
         // Migrate legacy flat args to grouped form. If anything changed,
         // persist the migrated config back to disk so the next load is a
-        // no-op and `koji status` shows the new format.
+        // no-op and `tama status` shows the new format.
         let args_migrated = normalize_grouped_args(&mut config);
         if args_migrated {
             tracing::info!(
@@ -1502,17 +1502,17 @@ mod tests {
 Note: `Config::default()` already has `models["default"]` populated with the args field. After 3.3, that field is in grouped form, so `normalize_default_config_is_noop` becomes meaningful. The test deliberately compares only `args` / `default_args` `Vec<String>`s (via `BTreeMap` snapshots) rather than whole `ModelConfig`/`BackendConfig` structs, because those structs don't derive `PartialEq` and adding derives is out-of-scope for this PR.
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/config/loader.rs` to find the current structure of `load_from` and `Default for Config`.
+- [ ] Read `crates/tama-core/src/config/loader.rs` to find the current structure of `load_from` and `Default for Config`.
 - [ ] Add the `normalize_grouped_args` helper function from section 3.1 to `loader.rs`.
 - [ ] Add the four tests from section 3.4 to a `#[cfg(test)] mod tests` block in `loader.rs`.
-- [ ] Run `cargo test -p koji-core --lib -- config::loader::tests::normalize_default_config_is_noop`
+- [ ] Run `cargo test -p tama-core --lib -- config::loader::tests::normalize_default_config_is_noop`
   - Did it fail? It should fail because `Default` still uses flat form. If it passes, investigate.
 - [ ] Update the `Default for Config` impl in `loader.rs` (section 3.3) to use grouped form.
-- [ ] Run `cargo test -p koji-core --lib -- config::loader::tests`
+- [ ] Run `cargo test -p tama-core --lib -- config::loader::tests`
   - Did all four tests pass? If not, fix.
 - [ ] Modify `Config::load_from` in `loader.rs` to call `normalize_grouped_args` and save-on-change (section 3.2).
-- [ ] Run `cargo test -p koji-core --lib`
-  - Did the full koji-core suite pass? If any other test depends on the old default, update its assertions.
+- [ ] Run `cargo test -p tama-core --lib`
+  - Did the full tama-core suite pass? If any other test depends on the old default, update its assertions.
 - [ ] Manually verify the save-on-migrate path: create a temp file with flat args, call `Config::load_from` on its parent dir, then read the file again and confirm it now contains grouped form. (You can write this as an integration-style test inside `loader.rs` using `tempfile::tempdir`.) Add this test:
 
 ```rust
@@ -1578,9 +1578,9 @@ enabled = true
         );
     }
 ```
-- [ ] Run `cargo test -p koji-core --lib -- config::loader::tests::load_from_persists_migration_to_disk`
+- [ ] Run `cargo test -p tama-core --lib -- config::loader::tests::load_from_persists_migration_to_disk`
   - Did it pass? If not, the save path is wrong; fix.
-- [ ] Run `cargo test -p koji-core --lib -- config::loader::tests::load_from_already_grouped_does_not_rewrite`
+- [ ] Run `cargo test -p tama-core --lib -- config::loader::tests::load_from_already_grouped_does_not_rewrite`
   - Did it pass? If not, the save-on-change guard is incorrectly triggering on no-op migrations; check `normalize_grouped_args` returns `false` for already-grouped input.
 - [ ] Run `cargo test --workspace`
   - Did the full workspace test suite pass?
@@ -1607,18 +1607,18 @@ enabled = true
 
 **Context:**
 The remaining loose ends are:
-1. `crates/koji-cli/src/service.rs` lines 307–314 has a fallback path that does naive `args.extend(srv.args.clone())` if `build_full_args` fails. This fallback must use the new `merge_args` + `flatten_args` so it produces a deduped flat list consistent with the success path. It also needs to import the helpers via `koji_core::config::{merge_args, flatten_args}` (which Task 1's `pub use` makes available).
-2. `crates/koji-web/src/pages/model_editor.rs` line 1186 (`placeholder`) and line 1190 (`form-hint`) currently disagree with each other and with the new grouped format. Both must be updated to describe one-flag-per-line.
+1. `crates/tama-cli/src/service.rs` lines 307–314 has a fallback path that does naive `args.extend(srv.args.clone())` if `build_full_args` fails. This fallback must use the new `merge_args` + `flatten_args` so it produces a deduped flat list consistent with the success path. It also needs to import the helpers via `tama_core::config::{merge_args, flatten_args}` (which Task 1's `pub use` makes available).
+2. `crates/tama-web/src/pages/model_editor.rs` line 1186 (`placeholder`) and line 1190 (`form-hint`) currently disagree with each other and with the new grouped format. Both must be updated to describe one-flag-per-line.
 
 This task includes a tiny compile-only test for the service.rs fallback to make sure the import paths work.
 
 **Files:**
-- Modify: `crates/koji-cli/src/service.rs` (lines 307–314)
-- Modify: `crates/koji-web/src/pages/model_editor.rs` (lines 1186 and 1190)
+- Modify: `crates/tama-cli/src/service.rs` (lines 307–314)
+- Modify: `crates/tama-web/src/pages/model_editor.rs` (lines 1186 and 1190)
 
 **What to implement:**
 
-### 4.1 — `crates/koji-cli/src/service.rs`
+### 4.1 — `crates/tama-cli/src/service.rs`
 
 Find the `unwrap_or_else` block at lines 307–314:
 
@@ -1640,16 +1640,16 @@ Replace with:
                 .build_full_args(srv, backend, ctx)
                 .unwrap_or_else(|e| {
                     tracing::warn!("Failed to build model args: {}", e);
-                    koji_core::config::flatten_args(&koji_core::config::merge_args(
+                    tama_core::config::flatten_args(&tama_core::config::merge_args(
                         &backend.default_args,
                         &srv.args,
                     ))
                 });
 ```
 
-(Use the fully-qualified `koji_core::config::...` path. `service.rs` already has `use koji_core::config::Config;` at line 26, so the helpers can also be imported as `use koji_core::config::{flatten_args, merge_args};` at the top of the file if you prefer — either approach is fine, but the FQN is more obviously correct on first read.)
+(Use the fully-qualified `tama_core::config::...` path. `service.rs` already has `use tama_core::config::Config;` at line 26, so the helpers can also be imported as `use tama_core::config::{flatten_args, merge_args};` at the top of the file if you prefer — either approach is fine, but the FQN is more obviously correct on first read.)
 
-### 4.2 — `crates/koji-web/src/pages/model_editor.rs`
+### 4.2 — `crates/tama-web/src/pages/model_editor.rs`
 
 Find line 1186 and 1190:
 
@@ -1668,30 +1668,30 @@ Replace with:
 ```
 
 **Steps:**
-- [ ] Read `crates/koji-cli/src/service.rs` lines 295–320 to confirm the current fallback shape and surrounding context (binding name `srv` vs `server`, etc.).
+- [ ] Read `crates/tama-cli/src/service.rs` lines 295–320 to confirm the current fallback shape and surrounding context (binding name `srv` vs `server`, etc.).
 - [ ] Apply the replacement from section 4.1. Use the exact binding names (`srv`, `backend`) as they appear in the current code.
-- [ ] Run `cargo check -p koji-cli`
+- [ ] Run `cargo check -p tama-cli`
   - Did it succeed? If not, the import path or function name is wrong; fix and re-check.
-- [ ] Run `cargo build -p koji-cli`
+- [ ] Run `cargo build -p tama-cli`
   - Did it succeed?
-- [ ] Read `crates/koji-web/src/pages/model_editor.rs` lines 1180–1195 to confirm the current placeholder and hint.
+- [ ] Read `crates/tama-web/src/pages/model_editor.rs` lines 1180–1195 to confirm the current placeholder and hint.
 - [ ] Apply the replacement from section 4.2.
 - [ ] Run `make build-frontend-dev` (this runs `trunk build` which is the correct Leptos/wasm build command).
   - Did it succeed? If not, fix any syntax errors.
 - [ ] Run `cargo clippy --workspace -- -D warnings`
-- [ ] Run `cargo clippy --package koji-web --features ssr -- -D warnings`
+- [ ] Run `cargo clippy --package tama-web --features ssr -- -D warnings`
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo fmt --all -- --check`
 - [ ] Run `cargo test --workspace` as a final smoke test that nothing else broke.
 - [ ] Commit with message: `chore(cli,web): use grouped-args helpers in service fallback and update model editor hint`
 
 **Acceptance criteria:**
-- [ ] `service.rs`'s `build_full_args` fallback uses `koji_core::config::flatten_args` + `koji_core::config::merge_args`.
-- [ ] `cargo check -p koji-cli` succeeds (proves the `pub use` from Task 1 makes the helpers reachable).
+- [ ] `service.rs`'s `build_full_args` fallback uses `tama_core::config::flatten_args` + `tama_core::config::merge_args`.
+- [ ] `cargo check -p tama-cli` succeeds (proves the `pub use` from Task 1 makes the helpers reachable).
 - [ ] `model_editor.rs` placeholder and hint both describe one-flag-per-line and mention quoting for paths with spaces.
 - [ ] `make build-frontend-dev` (i.e. `trunk build`) succeeds.
 - [ ] `cargo clippy --workspace -- -D warnings` passes.
-- [ ] `cargo clippy --package koji-web --features ssr -- -D warnings` passes.
+- [ ] `cargo clippy --package tama-web --features ssr -- -D warnings` passes.
 
 ---
 
@@ -1701,24 +1701,24 @@ Run each step manually after Task 4 commits:
 
 - [ ] `cargo fmt --all -- --check`
 - [ ] `cargo clippy --workspace -- -D warnings`
-- [ ] `cargo clippy --package koji-web --features ssr -- -D warnings`
+- [ ] `cargo clippy --package tama-web --features ssr -- -D warnings`
 - [ ] `cargo test --workspace`
 - [ ] `make build-frontend-dev` (verifies the Leptos frontend still builds)
 
-**Manual smoke test (requires a real koji install):**
+**Manual smoke test (requires a real tama install):**
 
-1. Backup your existing `~/.config/koji/config.toml` (or `%APPDATA%\koji\config.toml` on Windows).
+1. Backup your existing `~/.config/tama/config.toml` (or `%APPDATA%\tama\config.toml` on Windows).
 2. Edit it so a backend has `default_args = ["-fa", "1", "-b", "2048"]` (flat) and a model has `args = ["-ngl", "999"]` (flat).
-3. Run any command that calls `Config::load`, e.g. `koji status`.
+3. Run any command that calls `Config::load`, e.g. `tama status`.
 4. Inspect the file: it should now contain `default_args = ["-fa 1", "-b 2048"]` and `args = ["-ngl 999"]`.
 5. Check the logs: a `tracing::info!` line about migration should appear.
 6. Set the same backend's `default_args = ["-b 2048", "-ub 512"]` and a model's `args = ["-b 4096", "-ub 4096"]`.
-7. Run `koji run <model>` and inspect the `Executing backend:` log line: it must contain exactly one `-b 4096`, one `-ub 4096`, and no `2048`/`512`.
+7. Run `tama run <model>` and inspect the `Executing backend:` log line: it must contain exactly one `-b 4096`, one `-ub 4096`, and no `2048`/`512`.
 
 **Windows path-with-spaces verification:**
 
-1. In `models_dir = "C:/Users/Test/koji models"`, install a model.
-2. Run `koji run` against it and confirm the spawned command shows `-m "C:/Users/Test/koji models/.../model.gguf"` (or equivalently, `koji models/.../model.gguf` as a single argv element).
+1. In `models_dir = "C:/Users/Test/tama models"`, install a model.
+2. Run `tama run` against it and confirm the spawned command shows `-m "C:/Users/Test/tama models/.../model.gguf"` (or equivalently, `tama models/.../model.gguf` as a single argv element).
 3. The backend should successfully load the model (no "file not found" because the path was split mid-token).
 
 ---
@@ -1738,6 +1738,6 @@ Run each step manually after Task 4 commits:
 ## Out of scope
 
 - Changing the on-disk *type* of `args` from `Vec<String>` to a typed enum. Not done because the migration is sticky and the string-based form is sufficient.
-- Aliasing short and long flag forms (`-c` ↔ `--ctx-size`). Users typically pick one form; aliasing would couple koji to llama.cpp's flag taxonomy.
+- Aliasing short and long flag forms (`-c` ↔ `--ctx-size`). Users typically pick one form; aliasing would couple tama to llama.cpp's flag taxonomy.
 - Touching `proxy/process.rs::override_arg`, `bench/runner.rs::_override_arg`, `proxy/lifecycle.rs`, `bench/runner.rs` callers — they continue to work because `build_full_args` still returns flat tokens (invariant pinned by `debug_assert!` in Task 2b).
-- Backwards-compatibility fallback if a user downgrades koji after migration. Document this in the PR description as a known one-way migration.
+- Backwards-compatibility fallback if a user downgrades tama after migration. Document this in the PR description as a known one-way migration.

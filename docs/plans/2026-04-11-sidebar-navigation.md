@@ -14,9 +14,9 @@
 The app currently has a topbar (`components/nav.rs` + `.topbar` CSS). We need to create the new sidebar component and its CSS styles. This task is additive — it creates new files and adds new CSS without removing the topbar, so the app still works with the topbar until we wire it up in Task 2.
 
 **Files:**
-- Create: `crates/koji-web/src/components/sidebar.rs`
-- Modify: `crates/koji-web/style.css`
-- Modify: `crates/koji-web/src/components/mod.rs`
+- Create: `crates/tama-web/src/components/sidebar.rs`
+- Modify: `crates/tama-web/style.css`
+- Modify: `crates/tama-web/src/components/mod.rs`
 
 **What to implement:**
 
@@ -207,7 +207,7 @@ The app currently has a topbar (`components/nav.rs` + `.topbar` CSS). We need to
    }
    ```
 
-3. **Sidebar component** — Create `crates/koji-web/src/components/sidebar.rs`:
+3. **Sidebar component** — Create `crates/tama-web/src/components/sidebar.rs`:
    
    ```rust
    use leptos::prelude::*;
@@ -219,7 +219,7 @@ The app currently has a topbar (`components/nav.rs` + `.topbar` CSS). We need to
        
        // On mount, read localStorage for persisted state
        // Use wasm_bindgen to access window.localStorage
-       // Key: "koji-sidebar-collapsed"
+       // Key: "tama-sidebar-collapsed"
        // If value is "true", set collapsed to true
        
        // Effect to persist collapsed state to localStorage
@@ -229,7 +229,7 @@ The app currently has a topbar (`components/nav.rs` + `.topbar` CSS). We need to
                // Header: logo link to "/"
                <A href="/" attr:class="sidebar-header">
                    <span class="sidebar-header__logo">"⚡"</span>
-                   <span class="sidebar-header__text">"Koji"</span>
+                   <span class="sidebar-header__text">"Tama"</span>
                </A>
                
                // Main nav items
@@ -270,7 +270,7 @@ The app currently has a topbar (`components/nav.rs` + `.topbar` CSS). We need to
    }
    ```
    
-   For the localStorage interop, use this pattern. Note: the codebase consistently uses `web_sys::window()` (not `leptos::prelude::window()`), so follow that convention. You also need to add `"Storage"` to the `web-sys` features in `crates/koji-web/Cargo.toml` (see step 0 below).
+   For the localStorage interop, use this pattern. Note: the codebase consistently uses `web_sys::window()` (not `leptos::prelude::window()`), so follow that convention. You also need to add `"Storage"` to the `web-sys` features in `crates/tama-web/Cargo.toml` (see step 0 below).
    ```rust
    use web_sys::window;
    
@@ -279,7 +279,7 @@ The app currently has a topbar (`components/nav.rs` + `.topbar` CSS). We need to
    let initial = window()
        .and_then(|w| w.local_storage().ok())
        .flatten()
-       .and_then(|ls| ls.get("koji-sidebar-collapsed").ok())
+       .and_then(|ls| ls.get("tama-sidebar-collapsed").ok())
        .flatten();
    if initial.as_deref() == Some("true") {
        collapsed.set(true);
@@ -292,21 +292,21 @@ The app currently has a topbar (`components/nav.rs` + `.topbar` CSS). We need to
            window(),
            window().and_then(|w| w.local_storage().ok()).flatten(),
        ) {
-           let _ = ls.set("koji-sidebar-collapsed", val);
+           let _ = ls.set("tama-sidebar-collapsed", val);
        }
    });
    ```
    Note: `web_sys::window()` returns `Option<Window>`. `.local_storage()` returns `Result<Option<Storage>, JsValue>`. Handle with `.ok()`, `.flatten()`, and `.and_then()` chains.
 
-0. **Add `Storage` feature to `web-sys`** — Before writing the localStorage code, add `"Storage"` to the `web-sys` features list in `crates/koji-web/Cargo.toml`. The current features are: `Window`, `Document`, `HtmlElement`, `HtmlInputElement`, `HtmlSelectElement`, `HtmlTextAreaElement`, `EventSource`, `EventSourceInit`, `MessageEvent`, `Event`, `KeyboardEvent`, `MouseEvent`, `SvgElement`, `SvgsvgElement`, `DomRect`, `console`. Add `"Storage"` to this list.
+0. **Add `Storage` feature to `web-sys`** — Before writing the localStorage code, add `"Storage"` to the `web-sys` features list in `crates/tama-web/Cargo.toml`. The current features are: `Window`, `Document`, `HtmlElement`, `HtmlInputElement`, `HtmlSelectElement`, `HtmlTextAreaElement`, `EventSource`, `EventSourceInit`, `MessageEvent`, `Event`, `KeyboardEvent`, `MouseEvent`, `SvgElement`, `SvgsvgElement`, `DomRect`, `console`. Add `"Storage"` to this list.
 
-5. **Register module** — In `crates/koji-web/src/components/mod.rs`, add `pub mod sidebar;` at the end.
+5. **Register module** — In `crates/tama-web/src/components/mod.rs`, add `pub mod sidebar;` at the end.
 
 **Steps:**
-- [ ] Add `"Storage"` feature to `web-sys` features in `crates/koji-web/Cargo.toml`
-- [ ] Add CSS custom properties and sidebar CSS classes to `crates/koji-web/style.css`
-- [ ] Create `crates/koji-web/src/components/sidebar.rs` with the `Sidebar` component
-- [ ] Add `pub mod sidebar;` to `crates/koji-web/src/components/mod.rs`
+- [ ] Add `"Storage"` feature to `web-sys` features in `crates/tama-web/Cargo.toml`
+- [ ] Add CSS custom properties and sidebar CSS classes to `crates/tama-web/style.css`
+- [ ] Create `crates/tama-web/src/components/sidebar.rs` with the `Sidebar` component
+- [ ] Add `pub mod sidebar;` to `crates/tama-web/src/components/mod.rs`
 - [ ] Run `cargo check --workspace`
   - Did it succeed? If not, fix compilation errors and re-run.
 - [ ] Run `cargo fmt --all`
@@ -327,10 +327,10 @@ The app currently has a topbar (`components/nav.rs` + `.topbar` CSS). We need to
 The sidebar component and CSS are ready from Task 1. Now we need to swap the topbar for the sidebar in the app's root layout, remove the topbar CSS, and delete the old `nav.rs` component. After this task, the app will render with the left sidebar instead of the top bar.
 
 **Files:**
-- Modify: `crates/koji-web/src/lib.rs`
-- Modify: `crates/koji-web/style.css`
-- Delete: `crates/koji-web/src/components/nav.rs`
-- Modify: `crates/koji-web/src/components/mod.rs`
+- Modify: `crates/tama-web/src/lib.rs`
+- Modify: `crates/tama-web/style.css`
+- Delete: `crates/tama-web/src/components/nav.rs`
+- Modify: `crates/tama-web/src/components/mod.rs`
 
 **What to implement:**
 
@@ -391,16 +391,16 @@ The sidebar component and CSS are ready from Task 1. Now we need to swap the top
 
 3. **Remove `.topbar` CSS** — Delete all `.topbar` related rules from `style.css` (lines 59–95 approximately, the entire `.topbar` block including `.topbar .logo`, `.topbar a`, `.topbar a:hover`, `.topbar a[aria-current="page"]`). Keep the `/* 3. Layout */` comment header.
 
-4. **Delete `nav.rs`** — Remove the file `crates/koji-web/src/components/nav.rs`.
+4. **Delete `nav.rs`** — Remove the file `crates/tama-web/src/components/nav.rs`.
 
-5. **Update `mod.rs`** — Remove `pub mod nav;` from `crates/koji-web/src/components/mod.rs`.
+5. **Update `mod.rs`** — Remove `pub mod nav;` from `crates/tama-web/src/components/mod.rs`.
 
 **Steps:**
 - [ ] Update `lib.rs` to use `<components::sidebar::Sidebar />` instead of `<components::nav::Nav />`
 - [ ] Update `main` CSS in `style.css` to use `margin-left` and remove `max-width`
 - [ ] Remove all `.topbar` CSS rules from `style.css`
 - [ ] Remove `pub mod nav;` from `components/mod.rs`
-- [ ] Delete `crates/koji-web/src/components/nav.rs`
+- [ ] Delete `crates/tama-web/src/components/nav.rs`
 - [ ] Run `cargo check --workspace`
   - Did it succeed? If not, fix compilation errors (likely missing import references) and re-run.
 - [ ] Run `cargo fmt --all`
@@ -426,12 +426,12 @@ The sidebar component and CSS are ready from Task 1. Now we need to swap the top
 The Config Editor and Model Editor pages have inner section-navigation sidebars that previously used `position: sticky; top: 1rem` to stay visible while scrolling. This `1rem` offset was needed to avoid the 52px sticky topbar. Now that the topbar is gone, these sidebars should use `top: 0` so they stick flush to the top of the content area. Without this fix, the page sidebars will have a visual gap at the top when scrolled.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/config_editor.rs`
-- Modify: `crates/koji-web/style.css`
+- Modify: `crates/tama-web/src/pages/config_editor.rs`
+- Modify: `crates/tama-web/style.css`
 
 **What to implement:**
 
-1. **Config Editor sidebar** — In `crates/koji-web/src/pages/config_editor.rs`, find the inline `<nav>` element (around line 245) with:
+1. **Config Editor sidebar** — In `crates/tama-web/src/pages/config_editor.rs`, find the inline `<nav>` element (around line 245) with:
    ```rust
    <nav class="card" style="width:220px;flex-shrink:0;padding:0.75rem;position:sticky;top:1rem;">
    ```
@@ -440,7 +440,7 @@ The Config Editor and Model Editor pages have inner section-navigation sidebars 
    <nav class="card" style="width:220px;flex-shrink:0;padding:0.75rem;position:sticky;top:0;">
    ```
 
-2. **Model Editor sidebar** — In `crates/koji-web/style.css`, find the `.model-editor-nav` rule (around line 792):
+2. **Model Editor sidebar** — In `crates/tama-web/style.css`, find the `.model-editor-nav` rule (around line 792):
    ```css
    .model-editor-nav {
        width: 200px;
@@ -482,20 +482,20 @@ The Config Editor and Model Editor pages have inner section-navigation sidebars 
 ## Task 4: Delete Dead Code (config_nav.rs)
 
 **Context:**
-`crates/koji-web/src/components/config_nav.rs` contains an unused `ConfigNav` component marked with `#[allow(dead_code)]`. The Config Editor page (`config_editor.rs`) has its own inline sidebar implementation, making this component dead code. Now that we've confirmed the new sidebar works, we should clean up this unused file.
+`crates/tama-web/src/components/config_nav.rs` contains an unused `ConfigNav` component marked with `#[allow(dead_code)]`. The Config Editor page (`config_editor.rs`) has its own inline sidebar implementation, making this component dead code. Now that we've confirmed the new sidebar works, we should clean up this unused file.
 
 **Files:**
-- Delete: `crates/koji-web/src/components/config_nav.rs`
-- Modify: `crates/koji-web/src/components/mod.rs`
+- Delete: `crates/tama-web/src/components/config_nav.rs`
+- Modify: `crates/tama-web/src/components/mod.rs`
 
 **What to implement:**
 
-1. Delete `crates/koji-web/src/components/config_nav.rs`.
-2. Remove `pub mod config_nav;` from `crates/koji-web/src/components/mod.rs`.
+1. Delete `crates/tama-web/src/components/config_nav.rs`.
+2. Remove `pub mod config_nav;` from `crates/tama-web/src/components/mod.rs`.
 
 **Steps:**
 - [ ] Remove `pub mod config_nav;` from `components/mod.rs`
-- [ ] Delete `crates/koji-web/src/components/config_nav.rs`
+- [ ] Delete `crates/tama-web/src/components/config_nav.rs`
 - [ ] Run `cargo check --workspace`
   - Did it succeed? If not, there may be other files importing `config_nav` — find and remove those imports.
 - [ ] Run `cargo fmt --all`
@@ -515,8 +515,8 @@ The Config Editor and Model Editor pages have inner section-navigation sidebars 
 On narrow screens (<768px), the sidebar should not take up permanent space. Instead, it should be hidden by default and appear as an overlay when a hamburger button is tapped. This is the standard responsive pattern for admin sidebars. The hamburger button lives in a slim top bar that only appears on mobile.
 
 **Files:**
-- Modify: `crates/koji-web/src/components/sidebar.rs`
-- Modify: `crates/koji-web/style.css`
+- Modify: `crates/tama-web/src/components/sidebar.rs`
+- Modify: `crates/tama-web/style.css`
 
 **What to implement:**
 
@@ -561,7 +561,7 @@ On narrow screens (<768px), the sidebar should not take up permanent space. Inst
                // Header: logo link — close mobile overlay on click
                <A href="/" attr:class="sidebar-header" on:click=move |_| mobile_open.set(false)>
                    <span class="sidebar-header__logo">"⚡"</span>
-                   <span class="sidebar-header__text">"Koji"</span>
+                   <span class="sidebar-header__text">"Tama"</span>
                </A>
                
                // Main nav items — each closes mobile overlay on click

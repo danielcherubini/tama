@@ -22,7 +22,7 @@ empty, with a tooltip nudging the user to fill it in first.
 
 - The "Quantizations" table at the bottom lets you manually edit `name`,
   `file`, `size_bytes`, `context_length` for each quant.
-- The current **+ Add Quant** button (in `crates/koji-web/src/pages/model_editor.rs`
+- The current **+ Add Quant** button (in `crates/tama-web/src/pages/model_editor.rs`
   around line 1170) just appends an empty row with a placeholder name like
   `quant-N`. The user has to type in the GGUF filename, look up the size by
   hand, etc.
@@ -31,17 +31,17 @@ empty, with a tooltip nudging the user to fill it in first.
 
 ### Existing pull-from-HF flow (`/pull` page)
 
-- 6-step wizard in `crates/koji-web/src/pages/pull.rs`:
+- 6-step wizard in `crates/tama-web/src/pages/pull.rs`:
   `RepoInput → LoadingQuants → SelectQuants → SetContext → Downloading → Done`
 - Backed by:
-  - `GET /koji/v1/hf/*repo_id` — lists quants on HF
-    (`crates/koji-core/src/proxy/koji_handlers.rs::handle_hf_list_quants`).
+  - `GET /tama/v1/hf/*repo_id` — lists quants on HF
+    (`crates/tama-core/src/proxy/tama_handlers.rs::handle_hf_list_quants`).
     Note: this calls `fetch_blob_metadata` directly and does **not** do
     `-GGUF` auto-resolution. See §12 (out-of-scope notes).
-  - `POST /koji/v1/pulls` — starts download jobs
-  - `GET /koji/v1/pulls/:job_id/stream` — SSE progress stream
+  - `POST /tama/v1/pulls` — starts download jobs
+  - `GET /tama/v1/pulls/:job_id/stream` — SSE progress stream
 - On success, the backend handler `setup_model_after_pull`
-  (`crates/koji-core/src/proxy/koji_handlers.rs`) writes/updates the model card
+  (`crates/tama-core/src/proxy/tama_handlers.rs`) writes/updates the model card
   on disk **and** inserts/updates the entry into the live in-memory config.
   Critically, this is invoked unconditionally on download success — independent
   of any client.
@@ -67,20 +67,20 @@ are required.** This is purely a Leptos client-side refactor + UI feature.
 
 | Area | Change |
 |---|---|
-| New shared component | `crates/koji-web/src/components/pull_quant_wizard.rs` — extracted from the bulk of `pages/pull.rs` |
-| New shared component | `crates/koji-web/src/components/modal.rs` — first modal in the codebase, reusable shell |
-| Refactored | `crates/koji-web/src/pages/pull.rs` — becomes a thin wrapper that mounts the wizard with no pre-set repo |
-| Modified | `crates/koji-web/src/pages/model_editor.rs` — adds modal trigger, mounts wizard with `form_model` pre-set, handles `on_complete` callback |
-| Modified | `crates/koji-web/style.css` — modal overlay styles |
-| Module wiring | `crates/koji-web/src/components/mod.rs` — `pub mod modal; pub mod pull_quant_wizard;` |
+| New shared component | `crates/tama-web/src/components/pull_quant_wizard.rs` — extracted from the bulk of `pages/pull.rs` |
+| New shared component | `crates/tama-web/src/components/modal.rs` — first modal in the codebase, reusable shell |
+| Refactored | `crates/tama-web/src/pages/pull.rs` — becomes a thin wrapper that mounts the wizard with no pre-set repo |
+| Modified | `crates/tama-web/src/pages/model_editor.rs` — adds modal trigger, mounts wizard with `form_model` pre-set, handles `on_complete` callback |
+| Modified | `crates/tama-web/style.css` — modal overlay styles |
+| Module wiring | `crates/tama-web/src/components/mod.rs` — `pub mod modal; pub mod pull_quant_wizard;` |
 
-**Out of scope:** any backend changes. The existing `GET /koji/v1/hf/*repo_id`,
-`POST /koji/v1/pulls`, `GET /koji/v1/pulls/:job_id/stream`, and the post-download
+**Out of scope:** any backend changes. The existing `GET /tama/v1/hf/*repo_id`,
+`POST /tama/v1/pulls`, `GET /tama/v1/pulls/:job_id/stream`, and the post-download
 `setup_model_after_pull` machinery already do exactly what we need.
 
 ## 5. The reusable `PullQuantWizard` component
 
-Location: `crates/koji-web/src/components/pull_quant_wizard.rs`.
+Location: `crates/tama-web/src/components/pull_quant_wizard.rs`.
 
 The current `pages/pull.rs` already contains the full state machine — we hoist
 it almost verbatim and parameterize the entry point.
@@ -200,7 +200,7 @@ RepoInput → LoadingQuants → SelectQuants → SetContext → Downloading → 
        wizard_step.set(WizardStep::LoadingQuants);
 
        // Kick off the same fetch the Search button does today.
-       spawn_local(async move { /* GET /koji/v1/hf/*repo_id */ });
+       spawn_local(async move { /* GET /tama/v1/hf/*repo_id */ });
    });
    ```
 
@@ -264,17 +264,17 @@ RepoInput → LoadingQuants → SelectQuants → SetContext → Downloading → 
 ### 5.5 Quant-key derivation (matches backend)
 
 To keep the UI key consistent with what the backend writes to the model card
-(`_setup_model_after_pull_with_config` at `crates/koji-core/src/proxy/koji_handlers.rs:893-897`),
+(`_setup_model_after_pull_with_config` at `crates/tama-core/src/proxy/tama_handlers.rs:893-897`),
 the wizard module includes a local copy of `infer_quant_from_filename` with the
-same pattern list as `crates/koji-core/src/models/pull.rs:283`.
+same pattern list as `crates/tama-core/src/models/pull.rs:283`.
 
 ```rust
 /// MUST stay in sync with `infer_quant_from_filename` in
-/// `crates/koji-core/src/models/pull.rs`. Duplicated here because `koji-core`
+/// `crates/tama-core/src/models/pull.rs`. Duplicated here because `tama-core`
 /// is only available under the `ssr` feature and pulls in tokio/sqlite/reqwest
 /// which can't compile to WASM.
 ///
-/// If `koji-core` is later split into a WASM-compatible utility crate, replace
+/// If `tama-core` is later split into a WASM-compatible utility crate, replace
 /// this with a direct import.
 fn infer_quant_from_filename(filename: &str) -> Option<String> {
     // ... same patterns, same matching ...
@@ -344,7 +344,7 @@ Verbatim move into `components/pull_quant_wizard.rs`:
 
 ## 6. The `Modal` shell component
 
-Location: `crates/koji-web/src/components/modal.rs`.
+Location: `crates/tama-web/src/components/modal.rs`.
 
 This is the first modal in the codebase. Per decision #6, the modal **always
 renders its children** and toggles visibility via a CSS class, so children are
@@ -405,7 +405,7 @@ mounted unconditionally; the `modal-backdrop--open` class controls
   Effect, to avoid duplicate listeners across re-runs):
 
   ```rust
-  // Style mirrors `crates/koji-web/src/pages/dashboard.rs` (around line 115):
+  // Style mirrors `crates/tama-web/src/pages/dashboard.rs` (around line 115):
   // use Closure::<dyn Fn(...)>::new(...) rather than
   // Closure::wrap(Box::new(...) as Box<dyn Fn(_)>).
   let closure = Closure::<dyn Fn(KeyboardEvent)>::new(move |e: KeyboardEvent| {
@@ -424,7 +424,7 @@ mounted unconditionally; the `modal-backdrop--open` class controls
   ```
 
   **Cargo.toml dependencies.** Two `web-sys` features are missing from the
-  current `crates/koji-web/Cargo.toml` and must be added:
+  current `crates/tama-web/Cargo.toml` and must be added:
 
   - `KeyboardEvent` — needed by the Modal's Escape handler (this section).
   - `Console` — needed by the model editor's `on_complete` callback, which
@@ -479,7 +479,7 @@ mounted unconditionally; the `modal-backdrop--open` class controls
 .modal-body { padding: 1.5rem; }
 ```
 
-CSS variable names are taken from `crates/koji-web/style.css:9-32`
+CSS variable names are taken from `crates/tama-web/style.css:9-32`
 (`--bg-secondary`, `--border-color`, `--radius-md`, `--shadow-card`, etc.) so
 the modal matches the existing dark theme automatically.
 
@@ -522,7 +522,7 @@ smoke test 1). Only then proceed to section 8.
 
 ## 8. Model editor changes
 
-In `crates/koji-web/src/pages/model_editor.rs`:
+In `crates/tama-web/src/pages/model_editor.rs`:
 
 ### 8.1 New signal for modal visibility
 
@@ -744,13 +744,13 @@ No new automated tests are added, because:
 
 | File | Change | Approx LOC |
 |---|---|---|
-| `crates/koji-web/src/components/mod.rs` | Add `pub mod modal; pub mod pull_quant_wizard;` | +2 |
-| `crates/koji-web/src/components/modal.rs` | **New.** `Modal` component with `ChildrenFn`, Escape listener, CSS-toggle visibility | ~100 |
-| `crates/koji-web/src/components/pull_quant_wizard.rs` | **New.** `PullQuantWizard` component, `CompletedQuant` type, local `infer_quant_from_filename`, reset Effect, completion Effect | ~700 |
-| `crates/koji-web/src/pages/pull.rs` | **Shrink to thin wrapper** | ~20 (was ~600) |
-| `crates/koji-web/src/pages/model_editor.rs` | Remove `add_quant_counter`. Add `pull_modal_open`. Replace button (with span wrapper for tooltip). Mount modal + wizard with field-by-field merge. | +60, -10 |
-| `crates/koji-web/style.css` | Add modal overlay styles using existing CSS variables | +35 |
-| `crates/koji-web/Cargo.toml` | Add `KeyboardEvent` to `web-sys` features (required by Modal's Escape handler) | +1 |
+| `crates/tama-web/src/components/mod.rs` | Add `pub mod modal; pub mod pull_quant_wizard;` | +2 |
+| `crates/tama-web/src/components/modal.rs` | **New.** `Modal` component with `ChildrenFn`, Escape listener, CSS-toggle visibility | ~100 |
+| `crates/tama-web/src/components/pull_quant_wizard.rs` | **New.** `PullQuantWizard` component, `CompletedQuant` type, local `infer_quant_from_filename`, reset Effect, completion Effect | ~700 |
+| `crates/tama-web/src/pages/pull.rs` | **Shrink to thin wrapper** | ~20 (was ~600) |
+| `crates/tama-web/src/pages/model_editor.rs` | Remove `add_quant_counter`. Add `pull_modal_open`. Replace button (with span wrapper for tooltip). Mount modal + wizard with field-by-field merge. | +60, -10 |
+| `crates/tama-web/style.css` | Add modal overlay styles using existing CSS variables | +35 |
+| `crates/tama-web/Cargo.toml` | Add `KeyboardEvent` to `web-sys` features (required by Modal's Escape handler) | +1 |
 
 **Net total:** ~+926 lines, ~-610 lines (mostly the move of the wizard).
 
@@ -777,7 +777,7 @@ These are real but explicitly **not** addressed by this PR:
 - **`-GGUF` auto-resolution gap.** `handle_hf_list_quants` calls
   `fetch_blob_metadata` directly, which does not auto-append `-GGUF` to repo
   IDs the way `list_gguf_files` does. As a result, a user with `form_model =
-  "bartowski/Qwen3-8B"` (no suffix) will hit `/koji/v1/hf/bartowski/Qwen3-8B`,
+  "bartowski/Qwen3-8B"` (no suffix) will hit `/tama/v1/hf/bartowski/Qwen3-8B`,
   get an empty/error response, and be dropped into the wizard's error state.
   This bug also exists on `/pull`, but is more visible from the model editor
   button because users may not realize the suffix matters. **Follow-up:** make

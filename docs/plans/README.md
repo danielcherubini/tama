@@ -1,6 +1,6 @@
 # Implementation Plans Overview
 
-This directory contains implementation plans for the Koji project. Each plan documents a feature or refactor with clear goals, architecture, tasks, and verification steps.
+This directory contains implementation plans for the Tama project. Each plan documents a feature or refactor with clear goals, architecture, tasks, and verification steps.
 
 ## Status Legend
 
@@ -19,7 +19,7 @@ This directory contains implementation plans for the Koji project. Each plan doc
 - **In Progress**: 0 🚧
 - **Remaining**: 0 📋
 
-> **Note**: The Koji Management API Spec (2026-04-03) was removed as it was a design document, not an implementation plan. The functionality it describes is already implemented via other plans.
+> **Note**: The Tama Management API Spec (2026-04-03) was removed as it was a design document, not an implementation plan. The functionality it describes is already implemented via other plans.
 
 ---
 
@@ -29,7 +29,7 @@ This directory contains implementation plans for the Koji project. Each plan doc
 
 | Plan | Description | PR / Git References |
 |------|-------------|---------------------|
-| [Rename Kronk to Koji](2026-04-06-rename-kronk-to-koji.md) | Complete rename across README, crates, routes, service names | `6d3a220`, `8281739`, `ab25016`, `bb8b734`, `d731eab` |
+| [Rename Kronk to Tama](2026-04-06-rename-kronk-to-tama.md) | Complete rename across README, crates, routes, service names | `6d3a220`, `8281739`, `ab25016`, `bb8b734`, `d731eab` |
 | [Split Large Files (Wave 1 & 2)](2026-03-23-split-large-files.md) | Split CLI and core files into focused modules | #20 `9915565`, `57b1fe2`, `3ee005e` |
 | [Split Large Files (Wave 3)](2026-04-10-split-large-files.md) | Split remaining large files into domain submodules | #48 `b1e2f7d`, `8705ad0`, `7c6d50c` |
 | [Split Large Files (Wave 4)](2026-04-18-file-size-refactor.md) | Split remaining files >400 lines: model.rs, backends.rs, api.rs, gpu.rs, source.rs, backend.rs, model_editor/mod.rs | 🚧 IN PROGRESS |
@@ -42,8 +42,8 @@ This directory contains implementation plans for the Koji project. Each plan doc
 |------|-------------|---------------------|
 | [Bench Command](2026-03-29-bench-command.md) | LLM inference benchmarking CLI command | `4bf65f7`, `5d54245`, `7549b2c` |
 | [Status Command Redesign](2026-03-21-status-command-plan.md) | Unified status command with /status endpoint, removed model ps | `4de3b5a`, `b077271`, `7a49b44` |
-| [Server Add/Edit Flag Extraction](2026-03-21-server-add-flag-extraction-plan.md) | Extract koji flags from args, validate model cards | `c8327c8`, `4de3b5a` |
-| [Self-Update](2026-04-12-self-update.md) | CLI `koji self-update` and web UI update button with GitHub release download | #56 `efd5459`, `0b47435`, `cc51c83`, `1bf5ee8`, `5587df1` |
+| [Server Add/Edit Flag Extraction](2026-03-21-server-add-flag-extraction-plan.md) | Extract tama flags from args, validate model cards | `c8327c8`, `4de3b5a` |
+| [Self-Update](2026-04-12-self-update.md) | CLI `tama self-update` and web UI update button with GitHub release download | #56 `efd5459`, `0b47435`, `cc51c83`, `1bf5ee8`, `5587df1` |
 | [Move Self-Update to Updates Center](2026-04-17-move-self-update-to-updates-center.md) | Move self-update UI from sidebar to /updates page, keep minimal version indicator in sidebar | #62 `fa2cc94` ✅ COMPLETED |
 
 ### Database & Storage
@@ -77,7 +77,7 @@ This directory contains implementation plans for the Koji project. Each plan doc
 | [mmproj Support](2026-04-07-mmproj-support-spec.md) | Vision projector file support in pull wizard and model config | #40 `0489cc0`, `d58aa67`, `492dd1a` |
 | [API Name for Models](2026-04-09-api-name-for-models.md) | Use HF repo names as model identifiers in OpenAI API | #47 `d659b9f`, `8edb7d9`, `0cf3ef6` |
 | [Model Grid Separation](2026-04-07-model-grid-separation.md) | Split model grid into loaded and unloaded sections | `43b5678`, `405632b`, `329be36` |
-| [Quant File Deletion](2026-04-10-quant-file-deletion.md) | Delete GGUF files on quant removal, `koji model prune` command | #50 `a160eb3`, `f350293`, `f6461d1`, `78c3feb` |
+| [Quant File Deletion](2026-04-10-quant-file-deletion.md) | Delete GGUF files on quant removal, `tama model prune` command | #50 `a160eb3`, `f350293`, `f6461d1`, `78c3feb` |
 | [Preserve GGUF in Names](2026-03-27-preserve-gguf-in-names.md) | Preserve -GGUF suffix in model IDs and paths | `c102bd0`, `58ad0b4` |
 | [Num Parallel Slots](2026-04-20-num-parallel-slots.md) | Add num_parallel field to model configs that multiplies effective context length at inference time | #66
 | [Updates Center Fix](2026-04-20-updates-center-fix.md) | Backend update progress (JobLogPanel), per-quant LFS hash checking, download queue integration, expandable quant UI with selection | #65
@@ -100,7 +100,7 @@ This directory contains implementation plans for the Koji project. Each plan doc
 | [Context Length Selector](2026-04-14-context-length-selector.md) | Shared component for context length input with dropdown and custom value fallback | #59 |
 | [Benchmarks Page](2026-04-19-benchmarks.md) | Web UI benchmarking page with llama-bench integration, SSE progress streaming, preset configs (Quick/VRAM Sweet Spot/Thread Scaling), and benchmark history | `dd869b8`–`4be90f7` ✅ COMPLETED |
 | [Config Hot Reload](2026-04-06-config-hot-reload.md) | Config sync from web UI to proxy without restart | `69cbb68`, `54298dc`, `219c749` |
-| [Koji Web Control Plane](2026-04-03-koji-web-control-plane.md) | Core UI — initial implementation | ✅ PARTIALLY COMPLETED |
+| [Tama Web Control Plane](2026-04-03-tama-web-control-plane.md) | Core UI — initial implementation | ✅ PARTIALLY COMPLETED |
 
 ### Metrics & Dashboard
 
@@ -137,7 +137,7 @@ This directory contains implementation plans for the Koji project. Each plan doc
 
 | Plan | Description | PR / Git References |
 |------|-------------|---------------------|
-| [OpenCode Koji Plugin](2026-04-12-opencode-koji-plugin.md) | Auto-discover models via /v1/models, provide modalities and config | `f4530d6`, `dbf1e51`, `b1260e4` |
+| [OpenCode Tama Plugin](2026-04-12-opencode-tama-plugin.md) | Auto-discover models via /v1/models, provide modalities and config | `f4530d6`, `dbf1e51`, `b1260e4` |
 | [Proxy API Endpoints](2026-04-20-proxy-api-endpoints.md) | Add all missing llama.cpp-compatible API endpoints using wildcard forwarding | #68 `3e1d180` ✅ COMPLETED |
 | [Max Loaded Models with LRU Eviction](2026-04-21-max-loaded-models.md) | Add `max_loaded_models` config field (default=1) that automatically evicts the least-recently-used model when capacity is reached | #69 ✅ COMPLETED |
 
@@ -151,7 +151,7 @@ This directory contains implementation plans for the Koji project. Each plan doc
 
 Longer-term features that don't yet have implementation plans:
 
-- **TUI Dashboard** — `koji-tui` crate with ratatui
+- **TUI Dashboard** — `tama-tui` crate with ratatui
 - **System tray** — Windows tray icon for quick service toggle
 - **Tauri GUI** — Lightweight desktop frontend for non-CLI users
 
@@ -201,7 +201,7 @@ When implementing a new feature:
 
 - [`README.md`](../README.md) — Project overview
 - [`AGENTS.md`](../AGENTS.md) — Development guide and conventions
-- [`docs/openapi/koji-api.yaml`](../openapi/koji-api.yaml) — Machine-readable OpenAPI spec
+- [`docs/openapi/tama-api.yaml`](../openapi/tama-api.yaml) — Machine-readable OpenAPI spec
 - [`docs/openapi/openai-compat.yaml`](../openapi/openai-compat.yaml) — OpenAI-compatible API spec
 
 ---

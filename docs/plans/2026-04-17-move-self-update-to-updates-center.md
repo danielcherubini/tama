@@ -1,6 +1,6 @@
 # Move Self-Update to Updates Center
 
-**Goal:** Move the Koji application self-update UI from the sidebar to the `/updates` page, keeping only a minimal read-only version indicator in the sidebar.
+**Goal:** Move the Tama application self-update UI from the sidebar to the `/updates` page, keeping only a minimal read-only version indicator in the sidebar.
 
 **Architecture:** The full self-update flow (version check, update button, confirmation dialog, progress overlay, SSE streaming, restart polling) moves into a new `SelfUpdateSection` component rendered on the `/updates` page. The two shared streaming functions (`stream_update_events`, `poll_for_restart`) are extracted to a utility module. The sidebar is stripped of all self-update logic and replaced with a minimal clickable version text that links to `/updates`.
 
@@ -16,8 +16,8 @@
 Currently `stream_update_events()` and `poll_for_restart()` are free functions inside `sidebar.rs` (~140 lines combined). They will be needed by both the sidebar (for its minimal version check) and the new `SelfUpdateSection` component. Extracting them prevents duplication and makes future maintenance easier.
 
 **Files:**
-- Create: `crates/koji-web/src/utils/self_update.rs`
-- Modify: `crates/koji-web/src/utils.rs` (add `pub mod self_update;`)
+- Create: `crates/tama-web/src/utils/self_update.rs`
+- Modify: `crates/tama-web/src/utils.rs` (add `pub mod self_update;`)
 
 **What to implement:**
 
@@ -71,18 +71,18 @@ pub mod self_update;
 ```
 
 **Steps:**
-- [ ] Create `crates/koji-web/src/utils/self_update.rs` with the two functions and their private helper structs (copy from sidebar.rs lines 273–416, adjusting visibility)
-- [ ] Add `pub mod self_update;` to `crates/koji-web/src/utils.rs`
+- [ ] Create `crates/tama-web/src/utils/self_update.rs` with the two functions and their private helper structs (copy from sidebar.rs lines 273–416, adjusting visibility)
+- [ ] Add `pub mod self_update;` to `crates/tama-web/src/utils.rs`
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo build --package koji-web`
+- [ ] Run `cargo build --package tama-web`
   - Did it succeed? If not, fix import issues and re-run before continuing.
 - [ ] Commit with message: "chore(web): extract self-update streaming to shared utils module"
 
 **Acceptance criteria:**
-- [ ] `crates/koji-web/src/utils/self_update.rs` exists with `stream_update_events` and `poll_for_restart` as public async functions
+- [ ] `crates/tama-web/src/utils/self_update.rs` exists with `stream_update_events` and `poll_for_restart` as public async functions
 - [ ] `utils.rs` exports the module via `pub mod self_update;`
 - [ ] The two functions have identical behavior to the sidebar implementation (same SSE subscription, same event handling, same polling logic)
-- [ ] `cargo build --package koji-web` succeeds
+- [ ] `cargo build --package tama-web` succeeds
 
 ---
 
@@ -92,8 +92,8 @@ pub mod self_update;
 The main self-update UI needs a new home on the `/updates` page. This component encapsulates all self-update state, API calls, error handling, and UI (version display, update button, confirmation dialog, progress overlay). It follows the existing pattern of `backup_section.rs`, `general_section.rs`, etc.
 
 **Files:**
-- Create: `crates/koji-web/src/components/self_update_section.rs`
-- Modify: `crates/koji-web/src/components/mod.rs` (add `pub mod self_update_section;`)
+- Create: `crates/tama-web/src/components/self_update_section.rs`
+- Modify: `crates/tama-web/src/components/mod.rs` (add `pub mod self_update_section;`)
 
 **What to implement:**
 
@@ -130,7 +130,7 @@ When `update_in_progress` is true:
 ```rust
 view! {
     <div class="self-update-section">
-        <h2 class="section__title">Koji</h2>
+        <h2 class="section__title">Tama</h2>
 
         // Loading state (initial check in flight)
         {move || (current_version.with(|v| v.is_empty()) && check_error.get().is_none() && !update_in_progress.get()).then(|| view! {
@@ -183,8 +183,8 @@ view! {
     {move || show_update_confirm.get().then(|| view! {
         <div class="update-confirm-overlay">
             <div class="update-confirm-dialog">
-                <p>{format!("Update Koji to v{}?", latest_version.get())}</p>
-                <p class="update-confirm-note">"Koji will restart after updating."</p>
+                <p>{format!("Update Tama to v{}?", latest_version.get())}</p>
+                <p class="update-confirm-note">"Tama will restart after updating."</p>
                 <div class="update-confirm-actions">
                     <button class="btn btn-secondary" on:click=move |_| show_update_confirm.set(false)>"Cancel"</button>
                     <button class="btn btn-primary" on:click=confirm_update>"Update"</button>
@@ -213,10 +213,10 @@ pub mod self_update_section;
 ```
 
 **Steps:**
-- [ ] Create `crates/koji-web/src/components/self_update_section.rs` with the component, signals, handlers, and UI
-- [ ] Add `pub mod self_update_section;` to `crates/koji-web/src/components/mod.rs`
+- [ ] Create `crates/tama-web/src/components/self_update_section.rs` with the component, signals, handlers, and UI
+- [ ] Add `pub mod self_update_section;` to `crates/tama-web/src/components/mod.rs`
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo build --package koji-web`
+- [ ] Run `cargo build --package tama-web`
   - Did it succeed? If not, fix import issues and re-run before continuing.
 - [ ] Commit with message: "feat(web): add SelfUpdateSection component for /updates page"
 
@@ -236,7 +236,7 @@ pub mod self_update_section;
 The `/updates` page currently shows only Backends and Models sections. We need to render the new `SelfUpdateSection` at the top of the page, before the "Backends" section.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/updates.rs`
+- Modify: `crates/tama-web/src/pages/updates.rs`
 
 **What to implement:**
 
@@ -261,7 +261,7 @@ view! {
             <div class="error-banner">{e}</div>
         })}
 
-        // NEW: Self-update section for the Koji application itself
+        // NEW: Self-update section for the Tama application itself
         <SelfUpdateSection />
 
         // Existing Backends section
@@ -274,13 +274,13 @@ view! {
 - [ ] Add `use crate::components::self_update_section::SelfUpdateSection;` import to `updates.rs`
 - [ ] Insert `<SelfUpdateSection />` between the error banner and the Backends section
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo build --package koji-web`
+- [ ] Run `cargo build --package tama-web`
   - Did it succeed? If not, fix import issues and re-run before continuing.
 - [ ] Commit with message: "feat(web): render SelfUpdateSection on /updates page"
 
 **Acceptance criteria:**
 - [ ] `/updates` page shows the SelfUpdateSection card at the top
-- [ ] The Koji self-update section is visually separated from the Backends/Models sections below it
+- [ ] The Tama self-update section is visually separated from the Backends/Models sections below it
 
 ---
 
@@ -290,7 +290,7 @@ view! {
 The sidebar currently contains all self-update logic: signals, API calls, handlers, overlays, and streaming functions. All of this moves to `SelfUpdateSection` (Task 2) and the shared utility (Task 1). The sidebar is left with a minimal read-only version indicator that links to `/updates`.
 
 **Files:**
-- Modify: `crates/koji-web/src/components/sidebar.rs`
+- Modify: `crates/tama-web/src/components/sidebar.rs`
 
 **What to remove (delete these sections from sidebar.rs):**
 
@@ -377,7 +377,7 @@ With `current_version: RwSignal::new(String::new())` as the only self-update-rel
 - [ ] Add minimal version indicator with single GET check on mount and `<A href="/updates">` link
 - [ ] Keep `update_badge_visible` logic (backend/model update badge — NOT self-update)
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo build --package koji-web`
+- [ ] Run `cargo build --package tama-web`
   - Did it succeed? If not, fix import issues and re-run before continuing.
 - [ ] Commit with message: "refactor(web): move self-update from sidebar to SelfUpdateSection"
 
@@ -387,7 +387,7 @@ With `current_version: RwSignal::new(String::new())` as the only self-update-rel
 - [ ] Sidebar still shows the "!" badge on Updates nav item (backend/model updates)
 - [ ] Sidebar shows a minimal clickable version text (e.g., "v1.36.1") that links to `/updates`
 - [ ] The version check is a single GET call on mount only (no SSE, no polling)
-- [ ] `cargo build --package koji-web` succeeds
+- [ ] `cargo build --package tama-web` succeeds
 
 ---
 
@@ -397,7 +397,7 @@ With `current_version: RwSignal::new(String::new())` as the only self-update-rel
 The CSS needs cleanup: remove all sidebar-version related rules (they're no longer used), and add new styles for the SelfUpdateSection card and the minimal version indicator.
 
 **Files:**
-- Modify: `crates/koji-web/style.css`
+- Modify: `crates/tama-web/style.css`
 
 **What to remove:**
 Delete these CSS rule blocks (approximately lines 255–308):
@@ -500,7 +500,7 @@ Add these CSS rules (insert near the existing sidebar styles, before the update-
 - [ ] Delete sidebar-version related CSS rules (~50 lines, approximately lines 255–308)
 - [ ] Add new CSS rules for `.sidebar-version-minimal` and `.self-update-section`
 - [ ] Run `cargo fmt --all` (CSS files are not affected by Rust formatter, but good practice)
-- [ ] Verify the build still succeeds: `cargo build --package koji-web`
+- [ ] Verify the build still succeeds: `cargo build --package tama-web`
 - [ ] Commit with message: "style(web): update CSS for self-update section, remove sidebar-version rules"
 
 **Acceptance criteria:**
@@ -521,7 +521,7 @@ After all tasks are complete:
 3. **Lint:** `cargo clippy --workspace -- -D warnings` passes
 4. **Tests:** `cargo test --workspace` passes
 5. **Visual check:**
-   - `/updates` page shows SelfUpdateSection card at the top with Koji version
+   - `/updates` page shows SelfUpdateSection card at the top with Tama version
    - Sidebar shows minimal version text only (no update button)
    - Clicking sidebar version navigates to `/updates`
    - "!" badge on Updates nav item still works (backend/model updates)

@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    "crates/koji-core",
-    "crates/koji-cli",
-    "crates/koji-mock",
-    "crates/koji-web",
+    "crates/tama-core",
+    "crates/tama-cli",
+    "crates/tama-mock",
+    "crates/tama-web",
 ]
 resolver = "2"
 

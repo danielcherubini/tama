@@ -59,5 +59,5 @@ project adheres to [Semantic Versioning](https://semver.org/).
 ## Earlier releases
 
 Release notes for v1.34.0 and earlier are not included here. See the
-[GitHub Releases](https://github.com/danielcherubini/koji/releases) page
+[GitHub Releases](https://github.com/danielcherubini/tama/releases) page
 and `git log` for history.

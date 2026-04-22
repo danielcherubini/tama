@@ -14,10 +14,10 @@
 Before any download logic can be persisted, we need the `download_queue` table and a query module to read/write it. This is purely infrastructure — no business logic yet. The table mirrors the existing `download_log` audit trail but is operational (updated as status changes) rather than append-only.
 
 **Files:**
-- Create: `crates/koji-core/src/db/queries/download_queue_queries.rs`
-- Modify: `crates/koji-core/src/db/migrations.rs` (add migration 11, bump LATEST_VERSION to 11)
-- Modify: `crates/koji-core/src/db/queries/mod.rs` (export new module)
-- Modify: `crates/koji-core/src/db/mod.rs` (export new module)
+- Create: `crates/tama-core/src/db/queries/download_queue_queries.rs`
+- Modify: `crates/tama-core/src/db/migrations.rs` (add migration 11, bump LATEST_VERSION to 11)
+- Modify: `crates/tama-core/src/db/queries/mod.rs` (export new module)
+- Modify: `crates/tama-core/src/db/mod.rs` (export new module)
 
 **What to implement:**
 
@@ -134,24 +134,24 @@ All return `anyhow::Result<T>`. Each function takes `&Connection` and uses param
 
 **Steps:**
 - [ ] Write failing test for `test_insert_and_get_queued` in `download_queue_queries.rs`
-- [ ] Run `cargo test --package koji-core test_insert_and_get_queued` — should fail (module doesn't exist yet)
+- [ ] Run `cargo test --package tama-core test_insert_and_get_queued` — should fail (module doesn't exist yet)
 - [ ] Add migration 11 to `migrations.rs`, bump `LATEST_VERSION` to 11
 - [ ] Create `download_queue_queries.rs` with `DownloadQueueItem` struct and stub functions
-- [ ] Implement `insert_queue_item` — run `cargo test --package koji-core test_insert_and_get_queued` — should pass
+- [ ] Implement `insert_queue_item` — run `cargo test --package tama-core test_insert_and_get_queued` — should pass
 - [ ] Implement `update_queue_status` — add `test_update_status_sets_timestamps` — run and pass
 - [ ] Implement `get_active_items` — add `test_get_active_items_ordering` — run and pass
 - [ ] Implement `cancel_queue_item` — add `test_cancel_queue_item` and `test_cancel_does_not_affect_completed` — run and pass
 - [ ] Implement `get_history_items` — add `test_get_history_items` — run and pass
 - [ ] Implement `try_mark_running`, `get_item_by_job_id`, `get_running_item`, and `mark_stale_running_as_failed` — add tests — run and pass
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo test --package koji-core -- download_queue_queries` — all pass
+- [ ] Run `cargo test --package tama-core -- download_queue_queries` — all pass
 - [ ] Commit with message: "feat(db): add download_queue table and query layer (migration 11)"
 
 **Acceptance criteria:**
 - [ ] Migration 11 creates `download_queue` table with all specified columns and indexes
 - [ ] All 10 query functions exist and work correctly
 - [ ] All tests pass
-- [ ] `cargo clippy --package koji-core -- -D warnings` passes for the new code
+- [ ] `cargo clippy --package tama-core -- -D warnings` passes for the new code
 
 ---
 
@@ -161,10 +161,10 @@ All return `anyhow::Result<T>`. Each function takes `&Connection` and uses param
 Now that we have a persistent queue, we need a service layer that manages the lifecycle: enqueue items, dequeue the next one, update status during download, and run a background processor that picks up queued items one at a time. The processor also handles startup recovery (marking stale running items as failed).
 
 **Files:**
-- Create: `crates/koji-core/src/proxy/download_queue.rs` (service + events — placed in proxy/, not models/)
-- Modify: `crates/koji-core/src/proxy/state.rs` (add DownloadQueueService to ProxyState, start processor)
-- Modify: `crates/koji-core/src/proxy/types.rs` (add SSE event type for downloads)
-- Modify: `crates/koji-core/src/proxy/mod.rs` (export download_queue module)
+- Create: `crates/tama-core/src/proxy/download_queue.rs` (service + events — placed in proxy/, not models/)
+- Modify: `crates/tama-core/src/proxy/state.rs` (add DownloadQueueService to ProxyState, start processor)
+- Modify: `crates/tama-core/src/proxy/types.rs` (add SSE event type for downloads)
+- Modify: `crates/tama-core/src/proxy/mod.rs` (export download_queue module)
 
 **What to implement:**
 
@@ -346,7 +346,7 @@ if let Some(ref dq) = download_queue {
 - [ ] Add `download_queue` field to `ProxyState` in `types.rs`
 - [ ] Initialize it in `state.rs::new()`
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo test --package koji-core -- download_queue` — all pass
+- [ ] Run `cargo test --package tama-core -- download_queue` — all pass
 - [ ] Commit with message: "feat(core): add DownloadQueueService with event bus and background processor"
 
 **Acceptance criteria:**
@@ -360,7 +360,7 @@ if let Some(ref dq) = download_queue {
 ### Task 3: Hook downloads into the queue (pull handler integration)
 
 **Context:**
-Currently `spawn_download_job` in `koji_handlers/pull.rs` creates a `PullJob` in memory and spawns a download directly. We need to refactor this into a two-step process with a **single canonical path** — no race conditions.
+Currently `spawn_download_job` in `tama_handlers/pull.rs` creates a `PullJob` in memory and spawns a download directly. We need to refactor this into a two-step process with a **single canonical path** — no race conditions.
 
 **CRITICAL DESIGN DECISION — Single canonical path (no direct start):**
 - `enqueue_download()` inserts a `queued` row into the DB and returns immediately.
@@ -369,9 +369,9 @@ Currently `spawn_download_job` in `koji_handlers/pull.rs` creates a `PullJob` in
 - The queue processor uses an atomic CAS: `UPDATE download_queue SET status='running' WHERE job_id=? AND status='queued'`. If this affects 0 rows, the item was already started by someone else (skip it). This prevents double-starts even if multiple consumers exist.
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy/pull_jobs.rs` (add `duration_ms` field)
-- Modify: `crates/koji-core/src/proxy/koji_handlers/pull.rs` (refactor spawn_download_job, add enqueue_download + start_download_from_queue)
-- Modify: `crates/koji-core/src/proxy/state.rs` (queue processor task already started in Task 2)
+- Modify: `crates/tama-core/src/proxy/pull_jobs.rs` (add `duration_ms` field)
+- Modify: `crates/tama-core/src/proxy/tama_handlers/pull.rs` (refactor spawn_download_job, add enqueue_download + start_download_from_queue)
+- Modify: `crates/tama-core/src/proxy/state.rs` (queue processor task already started in Task 2)
 
 **What to implement:**
 
@@ -388,7 +388,7 @@ pub duration_ms: Option<u64>,  // Set on completion, calculated via Instant::now
 
 **New state — Two separate functions with single canonical path:**
 
-1. **`enqueue_download(job_id, repo_id, filename, display_name, kind) -> Result<()>`** (called from `handle_koji_pull_model`)
+1. **`enqueue_download(job_id, repo_id, filename, display_name, kind) -> Result<()>`** (called from `handle_tama_pull_model`)
    - Creates the `download_queue` DB row via `state.download_queue.enqueue()` with status='queued'
    - Returns immediately — does NOT start the download
    - The queue processor will pick it up and start it
@@ -401,7 +401,7 @@ pub duration_ms: Option<u64>,  // Set on completion, calculated via Instant::now
    - On completion/failure, calls `state.download_queue.update_status()` with the final status
    - This is the ONLY path that starts a download
 
-**Hook in `handle_koji_pull_model`:**
+**Hook in `handle_tama_pull_model`:**
 1. Generate the job_id (existing logic)
 2. Look up display_name from model config if available
 3. Call `enqueue_download(job_id, repo_id, filename, display_name, "model")`
@@ -433,12 +433,12 @@ Since these are integration tests that require actual file I/O, write them again
 **Steps:**
 - [ ] Add `duration_ms: Option<u64>` to `PullJob` struct
 - [ ] Refactor `spawn_download_job` into `enqueue_download` + `start_download_from_queue`
-- [ ] Update `handle_koji_pull_model` to call `enqueue_download` instead of spawning directly
+- [ ] Update `handle_tama_pull_model` to call `enqueue_download` instead of spawning directly
 - [ ] Update `start_download_from_queue` to call `svc.update_status()` on completion/failure
 - [ ] Start queue processor task in `ProxyState::new()` (already covered in Task 2)
 - [ ] Write integration test for full download lifecycle through the queue
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo test --package koji-core` — all pass
+- [ ] Run `cargo test --package tama-core` — all pass
 - [ ] Commit with message: "feat(core): integrate pull handler with download queue"
 
 **Acceptance criteria:**
@@ -456,9 +456,9 @@ Since these are integration tests that require actual file I/O, write them again
 The web UI needs REST endpoints to query the download queue (active + history) and cancel items. We also need an SSE endpoint so the browser receives real-time toast events.
 
 **Files:**
-- Create: `crates/koji-web/src/api/downloads.rs`
-- Modify: `crates/koji-web/src/api.rs` (add `pub mod downloads;` — NEW, reviewer pointed out this was missing)
-- Modify: `crates/koji-web/src/server.rs` (register routes, add AppState field)
+- Create: `crates/tama-web/src/api/downloads.rs`
+- Modify: `crates/tama-web/src/api.rs` (add `pub mod downloads;` — NEW, reviewer pointed out this was missing)
+- Modify: `crates/tama-web/src/server.rs` (register routes, add AppState field)
 
 **What to implement:**
 
@@ -569,7 +569,7 @@ for event_name in ["Started", "Progress", "Verifying", "Completed", "Failed", "C
 
 Add to `AppState`:
 ```rust
-pub download_queue: Option<Arc<koji_core::proxy::download_queue::DownloadQueueService>>,
+pub download_queue: Option<Arc<tama_core::proxy::download_queue::DownloadQueueService>>,
 ```
 
 Initialize it in `run_with_opts` from the proxy config's state (extract `db_dir` from proxy state).
@@ -592,7 +592,7 @@ These are integration tests using the existing test infrastructure (similar to `
 - [ ] Register routes in `build_router`
 - [ ] Write integration tests
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo test --package koji-web` — all pass
+- [ ] Run `cargo test --package tama-web` — all pass
 - [ ] Commit with message: "feat(web): add downloads API endpoints (active, history, cancel, SSE)"
 
 **Acceptance criteria:**
@@ -610,12 +610,12 @@ These are integration tests using the existing test infrastructure (similar to `
 Now we build the UI. Two components: a toast notification system (top-right, auto-dismissing) and a Downloads page (Active/History tabs). The browser opens an SSE connection on app mount to receive download events, which trigger toasts.
 
 **Files:**
-- Create: `crates/koji-web/src/components/toast.rs`
-- Create: `crates/koji-web/src/pages/downloads.rs`
-- Modify: `crates/koji-web/src/components/mod.rs` (export toast)
-- Modify: `crates/koji-web/src/pages/mod.rs` (export downloads)
-- Modify: `crates/koji-web/src/lib.rs` (add /downloads route, wire up SSE + toast store in App)
-- Modify: `crates/koji-web/src/components/sidebar.rs` (add Downloads nav item with badge)
+- Create: `crates/tama-web/src/components/toast.rs`
+- Create: `crates/tama-web/src/pages/downloads.rs`
+- Modify: `crates/tama-web/src/components/mod.rs` (export toast)
+- Modify: `crates/tama-web/src/pages/mod.rs` (export downloads)
+- Modify: `crates/tama-web/src/lib.rs` (add /downloads route, wire up SSE + toast store in App)
+- Modify: `crates/tama-web/src/components/sidebar.rs` (add Downloads nav item with badge)
 
 **What to implement:**
 
@@ -815,7 +815,7 @@ The `queued_count` is derived from polling `/api/downloads/active` and counting 
 - [ ] Add `/downloads` route in `lib.rs`
 - [ ] Update sidebar with Downloads nav item and queued count badge
 - [ ] Add CSS classes for toast and downloads page (inline or in existing styles)
-- [ ] Test manually: start koji, trigger a download, verify toasts appear and Downloads page updates
+- [ ] Test manually: start tama, trigger a download, verify toasts appear and Downloads page updates
 - [ ] Commit with message: "feat(web): add Downloads page and toast notifications"
 
 **Acceptance criteria:**
@@ -832,22 +832,22 @@ The `queued_count` is derived from polling `/api/downloads/active` and counting 
 
 | File | Action |
 |------|--------|
-| `crates/koji-core/src/db/migrations.rs` | Modify — add migration 11 |
-| `crates/koji-core/src/db/queries/mod.rs` | Modify — export new module |
-| `crates/koji-core/src/db/mod.rs` | Modify — export new module |
-| `crates/koji-core/src/db/queries/download_queue_queries.rs` | **New** — CRUD queries |
-| `crates/koji-core/src/proxy/download_queue.rs` | **New** — service + events (placed in proxy/, not models/) |
-| `crates/koji-core/src/proxy/pull_jobs.rs` | Modify — add duration_ms field |
-| `crates/koji-core/src/proxy/koji_handlers/pull.rs` | Modify — hook into queue |
-| `crates/koji-core/src/proxy/state.rs` | Modify — add DownloadQueueService, start processor |
-| `crates/koji-core/src/proxy/types.rs` | Modify — add DownloadEvent type |
-| `crates/koji-core/src/proxy/mod.rs` | Modify — export download_queue module |
-| `crates/koji-web/src/api/downloads.rs` | **New** — API handlers |
-| `crates/koji-web/src/api.rs` | Modify — add `pub mod downloads;` |
-| `crates/koji-web/src/server.rs` | Modify — register routes, add AppState field |
-| `crates/koji-web/src/components/toast.rs` | **New** — toast notifications |
-| `crates/koji-web/src/components/mod.rs` | Modify — export toast |
-| `crates/koji-web/src/pages/downloads.rs` | **New** — Downloads page |
-| `crates/koji-web/src/pages/mod.rs` | Modify — export downloads |
-| `crates/koji-web/src/lib.rs` | Modify — add route, wire SSE + toast store |
-| `crates/koji-web/src/components/sidebar.rs` | Modify — add Downloads nav item |
+| `crates/tama-core/src/db/migrations.rs` | Modify — add migration 11 |
+| `crates/tama-core/src/db/queries/mod.rs` | Modify — export new module |
+| `crates/tama-core/src/db/mod.rs` | Modify — export new module |
+| `crates/tama-core/src/db/queries/download_queue_queries.rs` | **New** — CRUD queries |
+| `crates/tama-core/src/proxy/download_queue.rs` | **New** — service + events (placed in proxy/, not models/) |
+| `crates/tama-core/src/proxy/pull_jobs.rs` | Modify — add duration_ms field |
+| `crates/tama-core/src/proxy/tama_handlers/pull.rs` | Modify — hook into queue |
+| `crates/tama-core/src/proxy/state.rs` | Modify — add DownloadQueueService, start processor |
+| `crates/tama-core/src/proxy/types.rs` | Modify — add DownloadEvent type |
+| `crates/tama-core/src/proxy/mod.rs` | Modify — export download_queue module |
+| `crates/tama-web/src/api/downloads.rs` | **New** — API handlers |
+| `crates/tama-web/src/api.rs` | Modify — add `pub mod downloads;` |
+| `crates/tama-web/src/server.rs` | Modify — register routes, add AppState field |
+| `crates/tama-web/src/components/toast.rs` | **New** — toast notifications |
+| `crates/tama-web/src/components/mod.rs` | Modify — export toast |
+| `crates/tama-web/src/pages/downloads.rs` | **New** — Downloads page |
+| `crates/tama-web/src/pages/mod.rs` | Modify — export downloads |
+| `crates/tama-web/src/lib.rs` | Modify — add route, wire SSE + toast store |
+| `crates/tama-web/src/components/sidebar.rs` | Modify — add Downloads nav item |

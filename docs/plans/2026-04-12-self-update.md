@@ -1,23 +1,23 @@
-# Koji Self-Update Plan
+# Tama Self-Update Plan
 
-**Goal:** Allow users to update the Koji binary from both the Web UI (update button) and CLI (`koji self-update`), downloading new releases from GitHub and auto-restarting.
+**Goal:** Allow users to update the Tama binary from both the Web UI (update button) and CLI (`tama self-update`), downloading new releases from GitHub and auto-restarting.
 
-**Architecture:** A new `self_update` module in `koji-core` uses the `self_update` crate's lower-level API for GitHub release discovery, download, and extraction, with `self_replace` (bundled) for cross-platform binary swap. The Web UI gets a version badge in the sidebar footer with an "Update" button that streams progress via SSE. The CLI gets a `koji self-update` subcommand. The CI pipeline is updated to produce archives named with target triples for `self_update` crate compatibility.
+**Architecture:** A new `self_update` module in `tama-core` uses the `self_update` crate's lower-level API for GitHub release discovery, download, and extraction, with `self_replace` (bundled) for cross-platform binary swap. The Web UI gets a version badge in the sidebar footer with an "Update" button that streams progress via SSE. The CLI gets a `tama self-update` subcommand. The CI pipeline is updated to produce archives named with target triples for `self_update` crate compatibility.
 
 **Tech Stack:** `self_update` 0.44 (with `archive-tar`, `archive-zip`, `compression-flate2`, `compression-zip-deflate`, `rustls` features), `semver` 1, Leptos 0.7 (CSR), Axum 0.7 (SSR), existing `tokio::sync::broadcast` pattern for SSE.
 
 ---
 
-## Task 1: Add `self_update` and `semver` Dependencies to koji-core
+## Task 1: Add `self_update` and `semver` Dependencies to tama-core
 
 **Context:**
-Before any self-update logic can be written, the workspace needs the `self_update` and `semver` crates. The `self_update` crate provides GitHub release discovery, asset download, archive extraction, and internally uses `self_replace` for cross-platform binary swapping. The `semver` crate handles version comparison. These are added to `koji-core` because the core library owns all backend logic (backends, models, platform) and the self-update module fits that pattern.
+Before any self-update logic can be written, the workspace needs the `self_update` and `semver` crates. The `self_update` crate provides GitHub release discovery, asset download, archive extraction, and internally uses `self_replace` for cross-platform binary swapping. The `semver` crate handles version comparison. These are added to `tama-core` because the core library owns all backend logic (backends, models, platform) and the self-update module fits that pattern.
 
 **Files:**
-- Modify: `crates/koji-core/Cargo.toml`
+- Modify: `crates/tama-core/Cargo.toml`
 
 **What to implement:**
-Add two new dependencies to `crates/koji-core/Cargo.toml` under `[dependencies]`:
+Add two new dependencies to `crates/tama-core/Cargo.toml` under `[dependencies]`:
 
 ```toml
 self_update = { version = "0.43", default-features = false, features = ["archive-tar", "compression-flate2", "archive-zip", "compression-zip-deflate", "rustls"] }
@@ -27,35 +27,35 @@ semver = "1"
 The `self_update` features are:
 - `archive-tar` + `compression-flate2`: for Linux `.tar.gz` archives
 - `archive-zip` + `compression-zip-deflate`: for Windows `.zip` archives
-- `rustls`: TLS backend (avoids OpenSSL dependency, consistent with koji's existing use of `rustls-tls` for reqwest)
+- `rustls`: TLS backend (avoids OpenSSL dependency, consistent with tama's existing use of `rustls-tls` for reqwest)
 
-Do NOT enable `self_update`'s `reqwest` feature — it defaults to `ureq` for HTTP, which avoids conflicts with koji's existing reqwest dependency.
+Do NOT enable `self_update`'s `reqwest` feature — it defaults to `ureq` for HTTP, which avoids conflicts with tama's existing reqwest dependency.
 
 **Steps:**
-- [ ] Add `self_update` and `semver` to `crates/koji-core/Cargo.toml` under `[dependencies]`, inserting alphabetically
-- [ ] Run `cargo check --package koji-core`
+- [ ] Add `self_update` and `semver` to `crates/tama-core/Cargo.toml` under `[dependencies]`, inserting alphabetically
+- [ ] Run `cargo check --package tama-core`
   - Did it succeed? If not, resolve dependency conflicts (likely reqwest version) and re-run.
 - [ ] Run `cargo fmt --all`
-- [ ] Commit with message: `feat: add self_update and semver dependencies to koji-core`
+- [ ] Commit with message: `feat: add self_update and semver dependencies to tama-core`
 
 **Acceptance criteria:**
-- [ ] `cargo check --package koji-core` succeeds with no errors
+- [ ] `cargo check --package tama-core` succeeds with no errors
 - [ ] `self_update` and `semver` appear in `Cargo.lock`
 
 ---
 
-## Task 2: Implement `koji_core::self_update` Module
+## Task 2: Implement `tama_core::self_update` Module
 
 **Context:**
-This is the core self-update logic. It lives in `koji-core` following the pattern of other core modules (backends, models, platform). The module provides three functions: (1) check if an update is available by querying GitHub Releases, (2) perform the update by downloading + extracting + replacing the binary, and (3) restart the process. The `self_update` crate's API is synchronous, so all calls must be wrapped in `tokio::task::spawn_blocking`. The restart function uses koji's existing platform service management (`platform::linux::restart_service` / `platform::windows::restart_service`) when running as a service, or re-execs the binary for CLI mode.
+This is the core self-update logic. It lives in `tama-core` following the pattern of other core modules (backends, models, platform). The module provides three functions: (1) check if an update is available by querying GitHub Releases, (2) perform the update by downloading + extracting + replacing the binary, and (3) restart the process. The `self_update` crate's API is synchronous, so all calls must be wrapped in `tokio::task::spawn_blocking`. The restart function uses tama's existing platform service management (`platform::linux::restart_service` / `platform::windows::restart_service`) when running as a service, or re-execs the binary for CLI mode.
 
 **Files:**
-- Create: `crates/koji-core/src/self_update.rs`
-- Modify: `crates/koji-core/src/lib.rs` (add `pub mod self_update;`)
+- Create: `crates/tama-core/src/self_update.rs`
+- Modify: `crates/tama-core/src/lib.rs` (add `pub mod self_update;`)
 
 **What to implement:**
 
-Create `crates/koji-core/src/self_update.rs` with these types and functions:
+Create `crates/tama-core/src/self_update.rs` with these types and functions:
 
 1. **Types:**
    ```rust
@@ -76,8 +76,8 @@ Create `crates/koji-core/src/self_update.rs` with these types and functions:
    ```
 
 2. **`check_for_update(current_version: &str) -> Result<UpdateInfo>`:**
-   - Accepts `current_version` as a parameter (NOT `env!("CARGO_PKG_VERSION")`) so the caller passes the correct binary version. This avoids version mismatch since `env!("CARGO_PKG_VERSION")` resolves to the crate's own version at compile time, and koji-core's version may differ from koji-cli's.
-   - Use `self_update::backends::github::ReleaseList::configure()` with `.repo_owner("danielcherubini")` and `.repo_name("koji")` to fetch releases.
+   - Accepts `current_version` as a parameter (NOT `env!("CARGO_PKG_VERSION")`) so the caller passes the correct binary version. This avoids version mismatch since `env!("CARGO_PKG_VERSION")` resolves to the crate's own version at compile time, and tama-core's version may differ from tama-cli's.
+   - Use `self_update::backends::github::ReleaseList::configure()` with `.repo_owner("danielcherubini")` and `.repo_name("tama")` to fetch releases.
    - Wrap the sync `.fetch()` call in `tokio::task::spawn_blocking`.
    - Compare using `semver::Version::parse()` on the `current_version` parameter.
    - Return `UpdateInfo` with `update_available` set based on semver comparison.
@@ -98,7 +98,7 @@ Create `crates/koji-core/src/self_update.rs` with these types and functions:
      i. Use `self_replace::self_replace(&extracted_binary_path)?` to swap the running binary
      j. Call `on_progress("Update complete!")`
    - The archive kind is platform-specific: `ArchiveKind::Tar(Some(Compression::Gz))` on Linux, `ArchiveKind::Zip` on Windows. Use `#[cfg(target_os = "...")]` to select.
-   - The asset name to look for: `koji-x86_64-unknown-linux-gnu.tar.gz` (Linux) or `koji-x86_64-pc-windows-msvc.zip` (Windows). Match the asset by checking if its name contains the target triple (`env!("TARGET")` or hardcode).
+   - The asset name to look for: `tama-x86_64-unknown-linux-gnu.tar.gz` (Linux) or `tama-x86_64-pc-windows-msvc.zip` (Windows). Match the asset by checking if its name contains the target triple (`env!("TARGET")` or hardcode).
    - Wrap all sync calls in `tokio::task::spawn_blocking`.
    - Return `UpdateResult` with old and new versions.
    - On version already up to date, return `anyhow::bail!("Already up to date (v{version})")`.
@@ -107,58 +107,58 @@ Create `crates/koji-core/src/self_update.rs` with these types and functions:
 4. **`restart_process() -> Result<()>`:**
    - Detect if running as a systemd service on Linux: check if `INVOCATION_ID` env var is set (systemd sets this for both system and user services). As a fallback, also check if parent PID is 1 or if `JOURNAL_STREAM` env var is set.
    - Detect if running as a Windows service: check if we were launched via the `service-run` command by examining `std::env::args()`.
-   - If service on Linux: call `crate::platform::linux::restart_service("koji")`. If that fails (e.g., service not installed), log a warning and fall back to CLI re-exec behavior.
-   - If service on Windows: call `crate::platform::windows::restart_service("koji")`. If that fails, fall back to CLI re-exec.
+   - If service on Linux: call `crate::platform::linux::restart_service("tama")`. If that fails (e.g., service not installed), log a warning and fall back to CLI re-exec behavior.
+   - If service on Windows: call `crate::platform::windows::restart_service("tama")`. If that fails, fall back to CLI re-exec.
    - Otherwise (CLI mode): get `std::env::current_exe()`, collect `std::env::args().skip(1)`, spawn new process via `std::process::Command::new(exe).args(args).spawn()`, then `std::process::exit(0)`.
    - Helper function: `fn is_running_as_service() -> bool` that encapsulates the detection logic for both platforms.
 
 5. **Constants:**
    ```rust
    pub const REPO_OWNER: &str = "danielcherubini";
-   pub const REPO_NAME: &str = "koji";
+   pub const REPO_NAME: &str = "tama";
    ```
 
-Add `pub mod self_update;` to `crates/koji-core/src/lib.rs` (insert alphabetically after `pub mod proxy;`).
+Add `pub mod self_update;` to `crates/tama-core/src/lib.rs` (insert alphabetically after `pub mod proxy;`).
 
 **Steps:**
-- [ ] Create `crates/koji-core/src/self_update.rs` with the types, constants, and three functions described above
-- [ ] Add `pub mod self_update;` to `crates/koji-core/src/lib.rs` after the `pub mod proxy;` line
-- [ ] Run `cargo check --package koji-core`
+- [ ] Create `crates/tama-core/src/self_update.rs` with the types, constants, and three functions described above
+- [ ] Add `pub mod self_update;` to `crates/tama-core/src/lib.rs` after the `pub mod proxy;` line
+- [ ] Run `cargo check --package tama-core`
   - Did it succeed? If not, fix compilation errors and re-run.
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo clippy --package koji-core -- -D warnings`
+- [ ] Run `cargo clippy --package tama-core -- -D warnings`
   - Did it succeed? If not, fix lint warnings and re-run.
-- [ ] Run `cargo test --package koji-core`
+- [ ] Run `cargo test --package tama-core`
   - Did all tests pass? If not, fix and re-run.
-- [ ] Commit with message: `feat: implement koji-core self_update module with check, update, and restart`
+- [ ] Commit with message: `feat: implement tama-core self_update module with check, update, and restart`
 
 **Acceptance criteria:**
-- [ ] `koji_core::self_update::check_for_update()` compiles and returns `Result<UpdateInfo>`, accepts `current_version: &str` parameter
-- [ ] `koji_core::self_update::perform_update()` compiles, accepts `current_version: &str` and progress callback, uses lower-level API for fine-grained progress
-- [ ] `koji_core::self_update::restart_process()` compiles with platform-aware restart logic and fallback
+- [ ] `tama_core::self_update::check_for_update()` compiles and returns `Result<UpdateInfo>`, accepts `current_version: &str` parameter
+- [ ] `tama_core::self_update::perform_update()` compiles, accepts `current_version: &str` and progress callback, uses lower-level API for fine-grained progress
+- [ ] `tama_core::self_update::restart_process()` compiles with platform-aware restart logic and fallback
 - [ ] `is_running_as_service()` helper correctly detects systemd (INVOCATION_ID / JOURNAL_STREAM) and Windows service (service-run arg)
 - [ ] All sync `self_update` crate calls are wrapped in `spawn_blocking`
-- [ ] `cargo check --package koji-core` passes
-- [ ] `cargo clippy --package koji-core -- -D warnings` passes
+- [ ] `cargo check --package tama-core` passes
+- [ ] `cargo clippy --package tama-core -- -D warnings` passes
 
 ---
 
 ## Task 3: Add Web API Endpoints for Self-Update
 
 **Context:**
-The Web UI needs API endpoints: one to check if an update is available, one to trigger the update, and one to stream progress via SSE. These follow the existing pattern in `koji-web/src/api/` — Axum handlers with `State<Arc<AppState>>` and JSON responses. The update uses a two-step flow: a POST to trigger the update (protected by same-origin middleware against CSRF), then a GET SSE stream for progress. This matches the browser's EventSource API (GET-only) and reuses the proven SSE consumption pattern from `job_log_panel.rs` which uses `gloo_net::eventsource::futures::EventSource`.
+The Web UI needs API endpoints: one to check if an update is available, one to trigger the update, and one to stream progress via SSE. These follow the existing pattern in `tama-web/src/api/` — Axum handlers with `State<Arc<AppState>>` and JSON responses. The update uses a two-step flow: a POST to trigger the update (protected by same-origin middleware against CSRF), then a GET SSE stream for progress. This matches the browser's EventSource API (GET-only) and reuses the proven SSE consumption pattern from `job_log_panel.rs` which uses `gloo_net::eventsource::futures::EventSource`.
 
 **Files:**
-- Create: `crates/koji-web/src/api/self_update.rs`
-- Modify: `crates/koji-web/src/api.rs` (add `pub mod self_update;`)
-- Modify: `crates/koji-web/src/server.rs` (add routes, add `binary_version` + `update_tx` to AppState, update `run_with_opts` signature)
-- Modify: `crates/koji-cli/src/handlers/serve.rs` (pass `binary_version` to `run_with_opts`)
-- Modify: `crates/koji-cli/src/service.rs` (pass `binary_version` to `run_with_opts`)
-- Modify: `crates/koji-cli/src/handlers/web.rs` (pass `binary_version` to `run_with_opts`)
+- Create: `crates/tama-web/src/api/self_update.rs`
+- Modify: `crates/tama-web/src/api.rs` (add `pub mod self_update;`)
+- Modify: `crates/tama-web/src/server.rs` (add routes, add `binary_version` + `update_tx` to AppState, update `run_with_opts` signature)
+- Modify: `crates/tama-cli/src/handlers/serve.rs` (pass `binary_version` to `run_with_opts`)
+- Modify: `crates/tama-cli/src/service.rs` (pass `binary_version` to `run_with_opts`)
+- Modify: `crates/tama-cli/src/handlers/web.rs` (pass `binary_version` to `run_with_opts`)
 
 **What to implement:**
 
-1. **Create `crates/koji-web/src/api/self_update.rs`:**
+1. **Create `crates/tama-web/src/api/self_update.rs`:**
 
    Response types (derive `Serialize`, `Deserialize`):
    ```rust
@@ -181,22 +181,22 @@ The Web UI needs API endpoints: one to check if an update is available, one to t
    **Shared state for update SSE:** Add fields to `AppState` in `server.rs`:
    ```rust
    // In server.rs AppState, add:
-   pub binary_version: String,  // The actual koji binary version, passed from CLI
+   pub binary_version: String,  // The actual tama binary version, passed from CLI
    pub update_tx: Arc<tokio::sync::Mutex<Option<broadcast::Sender<String>>>>
    ```
-   - `binary_version`: The version of the running koji binary, NOT `env!("CARGO_PKG_VERSION")` (which resolves to koji-web's crate version). This must be passed in from the CLI when starting the web server. Use `tokio::sync::Mutex` for consistency with async code (even though the lock is held briefly).
+   - `binary_version`: The version of the running tama binary, NOT `env!("CARGO_PKG_VERSION")` (which resolves to tama-web's crate version). This must be passed in from the CLI when starting the web server. Use `tokio::sync::Mutex` for consistency with async code (even though the lock is held briefly).
    - `update_tx`: Initialize as `Arc::new(tokio::sync::Mutex::new(None))` in `run_with_opts`.
    - Update `run_with_opts` to accept a `binary_version: String` parameter (add as the last parameter) and pass it through to `AppState`. Also update the convenience `run()` wrapper to pass a default version.
    - **All callers of `run_with_opts` must be updated to pass the binary version:**
-     - `crates/koji-cli/src/handlers/serve.rs` (line ~94): pass `env!("CARGO_PKG_VERSION").to_string()` — this is koji-cli's version, the correct one
-     - `crates/koji-cli/src/service.rs` (line ~269): pass `env!("CARGO_PKG_VERSION").to_string()`
-     - `crates/koji-cli/src/handlers/web.rs` (line ~13): pass `env!("CARGO_PKG_VERSION").to_string()`
-     - `server.rs` `run()` wrapper (line ~212): pass `env!("CARGO_PKG_VERSION").to_string()` (koji-web's version as fallback)
+     - `crates/tama-cli/src/handlers/serve.rs` (line ~94): pass `env!("CARGO_PKG_VERSION").to_string()` — this is tama-cli's version, the correct one
+     - `crates/tama-cli/src/service.rs` (line ~269): pass `env!("CARGO_PKG_VERSION").to_string()`
+     - `crates/tama-cli/src/handlers/web.rs` (line ~13): pass `env!("CARGO_PKG_VERSION").to_string()`
+     - `server.rs` `run()` wrapper (line ~212): pass `env!("CARGO_PKG_VERSION").to_string()` (tama-web's version as fallback)
 
    Handlers:
 
    a. **`check_update`** — `GET /api/self-update/check`:
-   - Call `koji_core::self_update::check_for_update(&state.binary_version).await` — uses the actual binary version from AppState, NOT `env!("CARGO_PKG_VERSION")`.
+   - Call `tama_core::self_update::check_for_update(&state.binary_version).await` — uses the actual binary version from AppState, NOT `env!("CARGO_PKG_VERSION")`.
    - Map `UpdateInfo` to `UpdateCheckResponse`
    - On error, return 502 with JSON error body (GitHub API might be unreachable)
 
@@ -205,10 +205,10 @@ The Web UI needs API endpoints: one to check if an update is available, one to t
    - Store the sender in `state.update_tx`
    - Clone `state.binary_version` for use in the spawned task
    - Spawn a background `tokio::spawn` task that:
-     1. Calls `koji_core::self_update::perform_update(&binary_version, progress_callback)` where the callback sends messages to the broadcast channel
+     1. Calls `tama_core::self_update::perform_update(&binary_version, progress_callback)` where the callback sends messages to the broadcast channel
      2. On success, sends JSON via channel: `{"type": "status", "status": "succeeded", "old_version": "...", "new_version": "..."}`
      3. Then sends `{"type": "restarting"}`
-     4. Waits 500ms, then calls `koji_core::self_update::restart_process()`
+     4. Waits 500ms, then calls `tama_core::self_update::restart_process()`
      5. On failure, sends `{"type": "status", "status": "failed", "error": "..."}`
    - Returns `Json(UpdateTriggerResponse { ok: true, message: "Update started" })`
    - If an update is already in progress (sender exists and has receivers), return 409 Conflict
@@ -225,10 +225,10 @@ The Web UI needs API endpoints: one to check if an update is available, one to t
    - Use `Sse::new(stream).keep_alive(KeepAlive::default())`
    - Import pattern: `use async_stream::stream;`, `use axum::response::sse::{Event, KeepAlive};`, `use axum::response::Sse;`, `use futures_util::Stream;`, `use tokio::sync::broadcast;`
 
-2. **Modify `crates/koji-web/src/api.rs`:**
+2. **Modify `crates/tama-web/src/api.rs`:**
    - Add `pub mod self_update;` after the existing `pub mod middleware;` line
 
-3. **Modify `crates/koji-web/src/server.rs`:**
+3. **Modify `crates/tama-web/src/server.rs`:**
    - Add `update_tx: Arc::new(Mutex::new(None))` to `AppState` construction
    - Add the POST route **inside the `backend_routes` sub-router** (which has `enforce_same_origin` middleware), around line 141 where the other backend POST routes are:
      ```rust
@@ -245,20 +245,20 @@ The Web UI needs API endpoints: one to check if an update is available, one to t
 - [ ] Update `run_with_opts` to accept `binary_version: String` parameter and pass to AppState
 - [ ] Initialize `update_tx` as `Arc::new(tokio::sync::Mutex::new(None))`
 - [ ] Update all callers of `run_with_opts` to pass `binary_version`:
-  - `crates/koji-cli/src/handlers/serve.rs`: pass `env!("CARGO_PKG_VERSION").to_string()`
-  - `crates/koji-cli/src/service.rs`: pass `env!("CARGO_PKG_VERSION").to_string()`
-  - `crates/koji-cli/src/handlers/web.rs`: pass `env!("CARGO_PKG_VERSION").to_string()`
+  - `crates/tama-cli/src/handlers/serve.rs`: pass `env!("CARGO_PKG_VERSION").to_string()`
+  - `crates/tama-cli/src/service.rs`: pass `env!("CARGO_PKG_VERSION").to_string()`
+  - `crates/tama-cli/src/handlers/web.rs`: pass `env!("CARGO_PKG_VERSION").to_string()`
   - `server.rs` `run()` wrapper: pass `env!("CARGO_PKG_VERSION").to_string()`
-- [ ] Create `crates/koji-web/src/api/self_update.rs` with `check_update`, `trigger_update`, and `update_events` handlers
-- [ ] Add `pub mod self_update;` to `crates/koji-web/src/api.rs` after the `pub mod middleware;` line
+- [ ] Create `crates/tama-web/src/api/self_update.rs` with `check_update`, `trigger_update`, and `update_events` handlers
+- [ ] Add `pub mod self_update;` to `crates/tama-web/src/api.rs` after the `pub mod middleware;` line
 - [ ] Add POST route inside `backend_routes` sub-router in `server.rs`
 - [ ] Add GET routes to main router in `server.rs`
-- [ ] Run `cargo check --package koji-web --features ssr`
+- [ ] Run `cargo check --package tama-web --features ssr`
   - Did it succeed? If not, fix compilation errors (likely missing imports) and re-run.
 - [ ] Run `cargo check --workspace` (to verify all callers of `run_with_opts` compile)
   - Did it succeed? If not, fix the callers and re-run.
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo clippy --package koji-web --features ssr -- -D warnings`
+- [ ] Run `cargo clippy --package tama-web --features ssr -- -D warnings`
   - Did it succeed? If not, fix lint warnings and re-run.
 - [ ] Commit with message: `feat: add self-update API endpoints with SSE progress streaming`
 
@@ -270,22 +270,22 @@ The Web UI needs API endpoints: one to check if an update is available, one to t
 - [ ] Two-step flow: POST triggers update → GET streams progress (compatible with browser EventSource)
 - [ ] `AppState` has `binary_version: String` field populated from CLI
 - [ ] Routes are registered in `build_router()`
-- [ ] `cargo check --package koji-web --features ssr` passes
+- [ ] `cargo check --package tama-web --features ssr` passes
 
 ---
 
 ## Task 4: Add Version Badge and Update Button to Sidebar
 
 **Context:**
-The sidebar (`crates/koji-web/src/components/sidebar.rs`) currently shows navigation links and a collapse toggle in the footer. We need to add a version badge that shows the current version, checks for updates on mount, and shows an "Update" button when an update is available. The update flow uses a two-step API: POST to trigger the update (via `gloo_net::http::Request`), then GET SSE to stream progress (via `gloo_net::eventsource::futures::EventSource`) — this exactly matches the proven pattern in `job_log_panel.rs`. This is a CSR (client-side rendered) component using Leptos 0.7 signals.
+The sidebar (`crates/tama-web/src/components/sidebar.rs`) currently shows navigation links and a collapse toggle in the footer. We need to add a version badge that shows the current version, checks for updates on mount, and shows an "Update" button when an update is available. The update flow uses a two-step API: POST to trigger the update (via `gloo_net::http::Request`), then GET SSE to stream progress (via `gloo_net::eventsource::futures::EventSource`) — this exactly matches the proven pattern in `job_log_panel.rs`. This is a CSR (client-side rendered) component using Leptos 0.7 signals.
 
 **Files:**
-- Modify: `crates/koji-web/src/components/sidebar.rs`
-- Modify: `crates/koji-web/style.css`
+- Modify: `crates/tama-web/src/components/sidebar.rs`
+- Modify: `crates/tama-web/style.css`
 
 **What to implement:**
 
-1. **Modify `crates/koji-web/src/components/sidebar.rs`:**
+1. **Modify `crates/tama-web/src/components/sidebar.rs`:**
 
    Add these reactive signals at the top of the `Sidebar` component (after the existing `collapsed` and `mobile_open` signals):
    ```rust
@@ -381,8 +381,8 @@ The sidebar (`crates/koji-web/src/components/sidebar.rs`) currently shows naviga
    {move || show_update_confirm.get().then(|| view! {
        <div class="update-confirm-overlay">
            <div class="update-confirm-dialog">
-               <p>{format!("Update Koji to v{}?", latest_version.get())}</p>
-               <p class="update-confirm-note">"Koji will restart after updating."</p>
+               <p>{format!("Update Tama to v{}?", latest_version.get())}</p>
+               <p class="update-confirm-note">"Tama will restart after updating."</p>
                <div class="update-confirm-actions">
                    <button class="btn btn--secondary" on:click=move |_| show_update_confirm.set(false)>"Cancel"</button>
                    <button class="btn btn--primary" on:click=confirm_update>"Update"</button>
@@ -402,9 +402,9 @@ The sidebar (`crates/koji-web/src/components/sidebar.rs`) currently shows naviga
    })}
    ```
 
-   Note: Version info comes from the API response (NOT `env!("CARGO_PKG_VERSION")` which would be koji-web's version). The `current_version` signal is populated from the `/api/self-update/check` response.
+   Note: Version info comes from the API response (NOT `env!("CARGO_PKG_VERSION")` which would be tama-web's version). The `current_version` signal is populated from the `/api/self-update/check` response.
 
-2. **Modify `crates/koji-web/style.css`:**
+2. **Modify `crates/tama-web/style.css`:**
 
    Add these CSS classes (add them after the existing `.sidebar-toggle` styles, before the Layout / main content section):
 
@@ -519,15 +519,15 @@ The sidebar (`crates/koji-web/src/components/sidebar.rs`) currently shows naviga
    Check if `--color-success` already exists in the CSS variables. If not, add `--color-success: #238636;` to the `:root` block.
 
 **Steps:**
-- [ ] Add version signals and update check logic to `crates/koji-web/src/components/sidebar.rs`
+- [ ] Add version signals and update check logic to `crates/tama-web/src/components/sidebar.rs`
 - [ ] Add two-step update flow: POST trigger + EventSource SSE stream (matching `job_log_panel.rs` pattern)
 - [ ] Add version badge, update button, confirmation dialog, and progress overlay to the sidebar view
 - [ ] Add reconnection logic using polling after update
-- [ ] Add CSS styles to `crates/koji-web/style.css`
-- [ ] Run `cargo check --package koji-web` (this checks the WASM/CSR target)
+- [ ] Add CSS styles to `crates/tama-web/style.css`
+- [ ] Run `cargo check --package tama-web` (this checks the WASM/CSR target)
   - Did it succeed? If not, fix compilation errors and re-run.
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo clippy --package koji-web -- -D warnings`
+- [ ] Run `cargo clippy --package tama-web -- -D warnings`
   - Did it succeed? If not, fix lint warnings and re-run.
 - [ ] Commit with message: `feat: add version badge and update button to web UI sidebar`
 
@@ -541,28 +541,28 @@ The sidebar (`crates/koji-web/src/components/sidebar.rs`) currently shows naviga
 - [ ] During update, a progress overlay with spinner shows real-time log messages
 - [ ] After server restarts, the UI polls and reconnects
 - [ ] Styles match the existing dark theme
-- [ ] `cargo check --package koji-web` passes (CSR)
-- [ ] `cargo check --package koji-web --features ssr` passes (SSR)
+- [ ] `cargo check --package tama-web` passes (CSR)
+- [ ] `cargo check --package tama-web --features ssr` passes (SSR)
 
 ---
 
-## Task 5: Add `koji self-update` CLI Command
+## Task 5: Add `tama self-update` CLI Command
 
 **Context:**
-Users should be able to update Koji from the command line as well. This follows the existing CLI pattern: add a variant to the `Commands` enum in `cli.rs`, create a handler in `handlers/self_update.rs`, and wire it up in the match statement in `lib.rs`. The CLI command supports `--check` (only check, don't install) and `--force` (skip version comparison).
+Users should be able to update Tama from the command line as well. This follows the existing CLI pattern: add a variant to the `Commands` enum in `cli.rs`, create a handler in `handlers/self_update.rs`, and wire it up in the match statement in `lib.rs`. The CLI command supports `--check` (only check, don't install) and `--force` (skip version comparison).
 
 **Files:**
-- Modify: `crates/koji-cli/src/cli.rs` (add `SelfUpdate` command variant)
-- Create: `crates/koji-cli/src/handlers/self_update.rs` (command handler)
-- Modify: `crates/koji-cli/src/handlers/mod.rs` (add `pub mod self_update;`)
-- Modify: `crates/koji-cli/src/lib.rs` (add match arm for `SelfUpdate`)
+- Modify: `crates/tama-cli/src/cli.rs` (add `SelfUpdate` command variant)
+- Create: `crates/tama-cli/src/handlers/self_update.rs` (command handler)
+- Modify: `crates/tama-cli/src/handlers/mod.rs` (add `pub mod self_update;`)
+- Modify: `crates/tama-cli/src/lib.rs` (add match arm for `SelfUpdate`)
 
 **What to implement:**
 
-1. **Modify `crates/koji-cli/src/cli.rs`:**
+1. **Modify `crates/tama-cli/src/cli.rs`:**
    Add a new variant to the `Commands` enum, after the `Logs` variant and before the `Web` variant:
    ```rust
-   /// Update koji to the latest version from GitHub
+   /// Update tama to the latest version from GitHub
    SelfUpdate {
        /// Only check for updates, don't install
        #[arg(long)]
@@ -573,28 +573,28 @@ Users should be able to update Koji from the command line as well. This follows 
    },
    ```
 
-2. **Create `crates/koji-cli/src/handlers/self_update.rs`:**
+2. **Create `crates/tama-cli/src/handlers/self_update.rs`:**
    ```rust
    pub async fn cmd_self_update(check: bool, force: bool) -> Result<()>
    ```
    Implementation:
-   - Get the current version: `let current_version = env!("CARGO_PKG_VERSION");` (this is koji-cli's version, which is the binary being updated — correct!)
-   - Call `koji_core::self_update::check_for_update(current_version).await?`
+   - Get the current version: `let current_version = env!("CARGO_PKG_VERSION");` (this is tama-cli's version, which is the binary being updated — correct!)
+   - Call `tama_core::self_update::check_for_update(current_version).await?`
    - Print: `"Current version: v{current_version}"`
    - Print: `"Latest version:  v{latest_version}"`
    - If no update available and not `force`: print "Already up to date!" and return Ok
    - If `check`: return Ok (just print info)
    - Print: `"Updating to v{latest_version}..."`
-   - Call `koji_core::self_update::perform_update(current_version, |msg| println!("  {}", msg)).await?`
+   - Call `tama_core::self_update::perform_update(current_version, |msg| println!("  {}", msg)).await?`
    - Print: `"Successfully updated from v{old} to v{new}!"`
-   - Print: `"Please restart koji to use the new version."`
+   - Print: `"Please restart tama to use the new version."`
    - Note: Do NOT auto-restart for CLI mode — the user invoked a one-shot command, not a server. Just tell them to restart.
    - Return Ok
 
-3. **Modify `crates/koji-cli/src/handlers/mod.rs`:**
+3. **Modify `crates/tama-cli/src/handlers/mod.rs`:**
    Add `pub mod self_update;` after `pub mod status;`
 
-4. **Modify `crates/koji-cli/src/lib.rs`:**
+4. **Modify `crates/tama-cli/src/lib.rs`:**
    Add the match arm in the `match args.command` block, after the `Commands::Logs` arm and before the `Commands::Web` arm:
    ```rust
    Commands::SelfUpdate { check, force } => {
@@ -603,23 +603,23 @@ Users should be able to update Koji from the command line as well. This follows 
    ```
 
 **Steps:**
-- [ ] Add `SelfUpdate` variant to `Commands` enum in `crates/koji-cli/src/cli.rs`
-- [ ] Create `crates/koji-cli/src/handlers/self_update.rs` with `cmd_self_update` function
-- [ ] Add `pub mod self_update;` to `crates/koji-cli/src/handlers/mod.rs`
-- [ ] Add `Commands::SelfUpdate` match arm to `crates/koji-cli/src/lib.rs`
-- [ ] Run `cargo check --package koji`
+- [ ] Add `SelfUpdate` variant to `Commands` enum in `crates/tama-cli/src/cli.rs`
+- [ ] Create `crates/tama-cli/src/handlers/self_update.rs` with `cmd_self_update` function
+- [ ] Add `pub mod self_update;` to `crates/tama-cli/src/handlers/mod.rs`
+- [ ] Add `Commands::SelfUpdate` match arm to `crates/tama-cli/src/lib.rs`
+- [ ] Run `cargo check --package tama`
   - Did it succeed? If not, fix compilation errors and re-run.
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo clippy --package koji -- -D warnings`
+- [ ] Run `cargo clippy --package tama -- -D warnings`
   - Did it succeed? If not, fix lint warnings and re-run.
 - [ ] Run `cargo test --workspace`
   - Did all tests pass? If not, fix and re-run.
-- [ ] Commit with message: `feat: add koji self-update CLI command`
+- [ ] Commit with message: `feat: add tama self-update CLI command`
 
 **Acceptance criteria:**
-- [ ] `koji self-update --check` compiles and would print version info
-- [ ] `koji self-update` compiles and would download + replace binary
-- [ ] `koji self-update --force` compiles and would skip version check
+- [ ] `tama self-update --check` compiles and would print version info
+- [ ] `tama self-update` compiles and would download + replace binary
+- [ ] `tama self-update --force` compiles and would skip version check
 - [ ] `cargo check --workspace` passes
 - [ ] `cargo clippy --workspace -- -D warnings` passes
 
@@ -628,7 +628,7 @@ Users should be able to update Koji from the command line as well. This follows 
 ## Task 6: Update CI Release Workflow for Target-Triple Archives
 
 **Context:**
-The `self_update` crate expects release assets to contain the target triple in their filename (e.g., `koji-x86_64-unknown-linux-gnu.tar.gz`). The current release workflow uploads flat-named files (`koji`, `koji.exe`). We need to add steps that create properly-named archives. Existing assets are kept for backward compatibility (manual download users, package managers).
+The `self_update` crate expects release assets to contain the target triple in their filename (e.g., `tama-x86_64-unknown-linux-gnu.tar.gz`). The current release workflow uploads flat-named files (`tama`, `tama.exe`). We need to add steps that create properly-named archives. Existing assets are kept for backward compatibility (manual download users, package managers).
 
 **Files:**
 - Modify: `.github/workflows/release.yml`
@@ -641,11 +641,11 @@ The `self_update` crate expects release assets to contain the target triple in t
    - name: Create self-update archive (Linux)
      run: |
        cd target/release
-       tar czf koji-x86_64-unknown-linux-gnu.tar.gz koji
+       tar czf tama-x86_64-unknown-linux-gnu.tar.gz tama
    ```
 
 2. **In the `build-linux` job**, update the "Upload artifacts" step to include the archive:
-   Add `target/release/koji-x86_64-unknown-linux-gnu.tar.gz` to the `path` list.
+   Add `target/release/tama-x86_64-unknown-linux-gnu.tar.gz` to the `path` list.
 
 3. **In the `build-windows` job**, after the "Build release" step and before "Install Inno Setup":
    Add a step to create a zip archive:
@@ -653,17 +653,17 @@ The `self_update` crate expects release assets to contain the target triple in t
    - name: Create self-update archive (Windows)
      shell: pwsh
      run: |
-       Compress-Archive -Path target/release/koji.exe -DestinationPath target/release/koji-x86_64-pc-windows-msvc.zip
+       Compress-Archive -Path target/release/tama.exe -DestinationPath target/release/tama-x86_64-pc-windows-msvc.zip
    ```
 
 4. **In the `build-windows` job**, update the "Upload artifacts" step to include the archive:
-   Add `target/release/koji-x86_64-pc-windows-msvc.zip` to the `path` list.
+   Add `target/release/tama-x86_64-pc-windows-msvc.zip` to the `path` list.
 
 5. **In the `release` job**, update the `files` list in the "Create Release" step:
    Add these two lines to the `files` section:
    ```yaml
-   linux/**/koji-x86_64-unknown-linux-gnu.tar.gz
-   windows/**/koji-x86_64-pc-windows-msvc.zip
+   linux/**/tama-x86_64-unknown-linux-gnu.tar.gz
+   windows/**/tama-x86_64-pc-windows-msvc.zip
    ```
 
 All existing file uploads remain unchanged for backward compatibility.
@@ -677,10 +677,10 @@ All existing file uploads remain unchanged for backward compatibility.
 - [ ] Commit with message: `ci: add target-triple archives to release workflow for self-update`
 
 **Acceptance criteria:**
-- [ ] Release workflow creates `koji-x86_64-unknown-linux-gnu.tar.gz` containing the `koji` binary
-- [ ] Release workflow creates `koji-x86_64-pc-windows-msvc.zip` containing `koji.exe`
+- [ ] Release workflow creates `tama-x86_64-unknown-linux-gnu.tar.gz` containing the `tama` binary
+- [ ] Release workflow creates `tama-x86_64-pc-windows-msvc.zip` containing `tama.exe`
 - [ ] Both archives are uploaded as release assets alongside existing files
-- [ ] Existing release assets (`koji`, `koji.exe`, `.deb`, `.rpm`, installer) are unchanged
+- [ ] Existing release assets (`tama`, `tama.exe`, `.deb`, `.rpm`, installer) are unchanged
 - [ ] YAML is syntactically valid
 
 ---

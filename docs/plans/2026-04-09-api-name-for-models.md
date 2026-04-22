@@ -2,7 +2,7 @@
 
 **Goal:** Use HuggingFace repo names (e.g. `bartowski/Qwen3-8B-GGUF`) as the model identifier in OpenAI-compatible API responses instead of internal config key slugs (e.g. `bartowski--qwen3-8b-gguf`).
 
-**Architecture:** Add an `api_name: Option<String>` field to `ModelConfig` (replacing `display_name`). OpenAI API endpoints use `api_name` (falling back to config key) for model `"id"` in responses, and resolve incoming model names by matching against `api_name` (primary) then `model` field (fallback). The Koji management API continues using config key slugs unchanged.
+**Architecture:** Add an `api_name: Option<String>` field to `ModelConfig` (replacing `display_name`). OpenAI API endpoints use `api_name` (falling back to config key) for model `"id"` in responses, and resolve incoming model names by matching against `api_name` (primary) then `model` field (fallback). The Tama management API continues using config key slugs unchanged.
 
 **Tech Stack:** Rust, serde, TOML config, axum handlers
 
@@ -13,26 +13,26 @@
 **Context:**
 The `ModelConfig` struct has a field `display_name: Option<String>` that is currently unused (always set to `None` during pull, set from card migration but never read for API purposes). We are replacing it with `api_name: Option<String>` which will serve as the user-facing model identifier in OpenAI API responses. This is a pure rename — no behavioral changes in this task.
 
-The field `display_name` appears in ~90 locations across the codebase, but many of those are for BACKEND display names (in `koji-web/src/api/backends.rs`, `components/backend_card.rs`, etc.) and must NOT be changed. Only MODEL-related `display_name` references should be renamed.
+The field `display_name` appears in ~90 locations across the codebase, but many of those are for BACKEND display names (in `tama-web/src/api/backends.rs`, `components/backend_card.rs`, etc.) and must NOT be changed. Only MODEL-related `display_name` references should be renamed.
 
 **Files:**
-- Modify: `crates/koji-core/src/config/types.rs` — rename field definition
-- Modify: `crates/koji-core/src/config/migrate.rs` — update migration reference
-- Modify: `crates/koji-core/src/config/resolve.rs` — update test literals
-- Modify: `crates/koji-core/src/config/loader.rs` — update test literals
-- Modify: `crates/koji-core/src/proxy/koji_handlers.rs` — update pull setup
-- Modify: `crates/koji-core/src/proxy/mod.rs` — update ModelConfig literals
-- Modify: `crates/koji-core/src/proxy/status.rs` — update test helper
-- Modify: `crates/koji-core/src/proxy/server/mod.rs` — update ModelConfig literals
-- Modify: `crates/koji-cli/src/commands/model.rs` — update CLI model command
-- Modify: `crates/koji-cli/src/handlers/server/add.rs` — update server add handler
-- Modify: `crates/koji-cli/tests/tests.rs` — update CLI test
-- Modify: `crates/koji-web/src/pages/model_editor.rs` — update form fields, signals, JSON
-- Modify: `crates/koji-web/src/pages/config_editor.rs` — update config editor struct
-- Modify: `crates/koji-web/src/api.rs` — update API types
-- Modify: `crates/koji-web/src/types/config.rs` — update web config type
-- Modify: `crates/koji-web/tests/server_test.rs` — update test fixtures
-- Modify: `crates/koji-web/tests/config_structured_test.rs` — update TOML fixture
+- Modify: `crates/tama-core/src/config/types.rs` — rename field definition
+- Modify: `crates/tama-core/src/config/migrate.rs` — update migration reference
+- Modify: `crates/tama-core/src/config/resolve.rs` — update test literals
+- Modify: `crates/tama-core/src/config/loader.rs` — update test literals
+- Modify: `crates/tama-core/src/proxy/tama_handlers.rs` — update pull setup
+- Modify: `crates/tama-core/src/proxy/mod.rs` — update ModelConfig literals
+- Modify: `crates/tama-core/src/proxy/status.rs` — update test helper
+- Modify: `crates/tama-core/src/proxy/server/mod.rs` — update ModelConfig literals
+- Modify: `crates/tama-cli/src/commands/model.rs` — update CLI model command
+- Modify: `crates/tama-cli/src/handlers/server/add.rs` — update server add handler
+- Modify: `crates/tama-cli/tests/tests.rs` — update CLI test
+- Modify: `crates/tama-web/src/pages/model_editor.rs` — update form fields, signals, JSON
+- Modify: `crates/tama-web/src/pages/config_editor.rs` — update config editor struct
+- Modify: `crates/tama-web/src/api.rs` — update API types
+- Modify: `crates/tama-web/src/types/config.rs` — update web config type
+- Modify: `crates/tama-web/tests/server_test.rs` — update test fixtures
+- Modify: `crates/tama-web/tests/config_structured_test.rs` — update TOML fixture
 
 **What to implement:**
 Rename the `display_name` field in `ModelConfig` to `api_name`. The field keeps the same type `Option<String>`, the same serde attributes (add `#[serde(alias = "display_name")]` for backwards compat with existing TOML files that may have `display_name` set, and keep `#[serde(skip_serializing_if = "Option::is_none")]`).
@@ -42,7 +42,7 @@ Every `ModelConfig` literal across the codebase that sets `display_name: None` o
 DO NOT change `display_name` references that belong to backend types (e.g. `BackendConfig`, `BackendRegistryEntry`, backend card components). Those are a different field on a different struct.
 
 **Steps:**
-- [ ] In `crates/koji-core/src/config/types.rs`, rename the `display_name` field to `api_name` on the `ModelConfig` struct. Add `#[serde(alias = "display_name")]` above it for backwards compatibility. Keep `#[serde(skip_serializing_if = "Option::is_none")]`.
+- [ ] In `crates/tama-core/src/config/types.rs`, rename the `display_name` field to `api_name` on the `ModelConfig` struct. Add `#[serde(alias = "display_name")]` above it for backwards compatibility. Keep `#[serde(skip_serializing_if = "Option::is_none")]`.
 - [ ] Run `cargo build --workspace 2>&1 | head -50` to see ALL compilation errors from the rename. Every error points to a location that needs updating.
 - [ ] Fix every compilation error by renaming `display_name` to `api_name` in each location. Use the compiler errors as your guide. Remember: do NOT change backend-related `display_name` references.
 - [ ] Run `cargo build --workspace` — it must compile clean.
@@ -68,12 +68,12 @@ Currently, when a model is pulled, `display_name` (now `api_name`) is set to `No
 This task makes `api_name` always populated for models that have a `model` field, ensuring the OpenAI API layer (Task 3) has a name to use.
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy/koji_handlers.rs` — set `api_name` during pull
-- Modify: `crates/koji-core/src/config/migrate.rs` — update migration to derive `api_name` from `model` field
+- Modify: `crates/tama-core/src/proxy/tama_handlers.rs` — set `api_name` during pull
+- Modify: `crates/tama-core/src/config/migrate.rs` — update migration to derive `api_name` from `model` field
 
 **What to implement:**
 
-1. **Pull setup** (`_setup_model_after_pull_with_config()` in `koji_handlers.rs`, around line 1163): Change `api_name: None` to `api_name: Some(repo_id.to_string())`. The `repo_id` variable is already in scope — it's the full HF repo ID like `"bartowski/Qwen3-8B-GGUF"`.
+1. **Pull setup** (`_setup_model_after_pull_with_config()` in `tama_handlers.rs`, around line 1163): Change `api_name: None` to `api_name: Some(repo_id.to_string())`. The `repo_id` variable is already in scope — it's the full HF repo ID like `"bartowski/Qwen3-8B-GGUF"`.
 
 2. **Migration** (`migrate.rs`): The current code sets `display_name` (now `api_name`) from `card.model.name` inside a `if let Some(card) = card_data.get(&filename)` block (around lines 88-92). This only runs for models that have card files. We need the `api_name` derivation to run for **ALL** models, not just those with cards.
 
@@ -93,11 +93,11 @@ This task makes `api_name` always populated for models that have a `model` field
    **Note:** This is a deliberate semantic shift. Previously, `display_name` was set from `card.model.name` (a short human-friendly name like `"Qwen3-8B-GGUF"`). Now `api_name` is set from the `model` field (the full HF repo ID like `"bartowski/Qwen3-8B-GGUF"`). This is the desired behavior — users want HF repo names as API identifiers.
 
 **Steps:**
-- [ ] Write a unit test in `crates/koji-core/src/config/migrate.rs` (in the existing `#[cfg(test)]` module). Since `migrate_cards_to_unified_config()` requires filesystem fixtures, write a focused test: create a `Config` with a model entry having `api_name: None` and `model: Some("org/model-name".to_string())`, set up a minimal temp dir with an empty `configs/` directory and a `config.toml`, call the migration function, and assert `api_name == Some("org/model-name".to_string())`. Look at existing migration tests in the file to follow the same fixture setup patterns.
-- [ ] Run `cargo test --package koji-core -- config::migrate::tests` — verify the new test FAILS (since migration doesn't set `api_name` from `model` yet).
-- [ ] Update `_setup_model_after_pull_with_config()` in `koji_handlers.rs`: change `api_name: None` to `api_name: Some(repo_id.to_string())`.
+- [ ] Write a unit test in `crates/tama-core/src/config/migrate.rs` (in the existing `#[cfg(test)]` module). Since `migrate_cards_to_unified_config()` requires filesystem fixtures, write a focused test: create a `Config` with a model entry having `api_name: None` and `model: Some("org/model-name".to_string())`, set up a minimal temp dir with an empty `configs/` directory and a `config.toml`, call the migration function, and assert `api_name == Some("org/model-name".to_string())`. Look at existing migration tests in the file to follow the same fixture setup patterns.
+- [ ] Run `cargo test --package tama-core -- config::migrate::tests` — verify the new test FAILS (since migration doesn't set `api_name` from `model` yet).
+- [ ] Update `_setup_model_after_pull_with_config()` in `tama_handlers.rs`: change `api_name: None` to `api_name: Some(repo_id.to_string())`.
 - [ ] Update the migration logic in `migrate.rs` (around lines 89-91): replace the `card.model.name` based assignment with the `model` field based assignment described above.
-- [ ] Run `cargo test --package koji-core` — all tests must pass including the new one.
+- [ ] Run `cargo test --package tama-core` — all tests must pass including the new one.
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo clippy --workspace -- -D warnings`
 - [ ] Commit with message: `feat: set api_name from HF repo ID during pull and migration`
@@ -115,10 +115,10 @@ This task makes `api_name` always populated for models that have a `model` field
 **Context:**
 The OpenAI-compatible API endpoints (`GET /v1/models` and `GET /v1/models/:model_id`) currently return the internal config key slug as the model `"id"`. After this task, they will return `api_name` (falling back to config key if `api_name` is `None`).
 
-The Koji management API (`/koji/models/*`) is NOT changed — it continues using config key slugs. Only the OpenAI-compatible endpoints in `proxy/handlers.rs` are modified.
+The Tama management API (`/tama/models/*`) is NOT changed — it continues using config key slugs. Only the OpenAI-compatible endpoints in `proxy/handlers.rs` are modified.
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy/handlers.rs` — update `handle_list_models` and `handle_get_model`
+- Modify: `crates/tama-core/src/proxy/handlers.rs` — update `handle_list_models` and `handle_get_model`
 
 **What to implement:**
 
@@ -137,7 +137,7 @@ The Koji management API (`/koji/models/*`) is NOT changed — it continues using
    - **Fallback config loop**: Update the matching condition to ALSO check `server_cfg.api_name.as_deref() == Some(&*model_id)`. When returning the JSON, use `server_cfg.api_name.as_deref().unwrap_or(config_name)` as the `"id"`. **IMPORTANT:** When a match is found in the config loop, check runtime state via `loaded_models.get(config_name)` (the config key slug) to determine accurate `"ready"` status. Use `ms.is_ready()` if state is found, `false` otherwise. This ensures that a loaded model queried by `api_name` correctly reports `"ready": true`.
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/proxy/handlers.rs` in full to understand current implementation.
+- [ ] Read `crates/tama-core/src/proxy/handlers.rs` in full to understand current implementation.
 - [ ] In `handle_list_models`, change the `"id"` value from `config_name` to `server_cfg.api_name.as_deref().unwrap_or(config_name)` (or equivalent — the exact variable names may differ; use whatever is in scope).
 - [ ] In `handle_get_model`, restructure:
   - Move lock acquisition to the top: `let config = state.config.read().await;` and `let loaded_models = state.models.read().await;`. Replace the `state.get_model_state()` call with `loaded_models.get(&model_id)`.
@@ -165,8 +165,8 @@ When a user sends a chat completion request with `"model": "bartowski/Qwen3-8B-G
 This is the critical change that makes the whole feature work end-to-end: users can now use the HF repo name in their API requests.
 
 **Files:**
-- Modify: `crates/koji-core/src/config/resolve.rs` — update `resolve_servers_for_model()` and `resolve_server()` to match on `api_name`
-- Test: `crates/koji-core/src/config/resolve.rs` — add tests for `api_name` matching
+- Modify: `crates/tama-core/src/config/resolve.rs` — update `resolve_servers_for_model()` and `resolve_server()` to match on `api_name`
+- Test: `crates/tama-core/src/config/resolve.rs` — add tests for `api_name` matching
 
 **What to implement:**
 
@@ -200,12 +200,12 @@ This is the critical change that makes the whole feature work end-to-end: users 
    - Test backward compat: model with `api_name: None` is still found by config key or `model` field.
 
 **Steps:**
-- [ ] Read the existing tests in `crates/koji-core/src/config/resolve.rs` to understand the test helpers and patterns used.
+- [ ] Read the existing tests in `crates/tama-core/src/config/resolve.rs` to understand the test helpers and patterns used.
 - [ ] Write the new tests described above. They should FAIL because `api_name` is not yet checked in resolution.
-- [ ] Run `cargo test --package koji-core -- config::resolve::tests` — verify new tests fail.
+- [ ] Run `cargo test --package tama-core -- config::resolve::tests` — verify new tests fail.
 - [ ] Update `resolve_servers_for_model()` to add `api_name` matching as described above.
 - [ ] Update `resolve_server()` to add `api_name` matching in the fallback search as described above.
-- [ ] Run `cargo test --package koji-core` — all tests must pass.
+- [ ] Run `cargo test --package tama-core` — all tests must pass.
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo clippy --workspace -- -D warnings`
 - [ ] Commit with message: `feat: resolve models by api_name in server resolution`
@@ -222,29 +222,29 @@ This is the critical change that makes the whole feature work end-to-end: users 
 ### Task 5: Update `status.rs` to include `api_name` in status responses
 
 **Context:**
-The `collect_model_statuses()` and `build_status_response()` functions in `status.rs` build JSON responses for the status endpoint. Currently they use the config key as the model `id`. We need to include `api_name` in these responses so that clients (including the web UI) can show the friendly name. The status response is consumed by both the Koji management API and the web dashboard.
+The `collect_model_statuses()` and `build_status_response()` functions in `status.rs` build JSON responses for the status endpoint. Currently they use the config key as the model `id`. We need to include `api_name` in these responses so that clients (including the web UI) can show the friendly name. The status response is consumed by both the Tama management API and the web dashboard.
 
 **Files:**
-- Modify: `crates/koji-core/src/gpu.rs` — add `api_name` field to `ModelStatus` struct (defined at line 82)
-- Modify: `crates/koji-core/src/proxy/status.rs` — populate `api_name` in status output
-- Modify: `crates/koji-web/src/pages/dashboard.rs` — add `api_name` to mirror `ModelStatus` struct (line 38)
+- Modify: `crates/tama-core/src/gpu.rs` — add `api_name` field to `ModelStatus` struct (defined at line 82)
+- Modify: `crates/tama-core/src/proxy/status.rs` — populate `api_name` in status output
+- Modify: `crates/tama-web/src/pages/dashboard.rs` — add `api_name` to mirror `ModelStatus` struct (line 38)
 
 **What to implement:**
 
 1. **`ModelStatus` struct** (`gpu.rs`, line 82): Add `pub api_name: Option<String>` field. The struct currently has `id`, `backend`, `loaded`. The new field should be added after `id`.
 
-2. **Dashboard mirror** (`crates/koji-web/src/pages/dashboard.rs`, line 38): Add `api_name: Option<String>` field to the mirror `ModelStatus` struct. This struct must match the server-side struct exactly (the comment at line 35 says so). Add `#[serde(default)]` on the field for forward compatibility if the server hasn't been updated yet.
+2. **Dashboard mirror** (`crates/tama-web/src/pages/dashboard.rs`, line 38): Add `api_name: Option<String>` field to the mirror `ModelStatus` struct. This struct must match the server-side struct exactly (the comment at line 35 says so). Add `#[serde(default)]` on the field for forward compatibility if the server hasn't been updated yet.
 
 3. **`collect_model_statuses()`** (status.rs, lines 13-38): Set `api_name: server_cfg.api_name.clone()` when building each `ModelStatus`.
 
 4. **`build_status_response()`** (lines 45-164): When building each model's JSON object, add an `"api_name"` key with the value from `server_cfg.api_name`. Note: the status JSON already includes `"model"` (the HF repo ID from `model_config.model`). The `api_name` will often have the same value, but keeping both is correct because: (a) `api_name` is user-customizable and may differ, (b) `model` is the canonical HF source, (c) `api_name` is what the OpenAI API uses as the `"id"`.
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/gpu.rs` (around line 82) to see the `ModelStatus` struct.
+- [ ] Read `crates/tama-core/src/gpu.rs` (around line 82) to see the `ModelStatus` struct.
 - [ ] Add `pub api_name: Option<String>` field to `ModelStatus` in `gpu.rs`.
-- [ ] Read `crates/koji-web/src/pages/dashboard.rs` (around line 38) to see the mirror `ModelStatus` struct.
+- [ ] Read `crates/tama-web/src/pages/dashboard.rs` (around line 38) to see the mirror `ModelStatus` struct.
 - [ ] Add `#[serde(default)] api_name: Option<String>` to the dashboard mirror `ModelStatus` struct.
-- [ ] Read `crates/koji-core/src/proxy/status.rs` to find where `ModelStatus` is constructed.
+- [ ] Read `crates/tama-core/src/proxy/status.rs` to find where `ModelStatus` is constructed.
 - [ ] Update `collect_model_statuses()` to populate `api_name` from `server_cfg.api_name.clone()`.
 - [ ] Update `build_status_response()` to include `"api_name"` in the JSON output for each model.
 - [ ] Run `cargo build --workspace` — must compile.
@@ -263,17 +263,17 @@ The `collect_model_statuses()` and `build_status_response()` functions in `statu
 ### Task 6: Update web UI to display and edit `api_name`
 
 **Context:**
-The web UI (Leptos frontend in `crates/koji-web/`) has a model editor page and a config editor page that previously showed `display_name`. These were updated to `api_name` in Task 1 (the rename). Now we need to ensure the UI meaningfully uses `api_name`:
+The web UI (Leptos frontend in `crates/tama-web/`) has a model editor page and a config editor page that previously showed `display_name`. These were updated to `api_name` in Task 1 (the rename). Now we need to ensure the UI meaningfully uses `api_name`:
 - The model editor should show `api_name` as the model's display identifier (instead of the slug)
 - The config editor should allow editing `api_name`
 - The models list/dashboard should show `api_name` where available
 
-Since this is a Leptos (Rust WASM) frontend, changes are in `.rs` files under `crates/koji-web/src/`.
+Since this is a Leptos (Rust WASM) frontend, changes are in `.rs` files under `crates/tama-web/src/`.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/model_editor.rs` — update to use `api_name` as primary display name
-- Modify: `crates/koji-web/src/pages/models.rs` (if it exists) — show `api_name` in model list
-- Modify: `crates/koji-web/src/pages/dashboard.rs` (if applicable) — show `api_name` in dashboard model cards
+- Modify: `crates/tama-web/src/pages/model_editor.rs` — update to use `api_name` as primary display name
+- Modify: `crates/tama-web/src/pages/models.rs` (if it exists) — show `api_name` in model list
+- Modify: `crates/tama-web/src/pages/dashboard.rs` (if applicable) — show `api_name` in dashboard model cards
 
 **What to implement:**
 
@@ -284,13 +284,13 @@ Since this is a Leptos (Rust WASM) frontend, changes are in `.rs` files under `c
 3. **Dashboard**: If the dashboard shows loaded model names, use `api_name` from the status response (added in Task 5).
 
 **Steps:**
-- [ ] Read `crates/koji-web/src/pages/model_editor.rs` to understand the current form fields and how `api_name` is used.
-- [ ] Read `crates/koji-web/src/pages/models.rs` (or equivalent models list page) to see how model names are displayed.
-- [ ] Read `crates/koji-web/src/pages/dashboard.rs` to see if it displays model names.
+- [ ] Read `crates/tama-web/src/pages/model_editor.rs` to understand the current form fields and how `api_name` is used.
+- [ ] Read `crates/tama-web/src/pages/models.rs` (or equivalent models list page) to see how model names are displayed.
+- [ ] Read `crates/tama-web/src/pages/dashboard.rs` to see if it displays model names.
 - [ ] Update model editor to label the field "API Name" and ensure it's saved correctly.
 - [ ] Update models list to prefer `api_name` over slug for display.
 - [ ] Update dashboard to show `api_name` from status data where available.
-- [ ] Run `cargo build --workspace` — must compile (note: koji-web may need wasm target or specific build command; check the Makefile or build scripts).
+- [ ] Run `cargo build --workspace` — must compile (note: tama-web may need wasm target or specific build command; check the Makefile or build scripts).
 - [ ] Run `cargo test --workspace` — all tests must pass.
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo clippy --workspace -- -D warnings`
@@ -313,8 +313,8 @@ When a chat completion request is forwarded to the backend (e.g. llama.cpp), the
 The `forward_request()` function in `proxy/forward.rs` handles both streaming (SSE) and non-streaming responses. It currently passes the response body through unchanged via `Body::from_stream(response.bytes_stream())`.
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy/forward.rs` — add model name rewriting
-- Modify: `crates/koji-core/src/proxy/handlers.rs` — pass model name to `forward_request`
+- Modify: `crates/tama-core/src/proxy/forward.rs` — add model name rewriting
+- Modify: `crates/tama-core/src/proxy/handlers.rs` — pass model name to `forward_request`
 
 **What to implement:**
 
@@ -330,8 +330,8 @@ The `forward_request()` function in `proxy/forward.rs` handles both streaming (S
 Use a `futures::stream::StreamExt::map()` (or similar) to transform each chunk. The response from reqwest is a `bytes::Bytes` stream. Buffer SSE lines, detect `data: ` prefixed lines, parse/modify/re-emit. Non-`data:` lines and `data: [DONE]` pass through unchanged.
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/proxy/forward.rs` in full to understand the current response handling.
-- [ ] Read `crates/koji-core/src/proxy/handlers.rs` lines 30-100 and 103-173 to see how `forward_request` is called.
+- [ ] Read `crates/tama-core/src/proxy/forward.rs` in full to understand the current response handling.
+- [ ] Read `crates/tama-core/src/proxy/handlers.rs` lines 30-100 and 103-173 to see how `forward_request` is called.
 - [ ] Add a `model_name: &str` parameter to `forward_request()`.
 - [ ] For non-streaming responses (check Content-Type header for `application/json`): buffer the response body, parse as `serde_json::Value`, set `response["model"] = serde_json::Value::String(model_name.to_string())`, re-serialize to bytes, and return.
 - [ ] For streaming responses (Content-Type `text/event-stream`): create a stream transformer that processes each chunk, finds `data: ` lines, parses the JSON, replaces `"model"`, and re-emits. Use `futures::stream` utilities. Handle edge cases: chunks may split across SSE boundaries, so buffer partial lines.

@@ -3,11 +3,11 @@
 **Date:** 2026-04-07  
 **Author:** Daniel Cherubini  
 **Status:** ✅ COMPLETED
-**PR:** https://github.com/danielcherubini/koji/pull/41
+**PR:** https://github.com/danielcherubini/tama/pull/41
 
 ## Overview
 
-This document specifies the redesign of the config editor page in the Koji web UI. The current implementation uses a raw TOML text editor, which is not user-friendly for non-technical users. The new design will provide a structured, form-based interface with grouped settings.
+This document specifies the redesign of the config editor page in the Tama web UI. The current implementation uses a raw TOML text editor, which is not user-friendly for non-technical users. The new design will provide a structured, form-based interface with grouped settings.
 
 ## Goals
 
@@ -30,7 +30,7 @@ This document specifies the redesign of the config editor page in the Koji web U
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Koji Web UI                          [User Menu]           │
+│  Tama Web UI                          [User Menu]           │
 ├──────────────┬──────────────────────────────────────────────┤
 │              │                                               │
 │  Navigation  │              Content Area                     │
@@ -435,11 +435,11 @@ This document specifies the redesign of the config editor page in the Koji web U
 - **UI:** Each field has an "Enabled" toggle; only enabled fields are serialized
 
 ### 3. Supervisor Field Audit (BLOCKER - Must Resolve Before Implementation)
-- **Issue:** `health_check_timeout_ms = 30000` and `health_check_retries = 3` exist in `config/koji.toml` (lines 19-20) but are NOT in `Supervisor` struct in `koji-core/src/config/types.rs`
+- **Issue:** `health_check_timeout_ms = 30000` and `health_check_retries = 3` exist in `config/tama.toml` (lines 19-20) but are NOT in `Supervisor` struct in `tama-core/src/config/types.rs`
 - **Risk:** These fields will be **silently dropped** on first save through the new UI, causing data loss in existing user configs
 - **Action Required (Choose One):**
-  - **Option A (Preferred):** Add `health_check_timeout_ms: u64` and `health_check_retries: u32` to `Supervisor` struct in `koji-core/src/config/types.rs`
-  - **Option B:** Remove these two lines from `config/koji.toml` example config to avoid confusion (but note: existing user configs with these fields will still lose them on save)
+  - **Option A (Preferred):** Add `health_check_timeout_ms: u64` and `health_check_retries: u32` to `Supervisor` struct in `tama-core/src/config/types.rs`
+  - **Option B:** Remove these two lines from `config/tama.toml` example config to avoid confusion (but note: existing user configs with these fields will still lose them on save)
 - **Also:** `restart_policy` has no usages outside `types.rs` - either wire it up to actual supervisor logic OR remove from UI and add help text "Not currently used by supervisor"
 - **This is a BLOCKER:** Do not ship the config page until C3 is resolved
 

@@ -2,30 +2,30 @@
 
 **Goal:** Add backup and restore functionality that archives config + database (no model files), and restores by re-downloading models and reinstalling backends from remote sources.
 
-**Architecture:** A new `backup` module in `koji-core` handles archive creation/extraction, manifest validation, and config/DB merging. The CLI exposes `koji backup` and `koji restore` commands. The web UI adds a "Backup & Restore" section tab in the Config page with download/upload/preview/progress UI.
+**Architecture:** A new `backup` module in `tama-core` handles archive creation/extraction, manifest validation, and config/DB merging. The CLI exposes `tama backup` and `tama restore` commands. The web UI adds a "Backup & Restore" section tab in the Config page with download/upload/preview/progress UI.
 
-**Tech Stack:** `tar` + `flate2` + `sha2` crates (already in koji-core deps) for archive and integrity; `inquire` (already in koji-cli deps) for CLI interactive model selection; Leptos + Axum SSE for web UI (matching existing patterns from backend install and self-update flows).
+**Tech Stack:** `tar` + `flate2` + `sha2` crates (already in tama-core deps) for archive and integrity; `inquire` (already in tama-cli deps) for CLI interactive model selection; Leptos + Axum SSE for web UI (matching existing patterns from backend install and self-update flows).
 
 ---
 
 ### Task 1: Core backup module — manifest types, archive creation/extraction
 
 **Context:**
-This is the foundation. All other tasks depend on having working archive create/extract functions and a well-defined manifest format. The backup archive is a `.tar.gz` containing `manifest.json`, `config.toml`, `configs/*.toml`, and `koji.db`. The manifest provides metadata for integrity checking and preview (so restore can show what's in the backup without extracting everything).
+This is the foundation. All other tasks depend on having working archive create/extract functions and a well-defined manifest format. The backup archive is a `.tar.gz` containing `manifest.json`, `config.toml`, `configs/*.toml`, and `tama.db`. The manifest provides metadata for integrity checking and preview (so restore can show what's in the backup without extracting everything).
 
 **SHA-256 contract:** The SHA-256 in the manifest covers all archive entries *except* `manifest.json` itself. This avoids the chicken-and-egg problem. On creation: stream config files + DB into both a hasher and the tar.gz, compute SHA-256, then write a second tar.gz with `manifest.json` first (containing the hash) followed by all other entries. On extraction: read all entries except `manifest.json` into a hasher, compare against the manifest's `sha256` field.
 
 **Files:**
-- Create: `crates/koji-core/src/backup/mod.rs`
-- Create: `crates/koji-core/src/backup/manifest.rs`
-- Create: `crates/koji-core/src/backup/archive.rs`
-- Modify: `crates/koji-core/src/lib.rs` (add `pub mod backup;`)
-- Modify: `crates/koji-core/src/db/mod.rs` (add `backup_db` function)
+- Create: `crates/tama-core/src/backup/mod.rs`
+- Create: `crates/tama-core/src/backup/manifest.rs`
+- Create: `crates/tama-core/src/backup/archive.rs`
+- Modify: `crates/tama-core/src/lib.rs` (add `pub mod backup;`)
+- Modify: `crates/tama-core/src/db/mod.rs` (add `backup_db` function)
 
 **What to implement:**
 
 1. **Manifest types** (`manifest.rs`):
-   - `BackupManifest` struct with fields: `version: u32`, `created_at: String` (ISO 8601), `koji_version: String`, `sha256: String`, `models: Vec<BackupModelEntry>`, `backends: Vec<BackendEntry>`
+   - `BackupManifest` struct with fields: `version: u32`, `created_at: String` (ISO 8601), `tama_version: String`, `sha256: String`, `models: Vec<BackupModelEntry>`, `backends: Vec<BackendEntry>`
    - `BackupModelEntry` with: `repo_id: String`, `quants: Vec<String>`, `total_size_bytes: i64`
    - `BackendEntry` with: `name: String`, `version: String`, `backend_type: String`, `source: String`
    - All derive `Debug, Clone, Serialize, Deserialize`
@@ -34,8 +34,8 @@ This is the foundation. All other tasks depend on having working archive create/
 2. **Archive creation** (`archive.rs`):
    - `create_backup(config_dir: &Path, output_path: &Path) -> Result<BackupManifest>` — builds the tar.gz archive
    - **Two-pass streaming approach** (avoids holding entire archive in memory):
-     - **Pass 1 (hash only):** Stream `config.toml`, `configs/*.toml`, and `koji.db` (via `VACUUM INTO`) through a `sha2::Sha256` hasher. Do NOT write to disk yet. Compute the SHA-256 hash.
-     - **Pass 2 (write archive):** Create the output `.tar.gz`. Write `manifest.json` as the first entry (containing the SHA-256 from pass 1). Then write `config.toml`, `configs/*.toml`, and `koji.db` as subsequent entries.
+     - **Pass 1 (hash only):** Stream `config.toml`, `configs/*.toml`, and `tama.db` (via `VACUUM INTO`) through a `sha2::Sha256` hasher. Do NOT write to disk yet. Compute the SHA-256 hash.
+     - **Pass 2 (write archive):** Create the output `.tar.gz`. Write `manifest.json` as the first entry (containing the SHA-256 from pass 1). Then write `config.toml`, `configs/*.toml`, and `tama.db` as subsequent entries.
    - Build `BackupManifest` by querying the DB for model/backend lists (open the VACUUM'd copy or the original DB).
    - Doc comment on `create_backup` must state the SHA-256 contract explicitly.
 
@@ -47,28 +47,28 @@ This is the foundation. All other tasks depend on having working archive create/
 
 4. **DB backup helper** (`db/mod.rs`):
    - `backup_db(config_dir: &Path, dest: &Path) -> Result<()>` — uses SQLite `VACUUM INTO ?` to create a clean copy of the database at `dest`. This avoids copying WAL/SHM files and guarantees a consistent snapshot.
-   - Implementation: open connection to `config_dir/koji.db`, execute `VACUUM INTO ?` with `dest` as parameter.
+   - Implementation: open connection to `config_dir/tama.db`, execute `VACUUM INTO ?` with `dest` as parameter.
 
 5. **Module re-export** (`mod.rs`):
    - Re-export `create_backup`, `extract_backup`, `extract_manifest`, `BackupManifest`, `ExtractResult`
 
 **Steps:**
-- [ ] Verify `tar`, `flate2`, `sha2` already exist in `koji-core/Cargo.toml` `[dependencies]` (they do)
-- [ ] Write failing tests in `crates/koji-core/src/backup/archive.rs` for `create_backup` and `extract_backup` roundtrip
+- [ ] Verify `tar`, `flate2`, `sha2` already exist in `tama-core/Cargo.toml` `[dependencies]` (they do)
+- [ ] Write failing tests in `crates/tama-core/src/backup/archive.rs` for `create_backup` and `extract_backup` roundtrip
 - [ ] Write failing test verifying SHA-256 contract: create backup, manually tamper with an entry, verify `extract_backup` fails integrity check
-- [ ] Run `cargo test --package koji-core -- backup::archive` — verify tests fail
+- [ ] Run `cargo test --package tama-core -- backup::archive` — verify tests fail
 - [ ] Implement `BackupManifest` and `BackendEntry`/`BackupModelEntry` in `manifest.rs`
 - [ ] Implement `backup_db()` in `db/mod.rs` using `VACUUM INTO`
 - [ ] Implement `create_backup()` in `archive.rs` using two-pass streaming approach
 - [ ] Implement `extract_manifest()` and `extract_backup()` in `archive.rs`
-- [ ] Add `pub mod backup;` to `koji-core/src/lib.rs`
-- [ ] Run `cargo test --package koji-core -- backup` — verify all tests pass
+- [ ] Add `pub mod backup;` to `tama-core/src/lib.rs`
+- [ ] Run `cargo test --package tama-core -- backup` — verify all tests pass
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo clippy --workspace -- -D warnings`
 - [ ] Commit with message: "feat: add backup module with archive creation, extraction, and manifest"
 
 **Acceptance criteria:**
-- [ ] `create_backup` produces a valid `.tar.gz` containing `manifest.json`, `config.toml`, `configs/*.toml`, and `koji.db`
+- [ ] `create_backup` produces a valid `.tar.gz` containing `manifest.json`, `config.toml`, `configs/*.toml`, and `tama.db`
 - [ ] `manifest.json` includes SHA-256 of all archive entries except itself, model list, backend list, and metadata
 - [ ] `extract_backup` validates SHA-256 (hashes all entries except manifest.json) and extracts files to a target directory
 - [ ] `extract_backup` rejects tampered archives with a clear error message
@@ -84,8 +84,8 @@ This is the foundation. All other tasks depend on having working archive create/
 Restore uses "smart merge" — existing local data is preserved, new data from the backup is added. This task implements the merge functions that combine the backup's config and DB records with the local installation. The merge must be idempotent (safe to re-run).
 
 **Files:**
-- Create: `crates/koji-core/src/backup/merge.rs`
-- Modify: `crates/koji-core/src/backup/mod.rs` (add `pub mod merge;`, re-exports)
+- Create: `crates/tama-core/src/backup/merge.rs`
+- Modify: `crates/tama-core/src/backup/mod.rs` (add `pub mod merge;`, re-exports)
 
 **What to implement:**
 
@@ -121,12 +121,12 @@ Restore uses "smart merge" — existing local data is preserved, new data from t
 **Steps:**
 - [ ] Write failing tests in `merge.rs` for `merge_config`, `merge_model_cards`, `merge_database`
 - [ ] Write test for `merge_database` using two in-memory DBs with explicit column INSERT (not SELECT *)
-- [ ] Run `cargo test --package koji-core -- backup::merge` — verify tests fail
+- [ ] Run `cargo test --package tama-core -- backup::merge` — verify tests fail
 - [ ] Implement `merge_config` with `MergeStats`
 - [ ] Implement `merge_model_cards`
 - [ ] Implement `merge_database` with explicit column lists, `INSERT OR IGNORE`, and `DbMergeStats`
 - [ ] Add re-exports to `mod.rs`
-- [ ] Run `cargo test --package koji-core -- backup::merge` — verify all tests pass
+- [ ] Run `cargo test --package tama-core -- backup::merge` — verify all tests pass
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo clippy --workspace -- -D warnings`
 - [ ] Commit with message: "feat: add backup merge logic for config, model cards, and DB"
@@ -141,23 +141,23 @@ Restore uses "smart merge" — existing local data is preserved, new data from t
 
 ---
 
-### Task 3: CLI `koji backup` command
+### Task 3: CLI `tama backup` command
 
 **Context:**
 The backup command creates the archive. This is the simplest part — it calls `create_backup` from the core module and prints the result. We also add `--dry-run` and `-o` output path flags. The `config_dir` is obtained from `config.loaded_from.as_ref()` (same approach as `Config::save()`).
 
 **Files:**
-- Create: `crates/koji-cli/src/commands/backup.rs`
-- Modify: `crates/koji-cli/src/cli.rs` (add `Backup` and `Restore` variants to `Commands`)
-- Modify: `crates/koji-cli/src/commands/mod.rs` (add `pub mod backup;`)
-- Modify: `crates/koji-cli/src/lib.rs` (wire up `Commands::Backup` and `Commands::Restore` dispatch)
+- Create: `crates/tama-cli/src/commands/backup.rs`
+- Modify: `crates/tama-cli/src/cli.rs` (add `Backup` and `Restore` variants to `Commands`)
+- Modify: `crates/tama-cli/src/commands/mod.rs` (add `pub mod backup;`)
+- Modify: `crates/tama-cli/src/lib.rs` (wire up `Commands::Backup` and `Commands::Restore` dispatch)
 
 **What to implement:**
 
 1. **`Commands::Backup` variant** in `cli.rs`:
    ```
    Backup {
-       /// Output path for the backup archive (default: koji-backup-YYYY-MM-DD.tar.gz in current dir)
+       /// Output path for the backup archive (default: tama-backup-YYYY-MM-DD.tar.gz in current dir)
        #[arg(short, long)]
        output: Option<PathBuf>,
        /// Show what would be backed up without creating the archive
@@ -167,10 +167,10 @@ The backup command creates the archive. This is the simplest part — it calls `
    ```
 
 2. **`cmd_backup` function** in `commands/backup.rs`:
-   - Get `config_dir` from `config.loaded_from.as_ref()` — this is the directory containing `config.toml` and `koji.db`
-   - Resolve output path: use `-o` value, or `koji-backup-YYYY-MM-DD.tar.gz` in current directory
-   - If `--dry-run`: list files that would be archived (config.toml, model cards, koji.db) and their sizes, then exit
-   - Call `koji_core::backup::create_backup(config_dir, output_path)`
+   - Get `config_dir` from `config.loaded_from.as_ref()` — this is the directory containing `config.toml` and `tama.db`
+   - Resolve output path: use `-o` value, or `tama-backup-YYYY-MM-DD.tar.gz` in current directory
+   - If `--dry-run`: list files that would be archived (config.toml, model cards, tama.db) and their sizes, then exit
+   - Call `tama_core::backup::create_backup(config_dir, output_path)`
    - Print success: archive path, size, number of models and backends included
    - Error handling: config_dir missing, DB open failure, disk write failure
 
@@ -181,32 +181,32 @@ The backup command creates the archive. This is the simplest part — it calls `
 - [ ] Create `commands/backup.rs` with `cmd_backup` stub
 - [ ] Add `pub mod backup;` to `commands/mod.rs`
 - [ ] Add dispatch in `lib.rs` for `Commands::Backup`
-- [ ] Run `cargo build --package koji-cli` — verify it compiles
+- [ ] Run `cargo build --package tama-cli` — verify it compiles
 - [ ] Implement `cmd_backup` with `--dry-run` and `-o` support
 - [ ] Write integration test in `tests/tests.rs`: create temp config dir with `Config::load_from`, run `cmd_backup`, verify archive exists and is valid
-- [ ] Run `cargo test --package koji` — verify tests pass
+- [ ] Run `cargo test --package tama` — verify tests pass
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo clippy --workspace -- -D warnings`
-- [ ] Commit with message: "feat: add koji backup CLI command"
+- [ ] Commit with message: "feat: add tama backup CLI command"
 
 **Acceptance criteria:**
-- [ ] `koji backup` creates a `.tar.gz` in the current directory
-- [ ] `koji backup -o /path/to/file.tar.gz` creates archive at specified path
-- [ ] `koji backup --dry-run` prints files and sizes without creating archive
+- [ ] `tama backup` creates a `.tar.gz` in the current directory
+- [ ] `tama backup -o /path/to/file.tar.gz` creates archive at specified path
+- [ ] `tama backup --dry-run` prints files and sizes without creating archive
 - [ ] Output shows archive path, size, model count, backend count
 - [ ] Integration test verifies archive creation roundtrip
 
 ---
 
-### Task 4: CLI `koji restore` command
+### Task 4: CLI `tama restore` command
 
 **Context:**
 The restore command validates the archive, merges config/DB, reinstalls backends, and re-downloads model GGUFs. It supports `--select` for interactive TUI model selection (using `inquire::MultiSelect`, consistent with existing CLI), `--dry-run`, `--skip-backends`, and `--skip-models`. The `--force` flag is deferred to a future iteration — merge-only behavior is sufficient for v1.
 
 **Files:**
-- Modify: `crates/koji-cli/src/commands/backup.rs` (add `cmd_restore`)
-- Modify: `crates/koji-cli/src/cli.rs` (add `Restore` variant)
-- Modify: `crates/koji-cli/src/lib.rs` (wire up `Commands::Restore`)
+- Modify: `crates/tama-cli/src/commands/backup.rs` (add `cmd_restore`)
+- Modify: `crates/tama-cli/src/cli.rs` (add `Restore` variant)
+- Modify: `crates/tama-cli/src/lib.rs` (wire up `Commands::Restore`)
 
 **What to implement:**
 
@@ -237,7 +237,7 @@ The restore command validates the archive, merges config/DB, reinstalls backends
 
    Phase 1 — Validate:
    - Call `extract_manifest(archive_path)` to read manifest
-   - Print backup metadata (date, koji version, model count, backend count)
+   - Print backup metadata (date, tama version, model count, backend count)
    - If `--dry-run`: print what would be restored, then exit
    
    Phase 2 — Extract & merge config:
@@ -268,7 +268,7 @@ The restore command validates the archive, merges config/DB, reinstalls backends
    - For each selected repo:
      - Check if GGUF files already exist locally (using `models_dir/repo_id/filename`)
      - Skip files that exist with matching size (from `model_files.size_bytes`)
-     - Download missing files using `download_gguf()` from `koji_core::models::pull`
+     - Download missing files using `download_gguf()` from `tama_core::models::pull`
      - Print progress: "Pulling {repo_id} {filename} ({size})..."
    
    Cleanup:
@@ -281,24 +281,24 @@ The restore command validates the archive, merges config/DB, reinstalls backends
 - [ ] Add `Restore` variant to `Commands` enum in `cli.rs`
 - [ ] Add `cmd_restore` stub in `commands/backup.rs`
 - [ ] Add dispatch in `lib.rs` for `Commands::Restore`
-- [ ] Run `cargo build --package koji-cli` — verify it compiles
+- [ ] Run `cargo build --package tama-cli` — verify it compiles
 - [ ] Implement Phase 1 (validate) and Phase 2 (extract & merge config)
 - [ ] Implement Phase 3 (merge DB)
 - [ ] Implement Phase 4 (install backends)
 - [ ] Implement Phase 5 (pull models with `--select` support using `inquire::MultiSelect`)
 - [ ] Implement `--dry-run`, `--skip-backends`, `--skip-models`
 - [ ] Write integration test: create backup with `cmd_backup`, restore with `cmd_restore --dry-run`, verify dry-run output
-- [ ] Run `cargo test --package koji` — verify tests pass
+- [ ] Run `cargo test --package tama` — verify tests pass
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo clippy --workspace -- -D warnings`
-- [ ] Commit with message: "feat: add koji restore CLI command with selective model restore"
+- [ ] Commit with message: "feat: add tama restore CLI command with selective model restore"
 
 **Acceptance criteria:**
-- [ ] `koji restore <file>` validates, merges config/DB, installs backends, pulls models
-- [ ] `koji restore <file> --dry-run` shows what would happen without making changes
-- [ ] `koji restore <file> --select` shows interactive TUI for model selection using `inquire::MultiSelect` (falls back to all on non-TTY)
-- [ ] `koji restore <file> --skip-backends` skips backend installation
-- [ ] `koji restore <file> --skip-models` skips model downloads
+- [ ] `tama restore <file>` validates, merges config/DB, installs backends, pulls models
+- [ ] `tama restore <file> --dry-run` shows what would happen without making changes
+- [ ] `tama restore <file> --select` shows interactive TUI for model selection using `inquire::MultiSelect` (falls back to all on non-TTY)
+- [ ] `tama restore <file> --skip-backends` skips backend installation
+- [ ] `tama restore <file> --skip-models` skips model downloads
 - [ ] Existing models/backends are not re-downloaded
 - [ ] Restore is idempotent — running twice produces same result
 - [ ] Progress is printed for each phase
@@ -312,23 +312,23 @@ The restore command validates the archive, merges config/DB, reinstalls backends
 The web UI needs API endpoints to create backups (download), preview restore archives (upload + read manifest), and execute restore with progress streaming. The restore endpoint follows the same async job + SSE pattern used by backend installs. The `Job.backend_type` field is made optional to support restore jobs that don't have a backend type.
 
 **Files:**
-- Create: `crates/koji-web/src/api/backup.rs`
-- Modify: `crates/koji-web/src/api.rs` (add `pub mod backup;` — note: `api.rs` is the module root, NOT `api/mod.rs`)
-- Modify: `crates/koji-web/src/server.rs` (add routes — restore POST routes go in `backend_routes` sub-router for CSRF protection)
-- Modify: `crates/koji-web/src/jobs.rs` (add `JobKind::Restore`, make `Job.backend_type` optional)
+- Create: `crates/tama-web/src/api/backup.rs`
+- Modify: `crates/tama-web/src/api.rs` (add `pub mod backup;` — note: `api.rs` is the module root, NOT `api/mod.rs`)
+- Modify: `crates/tama-web/src/server.rs` (add routes — restore POST routes go in `backend_routes` sub-router for CSRF protection)
+- Modify: `crates/tama-web/src/jobs.rs` (add `JobKind::Restore`, make `Job.backend_type` optional)
 
 **What to implement:**
 
 1. **`JobKind::Restore`** in `jobs.rs`:
    - Add `Restore` variant to `JobKind` enum
-   - Make `Job.backend_type` an `Option<koji_core::backends::BackendType>` (None for restore jobs)
+   - Make `Job.backend_type` an `Option<tama_core::backends::BackendType>` (None for restore jobs)
    - Update `JobManager::submit()` to accept `backend_type: Option<BackendType>`
    - Update all `submit()` call sites in `api/backends.rs` to pass `Some(backend_type)` instead of bare `backend_type`
    - Update `job_events_sse` handler and `get_job` endpoint to handle `backend_type = None` gracefully (omit from JSON or set to null)
 
 2. **`POST /api/backup`** — `create_backup`:
-   - Calls `koji_core::backup::create_backup(config_dir, temp_path)` using `spawn_blocking`
-   - Returns the `.tar.gz` as a file download with `Content-Type: application/gzip` and `Content-Disposition: attachment; filename="koji-backup-YYYY-MM-DD.tar.gz"`
+   - Calls `tama_core::backup::create_backup(config_dir, temp_path)` using `spawn_blocking`
+   - Returns the `.tar.gz` as a file download with `Content-Type: application/gzip` and `Content-Disposition: attachment; filename="tama-backup-YYYY-MM-DD.tar.gz"`
    - This is a read-only endpoint, so it can stay on the main router (no CSRF concern)
 
 3. **`POST /api/restore/preview`** — `preview_restore`:
@@ -336,7 +336,7 @@ The web UI needs API endpoints to create backups (download), preview restore arc
    - Saves upload to a temp file in `std::env::temp_dir()` with a UUID name
    - Calls `extract_manifest(temp_path)` using `spawn_blocking` to read manifest without full extraction
    - Stores the temp file path in `AppState.restore_temp_uploads` keyed by a UUID string
-   - Returns JSON: `{ "upload_id": "uuid", "created_at": "...", "koji_version": "...", "models": [...], "backends": [...] }`
+   - Returns JSON: `{ "upload_id": "uuid", "created_at": "...", "tama_version": "...", "models": [...], "backends": [...] }`
    - Does NOT make any changes to local state
    - This stores state, so it MUST be behind CSRF protection → goes in `backend_routes`
 
@@ -370,8 +370,8 @@ The web UI needs API endpoints to create backups (download), preview restore arc
 - [ ] Update all `submit()` call sites in `api/backends.rs` to pass `Some(backend_type)`
 - [ ] Update `job_events_sse` and `get_job` handlers to handle `backend_type = None`
 - [ ] Add `restore_temp_uploads` field to `AppState`
-- [ ] Create `crates/koji-web/src/api/backup.rs` with handler stubs
-- [ ] Add `pub mod backup;` to `crates/koji-web/src/api.rs` (the module root file, NOT `api/mod.rs`)
+- [ ] Create `crates/tama-web/src/api/backup.rs` with handler stubs
+- [ ] Add `pub mod backup;` to `crates/tama-web/src/api.rs` (the module root file, NOT `api/mod.rs`)
 - [ ] Implement `POST /api/backup` handler
 - [ ] Implement `POST /api/restore/preview` handler with temp upload storage
 - [ ] Implement `POST /api/restore` handler with async job + background task
@@ -401,9 +401,9 @@ The web UI needs API endpoints to create backups (download), preview restore arc
 The Config page has a side nav with tabs: General, Proxy, Supervisor, Sampling Templates. We add "Backup & Restore" as a 5th tab. The backup UI is a simple one-click download. The restore UI has a file upload, preview with checkboxes, and SSE progress streaming — following the same patterns as backend install. The `BackupSection` component is defined in its own file but imported and rendered from `config_editor.rs`.
 
 **Files:**
-- Create: `crates/koji-web/src/components/backup_section.rs`
-- Modify: `crates/koji-web/src/components/mod.rs` (add `pub mod backup_section;`)
-- Modify: `crates/koji-web/src/pages/config_editor.rs` (add `Section::Backup` variant, import and render `BackupSection` component)
+- Create: `crates/tama-web/src/components/backup_section.rs`
+- Modify: `crates/tama-web/src/components/mod.rs` (add `pub mod backup_section;`)
+- Modify: `crates/tama-web/src/pages/config_editor.rs` (add `Section::Backup` variant, import and render `BackupSection` component)
 
 **What to implement:**
 
@@ -430,7 +430,7 @@ The Config page has a side nav with tabs: General, Proxy, Supervisor, Sampling T
      - On file select: `POST /api/restore/preview` with multipart upload
      - Show loading spinner while uploading
    - Preview section (shown after upload succeeds):
-     - Backup metadata: date, koji version
+     - Backup metadata: date, tama version
      - Backends list with versions
      - Models list with checkboxes (default: all checked), showing repo_id, quant count, total size
      - "Restore Selected" button
@@ -443,7 +443,7 @@ The Config page has a side nav with tabs: General, Proxy, Supervisor, Sampling T
 3. **Styling**: Use existing card/button/form CSS classes from `style.css`. Dropzone can use a dashed border card pattern similar to the pull model modal.
 
 **Steps:**
-- [ ] Create `crates/koji-web/src/components/backup_section.rs` with component stub
+- [ ] Create `crates/tama-web/src/components/backup_section.rs` with component stub
 - [ ] Add `pub mod backup_section;` to `components/mod.rs`
 - [ ] Add `Section::Backup` variant to `config_editor.rs` with icon `"💾"` and name `"Backup & Restore"`
 - [ ] Import `BackupSection` in config_editor.rs and add render in the main form area
@@ -451,7 +451,7 @@ The Config page has a side nav with tabs: General, Proxy, Supervisor, Sampling T
 - [ ] Implement restore card with file upload dropzone
 - [ ] Implement preview display with model checkboxes
 - [ ] Implement restore execution: POST `/api/restore`, subscribe to job SSE at `/api/backends/jobs/{id}/events`
-- [ ] Run `cargo build --package koji-web` — verify it compiles
+- [ ] Run `cargo build --package tama-web` — verify it compiles
 - [ ] Test manually in browser: create backup download, upload archive, preview, restore
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo clippy --workspace -- -D warnings`

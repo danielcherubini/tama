@@ -20,15 +20,15 @@ The new config page will use Leptos components with reactive signals for state m
 
 **Callback pattern:** All component callbacks use `leptos::Callback<T>` (not `EventHandler` - fictional type). DOM listeners use inline closures: `on:input=move |e| signal.set(event_target_value(&e))`.
 
-**Mirror types:** Define types in `crates/koji-web/src/types/config.rs`. koji-core cannot be used from WASM (it's an ssr-only dep).
+**Mirror types:** Define types in `crates/tama-web/src/types/config.rs`. tama-core cannot be used from WASM (it's an ssr-only dep).
 
-**Important:** Mirror types must contain **every** serde-visible field of the koji-core counterpart. Omitting any field will silently drop user data on POST round-trip. This includes fields the UI doesn't edit.
+**Important:** Mirror types must contain **every** serde-visible field of the tama-core counterpart. Omitting any field will silently drop user data on POST round-trip. This includes fields the UI doesn't edit.
 
 ## Tech Stack
 - Leptos 0.7 (Rust web framework)
 - gloo_net for HTTP requests (JSON)
 - serde_json for JSON serialization
-- Mirror Config types in frontend (`crates/koji-web/src/types/config.rs`)
+- Mirror Config types in frontend (`crates/tama-web/src/types/config.rs`)
 - Existing CSS classes (form-input, form-select, btn-primary, etc.)
 
 ---
@@ -39,12 +39,12 @@ The new config page will use Leptos components with reactive signals for state m
 Per reviewer feedback, the current `/api/config` endpoint works with raw TOML strings, but the WASM build cannot use the `toml` crate (it's gated behind "ssr" feature). To enable frontend parsing/mutation of the Config struct, we need a parallel JSON-based API. This task must be completed before any other config page tasks.
 
 **Files:**
-- Modify: `crates/koji-web/src/api.rs` (add new endpoints)
-- Modify: `crates/koji-web/src/server.rs` (register new routes)
-- Create: `crates/koji-web/src/types/mod.rs` (new module)
-- Create: `crates/koji-web/src/types/config.rs` (mirror types for WASM)
-- Modify: `crates/koji-web/src/lib.rs` (add `mod types;`)
-- Modify: `crates/koji-web/Cargo.toml` (add serde_json and [[test]] entry)
+- Modify: `crates/tama-web/src/api.rs` (add new endpoints)
+- Modify: `crates/tama-web/src/server.rs` (register new routes)
+- Create: `crates/tama-web/src/types/mod.rs` (new module)
+- Create: `crates/tama-web/src/types/config.rs` (mirror types for WASM)
+- Modify: `crates/tama-web/src/lib.rs` (add `mod types;`)
+- Modify: `crates/tama-web/Cargo.toml` (add serde_json and [[test]] entry)
 - Note: `/api/config` (TOML) remains unchanged for backward compatibility
 
 **What to implement:**
@@ -60,7 +60,7 @@ Per reviewer feedback, the current `/api/config` endpoint works with raw TOML st
 2. **Mirror types** (`types/config.rs`):
     - Define types: `Config`, `General`, `ProxyConfig`, `BackendConfig`, `Supervisor`, `ModelConfig`, `SamplingParams`, `QuantEntry`, `QuantKind`, `HealthCheck`
     - All types must be `Clone, Serialize, Deserialize`
-    - **CRITICAL:** Each type must contain **every** serde-visible field of the koji-core counterpart, including fields the UI doesn't edit
+    - **CRITICAL:** Each type must contain **every** serde-visible field of the tama-core counterpart, including fields the UI doesn't edit
     - **CRITICAL:** Add forward-compat field preservation to prevent data loss from future upstream changes:
       ```rust
       #[derive(Clone, Serialize, Deserialize, Default)]
@@ -73,8 +73,8 @@ Per reviewer feedback, the current `/api/config` endpoint works with raw TOML st
       ```
       This pattern preserves unknown fields through round-trip and is the standard serde pattern for forward-compatibility.
     - Use `BTreeMap<String, _>` (not `HashMap`) for `backends`, `models`, `sampling_templates` to guarantee deterministic iteration in UI
-    - Mirror `QuantEntry` from `koji-core/src/config/types.rs` (NOT the one in `proxy/koji_handlers.rs`) and `QuantKind`, used by `ModelConfig.quants`. Fields: `file, kind, size_bytes, context_length`.
-    - **CRITICAL:** Add default helper functions for all fields that have `#[serde(default = "...")]` in koji-core. Each mirror type must have equivalent default helpers.
+    - Mirror `QuantEntry` from `tama-core/src/config/types.rs` (NOT the one in `proxy/tama_handlers.rs`) and `QuantKind`, used by `ModelConfig.quants`. Fields: `file, kind, size_bytes, context_length`.
+    - **CRITICAL:** Add default helper functions for all fields that have `#[serde(default = "...")]` in tama-core. Each mirror type must have equivalent default helpers.
 
 3. **Error handling**:
     - 400 Bad Request: JSON deserialization error (Axum returns 400 for all JSON errors, both syntactic and semantic). Update docs from spec's incorrect "422" claim.
@@ -82,7 +82,7 @@ Per reviewer feedback, the current `/api/config` endpoint works with raw TOML st
     - 404 Not Found: config_path not configured
 
 4. **Round-trip test**:
-    - Write test in `crates/koji-web/tests/config_structured_test.rs`
+    - Write test in `crates/tama-web/tests/config_structured_test.rs`
     - Test: GET /api/config/structured returns valid JSON
     - Test: POST /api/config/structured persists and round-trips without field loss
     - Test: loaded_from is restored from existing proxy config (not serialized, manually restored)
@@ -90,17 +90,17 @@ Per reviewer feedback, the current `/api/config` endpoint works with raw TOML st
     - Test: All fields preserved - populate a `Supervisor`, `BackendConfig`, and `ProxyConfig` with all fields and assert equality
     - Test: **Standalone mode** - verify save works when `proxy_config == None` (no panic, graceful handling)
     - Test: **Equivalence** - POST via `/api/config` (TOML), GET via `/api/config/structured`, POST JSON back, compare disk content for equivalence
-    - Note: Document that `ModelConfig.profile` field is `skip_serializing` in koji-core and will be silently dropped on structured POST (behavior change from raw TOML endpoint)
+    - Note: Document that `ModelConfig.profile` field is `skip_serializing` in tama-core and will be silently dropped on structured POST (behavior change from raw TOML endpoint)
 
 5. **Frontend types module**:
-    - Create `crates/koji-web/src/types/mod.rs` containing `pub mod config;`
-    - Add `mod types;` to `crates/koji-web/src/lib.rs`
+    - Create `crates/tama-web/src/types/mod.rs` containing `pub mod config;`
+    - Add `mod types;` to `crates/tama-web/src/lib.rs`
 
 **Steps:**
-- [ ] Add `[[test]] name = "config_structured_test" path = "tests/config_structured_test.rs" required-features = ["ssr"]` to `crates/koji-web/Cargo.toml`
-- [ ] Create `crates/koji-web/src/types/mod.rs` with `pub mod config;`
-- [ ] Add `mod types;` to `crates/koji-web/src/lib.rs`
-- [ ] Write failing test for structured API round-trip in `crates/koji-web/tests/config_structured_test.rs`
+- [ ] Add `[[test]] name = "config_structured_test" path = "tests/config_structured_test.rs" required-features = ["ssr"]` to `crates/tama-web/Cargo.toml`
+- [ ] Create `crates/tama-web/src/types/mod.rs` with `pub mod config;`
+- [ ] Add `mod types;` to `crates/tama-web/src/lib.rs`
+- [ ] Write failing test for structured API round-trip in `crates/tama-web/tests/config_structured_test.rs`
   - Test: GET /api/config/structured returns valid JSON
   - Test: POST /api/config/structured persists and round-trips without field loss
   - Test: loaded_from is restored from existing proxy config (not serialized, manually restored)
@@ -108,26 +108,26 @@ Per reviewer feedback, the current `/api/config` endpoint works with raw TOML st
   - Test: All Supervisor/BackendConfig/ProxyConfig fields preserved
   - Test: Standalone mode - save works when proxy_config is None
   - Test: Equivalence test - /api/config and /api/config/structured produce same disk content
-- [ ] Run `cargo test --package koji-web --test config_structured_test`
+- [ ] Run `cargo test --package tama-web --test config_structured_test`
   - Did it fail with "test failed"? If passed, investigate.
-- [ ] Add `serde_json` to `crates/koji-web/Cargo.toml` deps (if not present)
+- [ ] Add `serde_json` to `crates/tama-web/Cargo.toml` deps (if not present)
 - [ ] Implement `GET /api/config/structured` in `api.rs`
 - [ ] Implement `POST /api/config/structured` in `api.rs`
   - Important: Restore `loaded_from` from existing proxy config before persisting (it has `#[serde(skip)]`)
   - Call `sync_proxy_config` for hot-reload after successful save
   - Use `cfg.save_to(&state.config_path.parent()?)` for consistency with existing endpoints
 - [ ] Add route in `server.rs`: `.route("/api/config/structured", get(api::get_structured_config).post(api::save_structured_config))`
-- [ ] Define mirror types in `crates/koji-web/src/types/config.rs`
-  - Note: koji-core cannot be used from WASM (it's an ssr-only dep)
+- [ ] Define mirror types in `crates/tama-web/src/types/config.rs`
+  - Note: tama-core cannot be used from WASM (it's an ssr-only dep)
   - Use `BTreeMap<String, _>` for backends, models, sampling_templates
-  - Mirror every field from koji-core types (including QuantEntry, QuantKind, HealthCheck)
+  - Mirror every field from tama-core types (including QuantEntry, QuantKind, HealthCheck)
   - Add `#[serde(flatten, skip_serializing_if = "Option::is_none")] pub extra: Option<serde_json::Map<String, serde_json::Value>>` to prevent data loss from future upstream changes
   - Add default helper functions for all `#[serde(default = "...")]` fields
-- [ ] Run `cargo test --package koji-web --test config_structured_test`
+- [ ] Run `cargo test --package tama-web --test config_structured_test`
   - Did all tests pass? If not, fix failures.
 - [ ] Run `cargo fmt --all`
   - Did it succeed? If not, fix formatting.
-- [ ] Run `cargo check --package koji-web`
+- [ ] Run `cargo check --package tama-web`
   - Did it succeed? If not, fix type errors.
 - [ ] Commit with message: "feat: add structured JSON API for config (GET/POST /api/config/structured)"
 
@@ -151,7 +151,7 @@ Per reviewer feedback, the current `/api/config` endpoint works with raw TOML st
 **CRITICAL FIXES FROM REVIEWER:**
 - C1: Add `#[serde(flatten)] extra` field to all mirror types for forward compatibility
 - C2: Update docs to reflect Axum returns 400 for all JSON errors (not 422)
-- C3: **BEFORE TASK 0** - Either add `health_check_timeout_ms` and `health_check_retries` to `Supervisor` struct in koji-core, OR remove them from `config/koji.toml` example. This is a blocker - do not ship a regression.
+- C3: **BEFORE TASK 0** - Either add `health_check_timeout_ms` and `health_check_retries` to `Supervisor` struct in tama-core, OR remove them from `config/tama.toml` example. This is a blocker - do not ship a regression.
 - C4: **BEFORE TASK 0** - Reconcile `top_k` range: spec says 1-100, plan says 0-100. Update both documents to match llama.cpp docs (0 disables top-k).
 - C5: Specify `cfg.save_to(&state.config_path.parent()?)` for persistence path consistency
 - W6: Add default helper functions for all `#[serde(default = "...")]` fields
@@ -169,11 +169,11 @@ Before building the config page sections, we need reusable form components that 
 **Callback pattern:** Use `leptos::Callback<T>` for component-to-component callbacks. DOM listeners use inline closures: `on:input=move |e| signal.set(event_target_value(&e))`.
 
 **Files:**
-- Create: `crates/koji-web/src/components/form_input.rs`
-- Create: `crates/koji-web/src/components/form_select.rs`
-- Create: `crates/koji-web/src/components/form_checkbox.rs`
-- Create: `crates/koji-web/src/components/form_validation.rs`
-- Modify: `crates/koji-web/src/components/mod.rs` (export new components)
+- Create: `crates/tama-web/src/components/form_input.rs`
+- Create: `crates/tama-web/src/components/form_select.rs`
+- Create: `crates/tama-web/src/components/form_checkbox.rs`
+- Create: `crates/tama-web/src/components/form_validation.rs`
+- Modify: `crates/tama-web/src/components/mod.rs` (export new components)
 
 **What to implement:**
 
@@ -219,30 +219,30 @@ Before building the config page sections, we need reusable form components that 
     - **CRITICAL:** Validation states must use **icons + text**, not just color (WCAG 1.4.1). Include checkmark (✓) for valid, error icon (✗) for invalid. See spec fix #9.
 
 **Steps:**
-- [ ] Add `url` crate to `crates/koji-web/Cargo.toml` dependencies (see W2)
-- [ ] Write failing unit test for FormInput validation in `crates/koji-web/src/components/form_input.rs` (in `#[cfg(test)] mod tests`)
+- [ ] Add `url` crate to `crates/tama-web/Cargo.toml` dependencies (see W2)
+- [ ] Write failing unit test for FormInput validation in `crates/tama-web/src/components/form_input.rs` (in `#[cfg(test)] mod tests`)
   - Test: validation helpers return correct errors for invalid IP, port, URL
   - Test: `std::net::IpAddr::from_str` handles IPv6 correctly
   - Test: `url::Url::parse` handles edge cases (fragments, query strings)
-- [ ] Run `cargo test --package koji-web --features ssr --lib form_input::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib form_input::tests`
   - Did it fail with "test failed"? If passed, investigate.
 - [ ] Implement FormInput component with ARIA attributes and validation icons
-- [ ] Run `cargo test --package koji-web --features ssr --lib form_input::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib form_input::tests`
   - Did all tests pass? If not, fix failures.
 - [ ] Write unit test for FormNumber validation
-- [ ] Run `cargo test --package koji-web --features ssr --lib form_input::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib form_input::tests`
   - Did it fail? If passed, investigate.
 - [ ] Implement FormNumber with min/max props and help_text
-- [ ] Run `cargo test --package koji-web --features ssr --lib form_input::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib form_input::tests`
   - Did all tests pass?
 - [ ] Write unit test for FormSelect option mapping
 - [ ] Write unit test for FormCheckbox checked state handling
 - [ ] Implement FormSelect, FormCheckbox, FormValidation following same TDD pattern
-- [ ] Run `cargo test --package koji-web --features ssr --lib form_input form_select form_checkbox`
+- [ ] Run `cargo test --package tama-web --features ssr --lib form_input form_select form_checkbox`
   - Did all tests pass?
 - [ ] Run `cargo fmt --all`
   - Did it succeed? If not, fix formatting issues.
-- [ ] Run `cargo check --package koji-web`
+- [ ] Run `cargo check --package tama-web`
   - Did it succeed? If not, fix type errors.
 - [ ] **Optional:** Add one `wasm-bindgen-test` smoke test against `FormInput` (see W3)
   - Even a single DOM test proves infrastructure exists for follow-up coverage
@@ -275,11 +275,11 @@ Before building the config page sections, we need reusable form components that 
 `SamplingField` already exists in `model_editor.rs:67` but needs to be extracted to a reusable component. Per the reviewer's critical feedback, SamplingParams fields are Option<T> with skip_serializing. We cannot use hardcoded defaults (1.0, 40, etc.) because that would emit unnecessary CLI args. We need the enabled+value pattern to only serialize fields the user explicitly enables.
 
 **Files:**
-- Modify: `crates/koji-web/src/components/sampling_field.rs` (create new file)
-- Modify: `crates/koji-web/src/components/mod.rs` (export new component)
-- Read: `crates/koji-web/src/pages/model_editor.rs:67-71` (existing SamplingField)
-- Read: `crates/koji-web/src/pages/model_editor.rs:130` (existing parsing logic)
-- Read: `crates/koji-core/src/profiles.rs` (for SamplingParams structure)
+- Modify: `crates/tama-web/src/components/sampling_field.rs` (create new file)
+- Modify: `crates/tama-web/src/components/mod.rs` (export new component)
+- Read: `crates/tama-web/src/pages/model_editor.rs:67-71` (existing SamplingField)
+- Read: `crates/tama-web/src/pages/model_editor.rs:130` (existing parsing logic)
+- Read: `crates/tama-core/src/profiles.rs` (for SamplingParams structure)
 
 **What to implement:**
 
@@ -318,30 +318,30 @@ Before building the config page sections, we need reusable form components that 
     - DOM listeners: `on:change=move |e| on_enable.run(event_target_checked(&e))` for toggle, `on:input=move |e| on_change.run(event_target_value(&e))` for value
 
 **Steps:**
-- [ ] Write failing unit test for SamplingField serialization in `crates/koji-web/src/components/sampling_field.rs` (in `#[cfg(test)] mod tests`)
+- [ ] Write failing unit test for SamplingField serialization in `crates/tama-web/src/components/sampling_field.rs` (in `#[cfg(test)] mod tests`)
   - Test: `Option::<f64>::from(&field)` returns `None` when `enabled == false`, regardless of value
   - Test: `Option::<f64>::from(&field)` returns `Some(value)` when `enabled == true`
   - Test: top_k conversion handles u32 correctly (not u64)
   - Test: `From::from(Some(0.3))` yields `enabled == true` (loading rule)
   - Test: `From::from(None)` yields `enabled == false` (loading rule)
   - Test: Invalid top_k values (overflow u32) return validation error
-- [ ] Run `cargo test --package koji-web --features ssr --lib sampling_field::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib sampling_field::tests`
   - Did it fail? If passed, investigate.
-- [ ] Extract `SamplingField` struct from `model_editor.rs:67` to `crates/koji-web/src/components/sampling_field.rs`
+- [ ] Extract `SamplingField` struct from `model_editor.rs:67` to `crates/tama-web/src/components/sampling_field.rs`
 - [ ] Implement From traits for conversion (handle u32 for top_k separately)
 - [ ] Port parsing logic from `model_editor.rs:130` (use u32 for top_k, not u64)
 - [ ] **CRITICAL:** Add validation test for top_k overflow - `top_k = "99999999999"` (overflows u32) should return validation error, not silently fail (see C6)
-- [ ] Run `cargo test --package koji-web --features ssr --lib sampling_field::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib sampling_field::tests`
   - Did all tests pass?
 - [ ] Implement SamplingField UI component with toggle
-- [ ] Run `cargo test --package koji-web --features ssr --lib sampling_field::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib sampling_field::tests`
   - Did all tests pass?
 - [ ] Update `model_editor.rs` to import `SamplingField` from new location
-- [ ] Run `cargo test --package koji-web --features ssr`
+- [ ] Run `cargo test --package tama-web --features ssr`
   - Did all tests pass? (verify no regression to model_editor)
 - [ ] Run `cargo fmt --all`
   - Did it succeed?
-- [ ] Run `cargo check --package koji-web`
+- [ ] Run `cargo check --package tama-web`
   - Did it succeed?
 - [ ] Commit with message: "feat: extract SamplingField component with enabled toggle"
 
@@ -369,8 +369,8 @@ Before building the config page sections, we need reusable form components that 
 The config page needs a left sidebar navigation to switch between sections. This component will be reusable and follow the existing styling patterns from nav.rs and dashboard.rs.
 
 **Files:**
-- Create: `crates/koji-web/src/components/config_nav.rs`
-- Modify: `crates/koji-web/src/components/mod.rs`
+- Create: `crates/tama-web/src/components/config_nav.rs`
+- Modify: `crates/tama-web/src/components/mod.rs`
 
 **What to implement:**
 
@@ -396,11 +396,11 @@ The config page needs a left sidebar navigation to switch between sections. This
     - Mobile: Hidden by default, toggle via hamburger
 
 **Steps:**
-- [ ] Write failing unit test for ConfigNav in `crates/koji-web/src/components/config_nav.rs` (in `#[cfg(test)] mod tests`)
+- [ ] Write failing unit test for ConfigNav in `crates/tama-web/src/components/config_nav.rs` (in `#[cfg(test)] mod tests`)
   - Test: SECTIONS constant has exactly 4 items with correct values
   - Test: active section has aria-current="page"
   - Test: callback is wired (not anchor links with href)
-- [ ] Run `cargo test --package koji-web --features ssr --lib config_nav::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib config_nav::tests`
   - Did it fail? If passed, investigate.
 - [ ] Implement ConfigNav component with ARIA attributes
 - [ ] **CRITICAL:** Add mobile hamburger menu with:
@@ -411,7 +411,7 @@ The config page needs a left sidebar navigation to switch between sections. This
 - [ ] Define mobile breakpoint in CSS (e.g., `@media (max-width: 768px)`)
 - [ ] Run `cargo fmt --all`
   - Did it succeed?
-- [ ] Run `cargo check --package koji-web`
+- [ ] Run `cargo check --package tama-web`
   - Did it succeed?
 - [ ] Commit with message: "feat: add side navigation component with ARIA and mobile support"
 
@@ -439,9 +439,9 @@ The config page needs a left sidebar navigation to switch between sections. This
 The General section combines core app settings (log_level, models_dir, logs_dir) with Proxy settings. This is the first section to implement and will serve as a template for other sections.
 
 **Files:**
-- Create: `crates/koji-web/src/pages/config_sections/general.rs`
-- Create: `crates/koji-web/src/pages/config_sections/mod.rs`
-- Modify: `crates/koji-web/src/pages/mod.rs` (export new module)
+- Create: `crates/tama-web/src/pages/config_sections/general.rs`
+- Create: `crates/tama-web/src/pages/config_sections/mod.rs`
+- Modify: `crates/tama-web/src/pages/mod.rs` (export new module)
 
 **What to implement:**
 
@@ -477,21 +477,21 @@ The General section combines core app settings (log_level, models_dir, logs_dir)
    | metrics_retention_secs | 60-604800 | 1 day to 1 week range |
 
 **Steps:**
-- [ ] Write failing unit test for GeneralSection field mapping in `crates/koji-web/src/pages/config_sections/general.rs` (in `#[cfg(test)] mod tests`)
+- [ ] Write failing unit test for GeneralSection field mapping in `crates/tama-web/src/pages/config_sections/general.rs` (in `#[cfg(test)] mod tests`)
   - Test: field names match ProxyConfig struct exactly
   - Test: validation rules applied correctly
   - Test: general_field_names() returns correct list
-- [ ] Run `cargo test --package koji-web --features ssr --lib general::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib general::tests`
   - Did it fail? If passed, investigate.
 - [ ] Implement GeneralSection component with exact field names
 - [ ] Add validation for each field type
 - [ ] **CRITICAL:** Add populated `help_text` to all numeric fields citing source (see table above)
-- [ ] Run `cargo test --package koji-web --features ssr --lib general::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib general::tests`
   - Did all tests pass?
 - [ ] Add debounced validation using gloo_timers::callback::Timeout (500ms delay)
 - [ ] Run `cargo fmt --all`
   - Did it succeed?
-- [ ] Run `cargo check --package koji-web`
+- [ ] Run `cargo check --package tama-web`
   - Did it succeed?
 - [ ] Commit with message: "feat: add General section with Proxy settings (exact field names)"
 
@@ -517,8 +517,8 @@ The General section combines core app settings (log_level, models_dir, logs_dir)
 The Backends section displays a list of configured backends (llama_cpp, ik_llama, etc.) with editable fields. No add/remove functionality for now - only edit existing.
 
 **Files:**
-- Create: `crates/koji-web/src/pages/config_sections/backends.rs`
-- Modify: `crates/koji-web/src/pages/config_sections/mod.rs`
+- Create: `crates/tama-web/src/pages/config_sections/backends.rs`
+- Modify: `crates/tama-web/src/pages/config_sections/mod.rs`
 
 **What to implement:**
 
@@ -556,23 +556,23 @@ The Backends section displays a list of configured backends (llama_cpp, ik_llama
 5. **Data constant for field names**: `pub fn backend_card_field_names() -> &'static [&'static str]` to verify field names at compile time
 
 **Steps:**
-- [ ] Write failing unit test for default_args parsing in `crates/koji-web/src/pages/config_sections/backends.rs` (in `#[cfg(test)] mod tests`)
+- [ ] Write failing unit test for default_args parsing in `crates/tama-web/src/pages/config_sections/backends.rs` (in `#[cfg(test)] mod tests`)
   - Test: newline-separated string splits into Vec<String>
   - Test: empty string produces empty Vec
   - Test: trailing newline handled correctly
   - Test: empty lines are filtered out
   - Test: whitespace is trimmed
-- [ ] Run `cargo test --package koji-web --features ssr --lib backends::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib backends::tests`
   - Did it fail? If passed, investigate.
 - [ ] Implement BackendCard component with collapsible fields
 - [ ] Implement BackendsSection with BTreeMap iteration (sorted keys for deterministic order)
 - [ ] Add URL validation for health_check_url using validate_url helper
 - [ ] **CRITICAL:** Add help text to default_args textarea explaining one-arg-per-line format
-- [ ] Run `cargo test --package koji-web --features ssr --lib backends::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib backends::tests`
   - Did all tests pass?
 - [ ] Run `cargo fmt --all`
   - Did it succeed?
-- [ ] Run `cargo check --package koji-web`
+- [ ] Run `cargo check --package tama-web`
   - Did it succeed?
 - [ ] Commit with message: "feat: add Backends section with editable cards"
 
@@ -599,15 +599,15 @@ The Backends section displays a list of configured backends (llama_cpp, ik_llama
 The Supervisor section has 4 simple fields for process management. This is a straightforward form section similar to General but without the Proxy subsection.
 
 **CRITICAL BLOCKER (C3):** Before implementing this task, you MUST resolve the `health_check_timeout_ms` and `health_check_retries` issue:
-- These fields exist in `config/koji.toml` (lines 19-20) but NOT in `Supervisor` struct
+- These fields exist in `config/tama.toml` (lines 19-20) but NOT in `Supervisor` struct
 - They will be silently dropped on first save through the new UI
 - **ACTION REQUIRED:** Either:
-  - **Option A (preferred):** Add `health_check_timeout_ms: u64` and `health_check_retries: u32` to `Supervisor` struct in `koji-core/src/config/types.rs`
-  - **Option B:** Remove these fields from `config/koji.toml` example config to avoid confusion
+  - **Option A (preferred):** Add `health_check_timeout_ms: u64` and `health_check_retries: u32` to `Supervisor` struct in `tama-core/src/config/types.rs`
+  - **Option B:** Remove these fields from `config/tama.toml` example config to avoid confusion
 
 **Files:**
-- Create: `crates/koji-web/src/pages/config_sections/supervisor.rs`
-- Modify: `crates/koji-web/src/pages/config_sections/mod.rs`
+- Create: `crates/tama-web/src/pages/config_sections/supervisor.rs`
+- Modify: `crates/tama-web/src/pages/config_sections/mod.rs`
 
 **What to implement:**
 
@@ -615,7 +615,7 @@ The Supervisor section has 4 simple fields for process management. This is a str
     - Props: `supervisor: Supervisor`, `on_change: Callback<Supervisor>`
     - Fields (from Supervisor struct in types.rs):
       - restart_policy (select): ["always", "on-failure", "never"]
-        - **Action:** Verify usage by checking `grep -rn 'restart_policy' crates/koji-core/src`
+        - **Action:** Verify usage by checking `grep -rn 'restart_policy' crates/tama-core/src`
         - If unused, add help text "Not currently used by supervisor"
       - max_restarts (number): 0-1000 (0 = exit on first failure)
       - restart_delay_ms (number): 100-60000
@@ -632,21 +632,21 @@ The Supervisor section has 4 simple fields for process management. This is a str
 
 **Steps:**
 - [ ] **BLOCKER:** Resolve C3 - Either add fields to Supervisor struct OR remove from example config
-- [ ] Write failing unit test for SupervisorSection field mapping in `crates/koji-web/src/pages/config_sections/supervisor.rs` (in `#[cfg(test)] mod tests`)
+- [ ] Write failing unit test for SupervisorSection field mapping in `crates/tama-web/src/pages/config_sections/supervisor.rs` (in `#[cfg(test)] mod tests`)
   - Test: supervisor_field_names() returns correct list (includes health_check fields if C3 Option A chosen)
   - Test: field names match Supervisor struct in types.rs exactly
   - Test: restart_policy help text if unused
-- [ ] Run `cargo test --package koji-web --features ssr --lib supervisor::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib supervisor::tests`
   - Did it fail? If passed, investigate.
 - [ ] Implement SupervisorSection component
-- [ ] Verify restart_policy usage by checking process.rs, supervisor.rs (grep: `grep -rn 'restart_policy' crates/koji-core/src`)
+- [ ] Verify restart_policy usage by checking process.rs, supervisor.rs (grep: `grep -rn 'restart_policy' crates/tama-core/src`)
   - If unused, add help text "Not currently used by supervisor"
 - [ ] **CRITICAL:** If C3 Option A chosen, add health_check_timeout_ms and health_check_retries fields
-- [ ] Run `cargo test --package koji-web --features ssr --lib supervisor::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib supervisor::tests`
   - Did all tests pass?
 - [ ] Run `cargo fmt --all`
   - Did it succeed?
-- [ ] Run `cargo check --package koji-web`
+- [ ] Run `cargo check --package tama-web`
   - Did it succeed?
 - [ ] Commit with message: "feat: add Supervisor section with exact struct fields"
 
@@ -672,8 +672,8 @@ The Supervisor section has 4 simple fields for process management. This is a str
 The Sampling Templates section is the most complex - it's a card-based grid where users can add, edit, and delete custom templates. Built-in templates (coding, chat, analysis, creative) cannot be deleted.
 
 **Files:**
-- Create: `crates/koji-web/src/pages/config_sections/sampling_templates.rs`
-- Modify: `crates/koji-web/src/pages/config_sections/mod.rs`
+- Create: `crates/tama-web/src/pages/config_sections/sampling_templates.rs`
+- Modify: `crates/tama-web/src/pages/config_sections/mod.rs`
 
 **What to implement:**
 
@@ -714,18 +714,18 @@ The Sampling Templates section is the most complex - it's a card-based grid wher
 4. **Data constant for card summary**: `pub fn card_summary(params: &SamplingParams) -> (Option<f64>, Option<f64>)` returning (temperature, top_p)
 
 5. **Use existing Modal component (I7):**
-    - Do NOT create new modal - reuse `crates/koji-web/src/components/modal.rs`
+    - Do NOT create new modal - reuse `crates/tama-web/src/components/modal.rs`
     - Both SamplingTemplateEditor and Reload confirmation should use existing component
 
 **Steps:**
-- [ ] Write failing unit test for SamplingTemplateCard in `crates/koji-web/src/pages/config_sections/sampling_templates.rs` (in `#[cfg(test)] mod tests`)
+- [ ] Write failing unit test for SamplingTemplateCard in `crates/tama-web/src/pages/config_sections/sampling_templates.rs` (in `#[cfg(test)] mod tests`)
   - Test: BUILTIN_TEMPLATES constant has exactly 4 items with correct values
   - Test: card_summary() returns correct (temperature, top_p) tuple
   - Test: delete button disabled for built-in names
-- [ ] Run `cargo test --package koji-web --features ssr --lib sampling_templates::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib sampling_templates::tests`
   - Did it fail? If passed, investigate.
 - [ ] Implement SamplingTemplateCard
-- [ ] Run `cargo test --package koji-web --features ssr --lib sampling_templates::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib sampling_templates::tests`
   - Did all tests pass?
 - [ ] Write failing unit test for SamplingTemplateEditor in same file
   - Test: SAMPLING_FIELD_NAMES constant contains all 7 SamplingParams fields
@@ -734,7 +734,7 @@ The Sampling Templates section is the most complex - it's a card-based grid wher
   - Test: **built-in templates cannot be renamed** (name field read-only)
   - Test: custom template rename shows confirmation warning
   - Test: numeric ranges validated
-- [ ] Run `cargo test --package koji-web --features ssr --lib sampling_templates::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib sampling_templates::tests`
   - Did it fail? If passed, investigate.
 - [ ] Implement SamplingTemplateEditor with SamplingField components
 - [ ] **CRITICAL:** Make name field read-only for built-in templates
@@ -744,11 +744,11 @@ The Sampling Templates section is the most complex - it's a card-based grid wher
 - [ ] Add delete functionality (with confirmation for non-builtin)
 - [ ] **CRITICAL:** Use existing `Modal` component (do not create new modal)
 - [ ] **CRITICAL:** Add test syncing BUILTIN_TEMPLATES with `Profile::all()`
-- [ ] Run `cargo test --package koji-web --features ssr --lib sampling_templates::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib sampling_templates::tests`
   - Did all tests pass?
 - [ ] Run `cargo fmt --all`
   - Did it succeed?
-- [ ] Run `cargo check --package koji-web`
+- [ ] Run `cargo check --package tama-web`
   - Did it succeed?
 - [ ] Commit with message: "feat: add Sampling Templates section with built-in protection"
 
@@ -783,9 +783,9 @@ The Sampling Templates section is the most complex - it's a card-based grid wher
 Now we assemble all the pieces into a single config page that ties together navigation, sections, and the save bar. This page will load config from API, display sections, and handle saving.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/config_editor.rs` (replace existing implementation)
-- Modify: `crates/koji-web/src/pages/mod.rs` (ensure ConfigEditor is exported)
-- Read: `crates/koji-web/src/api.rs` (for GET/POST /api/config/structured)
+- Modify: `crates/tama-web/src/pages/config_editor.rs` (replace existing implementation)
+- Modify: `crates/tama-web/src/pages/mod.rs` (ensure ConfigEditor is exported)
+- Read: `crates/tama-web/src/api.rs` (for GET/POST /api/config/structured)
 
 **What to implement:**
 
@@ -850,12 +850,12 @@ Now we assemble all the pieces into a single config page that ties together navi
 6. **Important**: Load full Config struct, mutate only edited fields, serialize whole struct back. Do NOT rebuild TOML from partial data.
 
 **Steps:**
-- [ ] Write failing unit test for ConfigEditor in `crates/koji-web/src/pages/config_editor.rs` (in `#[cfg(test)] mod tests`)
+- [ ] Write failing unit test for ConfigEditor in `crates/tama-web/src/pages/config_editor.rs` (in `#[cfg(test)] mod tests`)
   - Test: state management (config, pending_changes, save_status, active_section)
   - Test: API calls use correct endpoints (/api/config/structured)
   - Test: SaveStatus enum works correctly (including Validating state)
   - Test: per-section diff logic for restart banner
-- [ ] Run `cargo test --package koji-web --features ssr --lib config_editor::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib config_editor::tests`
   - Did it fail? If passed, investigate.
 - [ ] Define enum SaveStatus { Idle, Validating, Saving, Success(String), Error(String) } in config_editor.rs
 - [ ] Implement SectionContainer component with `description: AnyView`
@@ -874,11 +874,11 @@ Now we assemble all the pieces into a single config page that ties together navi
   - Add `padding-bottom` to main content
   - Respect `prefers-reduced-motion` for scroll
   - Add "Skip to content" link
-- [ ] Run `cargo test --package koji-web --features ssr --lib config_editor::tests`
+- [ ] Run `cargo test --package tama-web --features ssr --lib config_editor::tests`
   - Did all tests pass?
 - [ ] Run `cargo fmt --all`
   - Did it succeed?
-- [ ] Run `cargo check --package koji-web`
+- [ ] Run `cargo check --package tama-web`
   - Did it succeed?
 - [ ] Commit with message: "feat: implement main ConfigEditor page with structured API"
 
@@ -919,10 +919,10 @@ Per AGENTS.md TDD requirement, we need comprehensive test coverage and documenta
 **Critical note:** Round-trip test should have been written in Task 0. This task focuses on comprehensive integration tests and documentation.
 
 **Files:**
-- Create: `crates/koji-web/tests/config_integration_test.rs`
+- Create: `crates/tama-web/tests/config_integration_test.rs`
 - Create: `docs/config-page-user-guide.md`
 - Create: `docs/config-page-developer-guide.md`
-- Modify: `crates/koji-web/README.md` (if exists)
+- Modify: `crates/tama-web/README.md` (if exists)
 
 **What to implement:**
 
@@ -951,7 +951,7 @@ Per AGENTS.md TDD requirement, we need comprehensive test coverage and documenta
     - Verify no regressions in existing features
 
 **Steps:**
-- [ ] Add `[[test]] name = "config_integration_test" path = "tests/config_integration_test.rs" required-features = ["ssr"]` to `crates/koji-web/Cargo.toml`
+- [ ] Add `[[test]] name = "config_integration_test" path = "tests/config_integration_test.rs" required-features = ["ssr"]` to `crates/tama-web/Cargo.toml`
 - [ ] Write integration test for full config round-trip (verify models, sampling_templates preserved; loaded_from manually restored)
 - [ ] Write integration test for POST /api/config/structured error handling (400, 500)
 - [ ] Write integration test for sampling fields serialization
@@ -959,11 +959,11 @@ Per AGENTS.md TDD requirement, we need comprehensive test coverage and documenta
 - [ ] Write integration test for proxy hot-reload via sync_proxy_config
 - [ ] Write equivalence test: /api/config (TOML) and /api/config/structured (JSON) produce same disk content
 - [ ] Write BUILTIN_TEMPLATES sync test with `Profile::all()`
-- [ ] Run `cargo test --package koji-web --test config_integration_test`
+- [ ] Run `cargo test --package tama-web --test config_integration_test`
   - Did all tests pass?
 - [ ] Create user guide documentation (`docs/config-page-user-guide.md`)
 - [ ] Create developer guide documentation (`docs/config-page-developer-guide.md`)
-- [ ] Run `cargo clippy --package koji-web -- -D warnings`
+- [ ] Run `cargo clippy --package tama-web -- -D warnings`
   - Did it succeed? If not, fix warnings.
 - [ ] Run `cargo fmt --all`
   - Did it succeed?
@@ -995,8 +995,8 @@ Execute tasks in order: 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 10
 - Task 0 MUST be completed first (all other tasks depend on JSON API)
 - **BLOCKER BEFORE ANY TASKS:** Resolve C3 (health_check_timeout_ms/retries) before starting Task 0
 - Each task is independently commitable and follows TDD pattern
-- Use `cargo test --package koji-web --features ssr --lib <module>::tests` for inline unit tests
-- Use `cargo test --package koji-web --test <name>` for integration tests with [[test]] entry
+- Use `cargo test --package tama-web --features ssr --lib <module>::tests` for inline unit tests
+- Use `cargo test --package tama-web --test <name>` for integration tests with [[test]] entry
 
 **Task numbering:** Tasks are numbered 0-8, then 10 (Task 9 was absorbed into Task 1 for accessibility). No renumbering needed.
 

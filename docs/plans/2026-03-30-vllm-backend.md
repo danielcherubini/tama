@@ -1,25 +1,25 @@
 # vLLM Backend Support Plan
 
-**Goal:** Add vLLM as a first-class backend type in koji with full lifecycle management (start, stop, health check, auto-unload), matching the existing llama.cpp/ik_llama experience.
+**Goal:** Add vLLM as a first-class backend type in tama with full lifecycle management (start, stop, health check, auto-unload), matching the existing llama.cpp/ik_llama experience.
 
 **Status:** 🚧 NOT STARTED - Only remaining major feature plan. Need to add `Vllm` variant to `BackendType` enum with PyPI version checking.
 
 **Architecture:** vLLM is a Python-based inference server (installed via pip) that serves an OpenAI-compatible API on `/v1/chat/completions` with health checks on `/health`. Unlike llama.cpp, it uses HuggingFace safetensors models (not GGUF), takes different CLI flags (`vllm serve <model> --port N`), handles sampling parameters per-request (not as CLI flags), and primarily runs on Linux. The proxy layer requires no changes since it just forwards HTTP. The key work is in the backend type enum, arg builder, installer, and updater.
 
-**Tech Stack:** Rust (koji-core, koji-cli), Python (vLLM external dependency), PyPI API for version checks
+**Tech Stack:** Rust (tama-core, tama-cli), Python (vLLM external dependency), PyPI API for version checks
 
 ---
 
 ### Task 1: Add `BackendType::Vllm` variant and update all match arms
 
 **Context:**
-Every backend in koji has a `BackendType` enum variant in `registry_ops.rs`. Adding a new backend requires updating this enum plus every `match` expression that pattern-matches on it across the entire workspace. This is a foundational task — all subsequent tasks depend on the `Vllm` variant existing. The variant needs Display, FromStr, and Serialize/Deserialize support. The compiler will flag any exhaustive-match errors, but the agent must proactively find and update every match arm.
+Every backend in tama has a `BackendType` enum variant in `registry_ops.rs`. Adding a new backend requires updating this enum plus every `match` expression that pattern-matches on it across the entire workspace. This is a foundational task — all subsequent tasks depend on the `Vllm` variant existing. The variant needs Display, FromStr, and Serialize/Deserialize support. The compiler will flag any exhaustive-match errors, but the agent must proactively find and update every match arm.
 
 **Files:**
-- Modify: `crates/koji-core/src/backends/registry/registry_ops.rs` — enum definition + Display + FromStr
-- Modify: `crates/koji-core/src/backends/installer/urls.rs` — `get_prebuilt_url` match arm
-- Modify: `crates/koji-core/src/backends/updater.rs` — `check_latest_version` match arm
-- Modify: `crates/koji-cli/src/commands/backend.rs` — **5 separate match arms** (see details below) + `parse_backend_type()` function
+- Modify: `crates/tama-core/src/backends/registry/registry_ops.rs` — enum definition + Display + FromStr
+- Modify: `crates/tama-core/src/backends/installer/urls.rs` — `get_prebuilt_url` match arm
+- Modify: `crates/tama-core/src/backends/updater.rs` — `check_latest_version` match arm
+- Modify: `crates/tama-cli/src/commands/backend.rs` — **5 separate match arms** (see details below) + `parse_backend_type()` function
 - Test: existing tests in `registry_ops.rs`, `urls.rs`
 
 **What to implement:**
@@ -41,7 +41,7 @@ Every backend in koji has a `BackendType` enum variant in `registry_ops.rs`. Add
      - Deserializes as `PypiPackage`
      - Returns `Ok(commit.info.version)`
 
-6. **In `crates/koji-cli/src/commands/backend.rs`**, update these 5 locations (search for each):
+6. **In `crates/tama-cli/src/commands/backend.rs`**, update these 5 locations (search for each):
    - **`parse_backend_type()` function** (~line 80): Add `"vllm" => Ok(BackendType::Vllm)` and update the error message.
    - **`use_source` match** (search for `let use_source = match backend_type`): Add `BackendType::Vllm` arm that prints `"vLLM is a Python package, not built from source. Registering existing installation..."` and sets `use_source = false`. (The actual vLLM install flow will be built in Task 3; for now this prevents compiler errors.)
    - **`backend_name` match** (search for `let type_str = match backend_type`): Add `BackendType::Vllm => "vllm"`.
@@ -51,11 +51,11 @@ Every backend in koji has a `BackendType` enum variant in `registry_ops.rs`. Add
 7. Add a test `test_vllm_prebuilt_not_available` in `urls.rs` tests.
 
 **Steps:**
-- [ ] Add `Vllm` variant to `BackendType` enum in `crates/koji-core/src/backends/registry/registry_ops.rs`
+- [ ] Add `Vllm` variant to `BackendType` enum in `crates/tama-core/src/backends/registry/registry_ops.rs`
 - [ ] Update `Display` and `FromStr` impls in the same file
-- [ ] Add `BackendType::Vllm` arm to `get_prebuilt_url` in `crates/koji-core/src/backends/installer/urls.rs`
-- [ ] Add `PypiPackage`/`PypiInfo` structs and `BackendType::Vllm` arm to `check_latest_version` in `crates/koji-core/src/backends/updater.rs`
-- [ ] Update all 5 match arms + `parse_backend_type()` in `crates/koji-cli/src/commands/backend.rs`
+- [ ] Add `BackendType::Vllm` arm to `get_prebuilt_url` in `crates/tama-core/src/backends/installer/urls.rs`
+- [ ] Add `PypiPackage`/`PypiInfo` structs and `BackendType::Vllm` arm to `check_latest_version` in `crates/tama-core/src/backends/updater.rs`
+- [ ] Update all 5 match arms + `parse_backend_type()` in `crates/tama-cli/src/commands/backend.rs`
 - [ ] Add test `test_vllm_prebuilt_not_available` in `urls.rs`
 - [ ] Run `cargo test --workspace` — compiler will catch any missed match arms. Fix ALL exhaustiveness errors.
 - [ ] Run `cargo clippy --workspace -- -D warnings`
@@ -76,7 +76,7 @@ Every backend in koji has a `BackendType` enum variant in `registry_ops.rs`. Add
 ### Task 2: Add vLLM-specific arg builder in `resolve.rs`
 
 **Context:**
-Koji builds CLI arguments for backends in `Config::build_full_args()` in `crates/koji-core/src/config/resolve.rs`. Currently this function assumes all backends use llama.cpp-style flags (`-m`, `-c`, `-ngl`, `--temp`, etc.). vLLM uses completely different flags. We need to detect when a backend is vLLM-type and build args differently.
+Tama builds CLI arguments for backends in `Config::build_full_args()` in `crates/tama-core/src/config/resolve.rs`. Currently this function assumes all backends use llama.cpp-style flags (`-m`, `-c`, `-ngl`, `--temp`, etc.). vLLM uses completely different flags. We need to detect when a backend is vLLM-type and build args differently.
 
 To detect vLLM backends, we add an optional `backend_type` field to `BackendConfig`. When `backend_type` is `Some("vllm")`, the arg builder switches to vLLM mode. When `None`, it defaults to llama.cpp-style (backward compatible with all existing configs).
 
@@ -91,11 +91,11 @@ Key differences from llama.cpp:
 - Sampling parameters are per-request, NOT CLI flags — do not emit `--temp`, `--top-k`, etc.
 
 **Files:**
-- Modify: `crates/koji-core/src/config/types.rs` — add `backend_type` field to `BackendConfig`
-- Modify: `crates/koji-core/src/config/resolve.rs` — add `build_vllm_args()`, update `build_full_args()`
-- Modify: `crates/koji-core/src/config/loader.rs` — add `backend_type: None` to default `BackendConfig`
-- Modify: `crates/koji-cli/tests/tests.rs` — add `backend_type: None` to test `BackendConfig` construction
-- Test: add tests in `crates/koji-core/src/config/resolve.rs`
+- Modify: `crates/tama-core/src/config/types.rs` — add `backend_type` field to `BackendConfig`
+- Modify: `crates/tama-core/src/config/resolve.rs` — add `build_vllm_args()`, update `build_full_args()`
+- Modify: `crates/tama-core/src/config/loader.rs` — add `backend_type: None` to default `BackendConfig`
+- Modify: `crates/tama-cli/tests/tests.rs` — add `backend_type: None` to test `BackendConfig` construction
+- Test: add tests in `crates/tama-core/src/config/resolve.rs`
 
 **What to implement:**
 
@@ -105,8 +105,8 @@ Key differences from llama.cpp:
    pub backend_type: Option<String>,
    ```
    **IMPORTANT:** This field uses `#[serde(default)]` so existing TOML configs without it deserialize correctly (defaults to `None`). However, you must ALSO update every place that constructs a `BackendConfig` with struct literal syntax, adding `backend_type: None`. Search the entire workspace for `BackendConfig {` to find all construction sites:
-   - `crates/koji-core/src/config/loader.rs` (in `Config::default()`)
-   - `crates/koji-cli/tests/tests.rs` (in test helper)
+   - `crates/tama-core/src/config/loader.rs` (in `Config::default()`)
+   - `crates/tama-cli/tests/tests.rs` (in test helper)
    - Any other places found by the compiler
 
 2. **Add `build_vllm_args()` method** to `Config` in `resolve.rs`:
@@ -168,15 +168,15 @@ Key differences from llama.cpp:
 ### Task 3: Add vLLM to CLI backend install command
 
 **Context:**
-The CLI `koji backend install` command in `crates/koji-cli/src/commands/backend.rs` handles backend installation. For llama.cpp it downloads prebuilt binaries or builds from source. For ik_llama it builds from source. For vLLM, installation is fundamentally different — it's a Python package installed via pip, not a compiled binary.
+The CLI `tama backend install` command in `crates/tama-cli/src/commands/backend.rs` handles backend installation. For llama.cpp it downloads prebuilt binaries or builds from source. For ik_llama it builds from source. For vLLM, installation is fundamentally different — it's a Python package installed via pip, not a compiled binary.
 
-Phase 1 approach: **manual registration** where koji detects an existing `vllm` binary on the system. The user must have already installed vLLM via `pip install vllm`. Koji finds the binary, registers it in the backend registry, and writes the config. This skips the entire `InstallOptions`/`install_backend()` path that llama.cpp/ik_llama use.
+Phase 1 approach: **manual registration** where tama detects an existing `vllm` binary on the system. The user must have already installed vLLM via `pip install vllm`. Tama finds the binary, registers it in the backend registry, and writes the config. This skips the entire `InstallOptions`/`install_backend()` path that llama.cpp/ik_llama use.
 
 For the backend registry, vLLM backends use `source: None` on `BackendInfo` (since they're not built from source or downloaded as prebuilt).
 
 **Files:**
-- Modify: `crates/koji-cli/src/commands/backend.rs` — main install flow for vLLM
-- Modify: `crates/koji-core/src/config/loader.rs` — (optional) helper for adding vLLM backend config
+- Modify: `crates/tama-cli/src/commands/backend.rs` — main install flow for vLLM
+- Modify: `crates/tama-core/src/config/loader.rs` — (optional) helper for adding vLLM backend config
 
 **What to implement:**
 
@@ -218,10 +218,10 @@ For the backend registry, vLLM backends use `source: None` on `BackendInfo` (sin
 - [ ] Commit with message: `feat: add vLLM backend install with auto-detection from PATH`
 
 **Acceptance criteria:**
-- [ ] `koji backend install vllm` detects and registers the vllm binary on Linux
-- [ ] `koji backend install vllm` on Windows gives a clear error
+- [ ] `tama backend install vllm` detects and registers the vllm binary on Linux
+- [ ] `tama backend install vllm` on Windows gives a clear error
 - [ ] If vllm is not on PATH, a clear error with install instructions is shown
-- [ ] `koji backend list` shows the vLLM backend correctly
+- [ ] `tama backend list` shows the vLLM backend correctly
 - [ ] Config file gets `backend_type = "vllm"` entry with sensible defaults
 - [ ] The vLLM flow skips GPU selection and source/prebuilt prompts entirely
 
@@ -230,14 +230,14 @@ For the backend registry, vLLM backends use `source: None` on `BackendInfo` (sin
 ### Task 4: vLLM quant mapping and configurable health check timeout
 
 **Context:**
-vLLM supports quantized model inference via `--quantization` flag (values: `awq`, `gptq`, `fp8`, `bitsandbytes`, etc.). Koji's `ModelConfig.quant` field should map to this when using a vLLM backend. Additionally, vLLM takes 30-120 seconds to load models (much longer than llama.cpp's ~5-10 seconds). The existing `startup_timeout_secs` in `ProxyConfig` (default: 30s) needs to be overridable per-backend.
+vLLM supports quantized model inference via `--quantization` flag (values: `awq`, `gptq`, `fp8`, `bitsandbytes`, etc.). Tama's `ModelConfig.quant` field should map to this when using a vLLM backend. Additionally, vLLM takes 30-120 seconds to load models (much longer than llama.cpp's ~5-10 seconds). The existing `startup_timeout_secs` in `ProxyConfig` (default: 30s) needs to be overridable per-backend.
 
 **Files:**
-- Modify: `crates/koji-core/src/config/resolve.rs` — add quant mapping to `build_vllm_args()`
-- Modify: `crates/koji-core/src/config/types.rs` — add `startup_timeout_secs` to `BackendConfig`
-- Modify: `crates/koji-core/src/proxy/lifecycle.rs` — use per-backend timeout when available
-- Modify: `crates/koji-core/src/config/loader.rs` — add default for new field
-- Modify: `crates/koji-cli/tests/tests.rs` — add new field to test construction sites
+- Modify: `crates/tama-core/src/config/resolve.rs` — add quant mapping to `build_vllm_args()`
+- Modify: `crates/tama-core/src/config/types.rs` — add `startup_timeout_secs` to `BackendConfig`
+- Modify: `crates/tama-core/src/proxy/lifecycle.rs` — use per-backend timeout when available
+- Modify: `crates/tama-core/src/config/loader.rs` — add default for new field
+- Modify: `crates/tama-cli/tests/tests.rs` — add new field to test construction sites
 - Test: add tests in `resolve.rs`
 
 **What to implement:**
@@ -290,16 +290,16 @@ vLLM supports quantized model inference via `--quantization` flag (values: `awq`
 With vLLM backend support implemented, users need to know how to use it. This task adds an example config block and ensures all help/error text is consistent.
 
 **Files:**
-- Modify: `config/koji.toml` — add commented-out vLLM example
+- Modify: `config/tama.toml` — add commented-out vLLM example
 - Verify: all error messages across Tasks 1-4 mention vLLM where appropriate
 
 **What to implement:**
 
-1. **Example config**: Add a commented-out vLLM example section at the bottom of `config/koji.toml`:
+1. **Example config**: Add a commented-out vLLM example section at the bottom of `config/tama.toml`:
    ```toml
    # === vLLM Backend (Linux only) ===
    # Install vLLM first: pip install vllm
-   # Then register: koji backend install vllm
+   # Then register: tama backend install vllm
    #
    # [backends.vllm]
    # path = "/usr/bin/vllm"
@@ -319,7 +319,7 @@ With vLLM backend support implemented, users need to know how to use it. This ta
 2. **Verify consistency**: Grep the workspace for any remaining references to "Supported: llama_cpp, ik_llama" that don't include `vllm`. Update them.
 
 **Steps:**
-- [ ] Add commented-out vLLM example to `config/koji.toml`
+- [ ] Add commented-out vLLM example to `config/tama.toml`
 - [ ] Search for stale "Supported:" strings and update to include vllm
 - [ ] Run `cargo test --workspace`
 - [ ] Run `cargo clippy --workspace -- -D warnings`
@@ -327,6 +327,6 @@ With vLLM backend support implemented, users need to know how to use it. This ta
 - [ ] Commit with message: `docs: add vLLM backend example config and update help text`
 
 **Acceptance criteria:**
-- [ ] `config/koji.toml` has a clear vLLM example section
+- [ ] `config/tama.toml` has a clear vLLM example section
 - [ ] All "Supported backends" strings include vllm
 - [ ] All tests pass

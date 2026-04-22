@@ -10,8 +10,8 @@ This feature adds the ability to view and control model loading/unloading direct
 
 ## Technical Changes
 
-### 1. Backend (koji-core)
-The `MetricSample` sent via the `/koji/v1/system/metrics/stream` endpoint must be expanded to include model information.
+### 1. Backend (tama-core)
+The `MetricSample` sent via the `/tama/v1/system/metrics/stream` endpoint must be expanded to include model information.
 
 **New Data Structure (in `MetricSample`):**
 ```rust
@@ -36,13 +36,13 @@ struct MetricSample {
 - For each model, determine if it is "loaded" (e.g., based on its `ModelState`).
 - Include this list in the `MetricSample` sent via the broadcast channel.
 
-### 2. Frontend (koji-web)
+### 2. Frontend (tama-web)
 
 #### Data Model Update
-Update `MetricSample` in `crates/koji-web/src/pages/dashboard.rs` to include the `models` field.
+Update `MetricSample` in `crates/tama-web/src/pages/dashboard.rs` to include the `models` field.
 
 #### UI Update
-Modify the `Dashboard` component in `crates/koji-web/src/pages/dashboard.rs`:
+Modify the `Dashboard` component in `crates/tama-web/src/pages/dashboard.rs`:
 - Replace the simple `models_loaded` card with a more descriptive "Active Models" section.
 - Implement a new sub-component or view block that iterates over `h.models`.
 - For each model, render:

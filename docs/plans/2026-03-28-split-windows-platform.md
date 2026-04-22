@@ -2,7 +2,7 @@
 
 **Status:** ✅ COMPLETED - See git commit `5d20835` ("refactor: split platform/windows.rs into focused submodules")
 
-**Goal:** Convert the monolithic 458-line `crates/koji-core/src/platform/windows.rs` into a `windows/` directory with focused submodules, without changing any behavior or public API.
+**Goal:** Convert the monolithic 458-line `crates/tama-core/src/platform/windows.rs` into a `windows/` directory with focused submodules, without changing any behavior or public API.
 
 **Architecture:** The file contains 11 functions in 4 logical groups: service installation, service lifecycle (start/stop/query/remove), firewall rules, and user permissions. We split into 4 files plus a `mod.rs` that re-exports everything so callers don't change.
 
@@ -31,7 +31,7 @@ Here's every function in `windows.rs` and which file it goes to:
 ### New file structure:
 
 ```
-crates/koji-core/src/platform/
+crates/tama-core/src/platform/
 ├── mod.rs              ← EXISTING (tiny edit: `pub mod windows` stays as-is)
 ├── linux.rs            ← UNTOUCHED
 ├── job_object.rs       ← UNTOUCHED
@@ -46,16 +46,16 @@ crates/koji-core/src/platform/
 ### Who calls these functions (DO NOT change these files):
 
 ```
-crates/koji-cli/src/handlers/server.rs:57    → koji_core::platform::windows::query_service(...)
-crates/koji-cli/src/handlers/server.rs:121   → koji_core::platform::windows::query_service(...)
-crates/koji-cli/src/handlers/service_cmd.rs:22  → koji_core::platform::windows::install_service(...)
-crates/koji-cli/src/handlers/service_cmd.rs:56  → koji_core::platform::windows::install_proxy_service(...)
-crates/koji-cli/src/handlers/service_cmd.rs:89  → koji_core::platform::windows::remove_service(...)
-crates/koji-cli/src/handlers/service_cmd.rs:110 → koji_core::platform::windows::start_service(...)
-crates/koji-cli/src/handlers/service_cmd.rs:128 → koji_core::platform::windows::stop_service(...)
+crates/tama-cli/src/handlers/server.rs:57    → tama_core::platform::windows::query_service(...)
+crates/tama-cli/src/handlers/server.rs:121   → tama_core::platform::windows::query_service(...)
+crates/tama-cli/src/handlers/service_cmd.rs:22  → tama_core::platform::windows::install_service(...)
+crates/tama-cli/src/handlers/service_cmd.rs:56  → tama_core::platform::windows::install_proxy_service(...)
+crates/tama-cli/src/handlers/service_cmd.rs:89  → tama_core::platform::windows::remove_service(...)
+crates/tama-cli/src/handlers/service_cmd.rs:110 → tama_core::platform::windows::start_service(...)
+crates/tama-cli/src/handlers/service_cmd.rs:128 → tama_core::platform::windows::stop_service(...)
 ```
 
-**CRITICAL:** All callers use the path `koji_core::platform::windows::function_name`. Because `mod.rs` re-exports everything with `pub use`, callers **do not need to change**. If any caller breaks, the `mod.rs` re-exports are wrong — fix them, don't touch the callers.
+**CRITICAL:** All callers use the path `tama_core::platform::windows::function_name`. Because `mod.rs` re-exports everything with `pub use`, callers **do not need to change**. If any caller breaks, the `mod.rs` re-exports are wrong — fix them, don't touch the callers.
 
 ---
 
@@ -69,12 +69,12 @@ Rust lets you define a module as either a single file (`windows.rs`) or a direct
 **Step 1.1: Create the directory**
 
 ```bash
-mkdir crates/koji-core/src/platform/windows
+mkdir crates/tama-core/src/platform/windows
 ```
 
 **Step 1.2: Create `windows/mod.rs`**
 
-Create the file `crates/koji-core/src/platform/windows/mod.rs` with this EXACT content:
+Create the file `crates/tama-core/src/platform/windows/mod.rs` with this EXACT content:
 
 ```rust
 //! Windows platform support
@@ -87,7 +87,7 @@ mod permissions;
 mod service;
 
 // Re-export all public functions so callers don't need to change.
-// e.g. `koji_core::platform::windows::start_service` still works.
+// e.g. `tama_core::platform::windows::start_service` still works.
 pub use firewall::{add_firewall_rule, remove_firewall_rule};
 pub use install::{install_proxy_service, install_service};
 pub use service::{query_service, remove_service, start_service, stop_service};
@@ -112,7 +112,7 @@ Moving the service lifecycle functions into their own file. This file contains t
 
 **Step 2.1: Create `windows/service.rs`**
 
-Create the file `crates/koji-core/src/platform/windows/service.rs` with this EXACT content.
+Create the file `crates/tama-core/src/platform/windows/service.rs` with this EXACT content.
 
 Copy these pieces from `windows.rs`:
 
@@ -172,7 +172,7 @@ Moving the two firewall functions into their own file.
 
 **Step 3.1: Create `windows/firewall.rs`**
 
-Create the file `crates/koji-core/src/platform/windows/firewall.rs` with this EXACT content.
+Create the file `crates/tama-core/src/platform/windows/firewall.rs` with this EXACT content.
 
 1. **Imports:**
 
@@ -201,7 +201,7 @@ Moving the two permission functions (SID resolution and SDDL grant) into their o
 
 **Step 4.1: Create `windows/permissions.rs`**
 
-Create the file `crates/koji-core/src/platform/windows/permissions.rs` with this EXACT content.
+Create the file `crates/tama-core/src/platform/windows/permissions.rs` with this EXACT content.
 
 1. **Imports:**
 
@@ -228,7 +228,7 @@ Moving the two install functions. These call into `firewall.rs` and `permissions
 
 **Step 5.1: Create `windows/install.rs`**
 
-Create the file `crates/koji-core/src/platform/windows/install.rs` with this EXACT content.
+Create the file `crates/tama-core/src/platform/windows/install.rs` with this EXACT content.
 
 1. **Imports:**
 
@@ -316,14 +316,14 @@ Now that all the code lives in `windows/mod.rs` + submodules, the old single fil
 **Step 6.1: Delete the old file**
 
 ```bash
-rm crates/koji-core/src/platform/windows.rs
+rm crates/tama-core/src/platform/windows.rs
 ```
 
 ### Verification
 
 At this point you should have:
 ```
-crates/koji-core/src/platform/
+crates/tama-core/src/platform/
 ├── mod.rs              ← unchanged
 ├── linux.rs            ← unchanged
 ├── job_object.rs       ← unchanged
@@ -335,7 +335,7 @@ crates/koji-core/src/platform/
     └── permissions.rs
 ```
 
-The OLD file `crates/koji-core/src/platform/windows.rs` should NOT exist.
+The OLD file `crates/tama-core/src/platform/windows.rs` should NOT exist.
 
 ---
 
@@ -406,12 +406,12 @@ git diff --stat
 
 You should see ONLY these changes:
 ```
- deleted:    crates/koji-core/src/platform/windows.rs
- new file:   crates/koji-core/src/platform/windows/mod.rs
- new file:   crates/koji-core/src/platform/windows/install.rs
- new file:   crates/koji-core/src/platform/windows/service.rs
- new file:   crates/koji-core/src/platform/windows/firewall.rs
- new file:   crates/koji-core/src/platform/windows/permissions.rs
+ deleted:    crates/tama-core/src/platform/windows.rs
+ new file:   crates/tama-core/src/platform/windows/mod.rs
+ new file:   crates/tama-core/src/platform/windows/install.rs
+ new file:   crates/tama-core/src/platform/windows/service.rs
+ new file:   crates/tama-core/src/platform/windows/firewall.rs
+ new file:   crates/tama-core/src/platform/windows/permissions.rs
 ```
 
 **If you see any other files modified** (like `service_cmd.rs`, `server.rs`, `mod.rs`), something went wrong. The whole point is that `mod.rs` re-exports make this transparent to callers.
@@ -422,12 +422,12 @@ You should see ONLY these changes:
 
 ## Checklist Before Committing
 
-- [ ] `crates/koji-core/src/platform/windows.rs` is DELETED (does not exist)
-- [ ] `crates/koji-core/src/platform/windows/mod.rs` exists and has re-exports
-- [ ] `crates/koji-core/src/platform/windows/install.rs` exists
-- [ ] `crates/koji-core/src/platform/windows/service.rs` exists
-- [ ] `crates/koji-core/src/platform/windows/firewall.rs` exists
-- [ ] `crates/koji-core/src/platform/windows/permissions.rs` exists
+- [ ] `crates/tama-core/src/platform/windows.rs` is DELETED (does not exist)
+- [ ] `crates/tama-core/src/platform/windows/mod.rs` exists and has re-exports
+- [ ] `crates/tama-core/src/platform/windows/install.rs` exists
+- [ ] `crates/tama-core/src/platform/windows/service.rs` exists
+- [ ] `crates/tama-core/src/platform/windows/firewall.rs` exists
+- [ ] `crates/tama-core/src/platform/windows/permissions.rs` exists
 - [ ] `cargo fmt --all` produces no changes
 - [ ] `cargo build --workspace` succeeds
 - [ ] `cargo clippy --workspace -- -D warnings` succeeds

@@ -6,11 +6,11 @@
 
 ## Problem
 
-`koji status` and `koji model ps` have diverged in output format. Both are slow because they independently query health endpoints per model with 3s HTTP timeouts. The output shows a "Service" line that's no longer relevant (single proxy architecture), and VRAM is buried at the bottom. Neither command shows whether a model is actually loaded in the proxy or useful config details.
+`tama status` and `tama model ps` have diverged in output format. Both are slow because they independently query health endpoints per model with 3s HTTP timeouts. The output shows a "Service" line that's no longer relevant (single proxy architecture), and VRAM is buried at the bottom. Neither command shows whether a model is actually loaded in the proxy or useful config details.
 
 ## Goals
 
-1. **Unified command**: Remove `koji model ps`, keep only `koji status`
+1. **Unified command**: Remove `tama model ps`, keep only `tama status`
 2. **Fast**: Single HTTP call to the running proxy instead of per-model health checks
 3. **Informative**: Show model config (source, quant, profile, context) and runtime state (loaded, idle timeout)
 4. **VRAM at top**: GPU memory displayed prominently
@@ -80,7 +80,7 @@ The CLI also queries VRAM independently (for the proxy-down fallback case), whic
 ### CLI Output Format
 
 ```
-KOJI Status
+TAMA Status
 ------------------------------------------------------------
   VRAM:     633 / 10240 MiB
 
@@ -104,7 +104,7 @@ KOJI Status
 When the proxy is not running, fall back to config-only display (no loaded/idle info):
 
 ```
-KOJI Status
+TAMA Status
 ------------------------------------------------------------
   VRAM:     633 / 10240 MiB
 
@@ -125,7 +125,7 @@ KOJI Status
 
 ### What Gets Removed
 
-- `koji model ps` command entirely (from ModelCommands enum, model.rs dispatch, and main.rs)
+- `tama model ps` command entirely (from ModelCommands enum, model.rs dispatch, and main.rs)
 - Service status querying from `cmd_status` (no more `query_service` / platform calls)
 - Per-model HTTP health checks from `cmd_status`
 

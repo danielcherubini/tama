@@ -8,7 +8,7 @@
 
 ## 1. Data Model Changes
 
-### 1.1 QuantEntry struct (`crates/koji-core/src/models/pull.rs` or `crates/koji-web/src/components/pull_quant_wizard.rs`)
+### 1.1 QuantEntry struct (`crates/tama-core/src/models/pull.rs` or `crates/tama-web/src/components/pull_quant_wizard.rs`)
 
 Add `is_mmproj` field to distinguish mmproj files from model quants:
 
@@ -26,7 +26,7 @@ struct QuantEntry {
 - Returns `true` if filename matches glob pattern `mmproj*.gguf`
 - Case-insensitive matching
 
-### 1.2 ModelCard struct (`crates/koji-core/src/models/card.rs`)
+### 1.2 ModelCard struct (`crates/tama-core/src/models/card.rs`)
 
 Add `mmproj` field to track selected mmproj:
 
@@ -42,7 +42,7 @@ pub struct ModelMeta {
 
 ## 2. Backend Changes
 
-### 2.1 HF List Endpoint (`crates/koji-core/src/proxy/koji_handlers.rs`)
+### 2.1 HF List Endpoint (`crates/tama-core/src/proxy/tama_handlers.rs`)
 
 Modify `handle_hf_list_quants` to:
 1. Fetch all blobs from HF repo (existing)
@@ -62,7 +62,7 @@ let mut quants: Vec<QuantEntry> = blobs
     .collect();
 ```
 
-### 2.2 Model Config Save (`crates/koji-core/src/models/card.rs`)
+### 2.2 Model Config Save (`crates/tama-core/src/models/card.rs`)
 
 When saving model config, if `mmproj` field is set:
 - Verify mmproj file exists in model directory
@@ -72,7 +72,7 @@ When saving model config, if `mmproj` field is set:
 
 ## 3. Frontend Wizard Changes
 
-### 3.1 PullQuantWizard Component (`crates/koji-web/src/components/pull_quant_wizard.rs`)
+### 3.1 PullQuantWizard Component (`crates/tama-web/src/components/pull_quant_wizard.rs`)
 
 #### 3.1.1 New Signals
 
@@ -183,7 +183,7 @@ if !available_mmprojs.get().is_empty() {
 
 ## 4. Model Config Page Changes
 
-### 4.1 ModelEditor Component (`crates/koji-web/src/pages/model_editor.rs`)
+### 4.1 ModelEditor Component (`crates/tama-web/src/pages/model_editor.rs`)
 
 #### 4.1.1 New Form Fields
 
@@ -312,14 +312,14 @@ When fetching model config:
 ## 7. Files to Modify
 
 ### Backend
-- `crates/koji-core/src/models/pull.rs` - Add `is_mmproj` field
-- `crates/koji-core/src/proxy/koji_handlers.rs` - Update `handle_hf_list_quants`
-- `crates/koji-core/src/models/card.rs` - Add `mmproj` field to `ModelMeta`
+- `crates/tama-core/src/models/pull.rs` - Add `is_mmproj` field
+- `crates/tama-core/src/proxy/tama_handlers.rs` - Update `handle_hf_list_quants`
+- `crates/tama-core/src/models/card.rs` - Add `mmproj` field to `ModelMeta`
 
 ### Frontend
-- `crates/koji-web/src/components/pull_quant_wizard.rs` - Add Vision step
-- `crates/koji-web/src/pages/model_editor.rs` - Add Vision toggle and dropdown
-- `crates/koji-web/style.css` - Add any new styles for Vision UI
+- `crates/tama-web/src/components/pull_quant_wizard.rs` - Add Vision step
+- `crates/tama-web/src/pages/model_editor.rs` - Add Vision toggle and dropdown
+- `crates/tama-web/style.css` - Add any new styles for Vision UI
 
 ---
 

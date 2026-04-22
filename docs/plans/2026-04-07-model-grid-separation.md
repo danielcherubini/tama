@@ -14,7 +14,7 @@
 The plan must follow TDD (test-first) as prescribed by AGENTS.md. We need to add failing tests for the partitioning logic before implementing it. This also addresses the reviewer's concern that `models.rs` currently has no tests.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/models.rs` (add `#[cfg(test)]` module)
+- Modify: `crates/tama-web/src/pages/models.rs` (add `#[cfg(test)]` module)
 
 **What to implement:**
 1. Add a `#[cfg(test)]` module at the bottom of models.rs
@@ -36,7 +36,7 @@ The plan must follow TDD (test-first) as prescribed by AGENTS.md. We need to add
 - [ ] Add `#[cfg(test)] mod tests { ... }` block at end of models.rs
 - [ ] Define the `partition_models_by_loaded` stub function (compiles but returns wrong data)
 - [ ] Add test cases for all scenarios mentioned above
-- [ ] Run `cargo test -p koji-web` and verify tests fail at runtime (TDD red)
+- [ ] Run `cargo test -p tama-web` and verify tests fail at runtime (TDD red)
 - [ ] Commit with message: "test(models): add failing tests for partition helper"
 
 **Acceptance criteria:**
@@ -51,7 +51,7 @@ The plan must follow TDD (test-first) as prescribed by AGENTS.md. We need to add
 Now that we have failing tests, we implement the partition helper and update the view to render two sections. This task also specifies empty-section handling: sections with no models are skipped entirely (no header above empty grid). The existing "no models configured" empty-state is preserved.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/models.rs`
+- Modify: `crates/tama-web/src/pages/models.rs`
 
 **What to implement:**
 1. Implement `partition_models_by_loaded` to split models into loaded/unloaded vectors
@@ -69,8 +69,8 @@ Now that we have failing tests, we implement the partition helper and update the
 - [ ] Update the view! macro to split models into two sections
 - [ ] Add conditional rendering: only show section if partition is non-empty
 - [ ] Add the `.model-section` div wrappers with `<h2 class="model-section__title">` headers
-- [ ] Run `cargo test -p koji-web` and verify all tests pass (TDD green)
-- [ ] Run `cargo check -p koji-web` to verify compilation
+- [ ] Run `cargo test -p tama-web` and verify all tests pass (TDD green)
+- [ ] Run `cargo check -p tama-web` to verify compilation
 - [ ] Run `cargo fmt --all`
 - [ ] Commit with message: "feat(web): split models grid into loaded and unloaded sections"
 
@@ -91,8 +91,8 @@ Now that we have failing tests, we implement the partition helper and update the
 The HTML structure needs corresponding CSS to provide visual separation between the two sections. This includes margins, borders, and typography for the section headers. This task follows TDD by first adding failing CSS contract tests.
 
 **Files:**
-- Modify: `crates/koji-web/tests/css_test.rs` (add tests)
-- Modify: `crates/koji-web/style.css` (add rules)
+- Modify: `crates/tama-web/tests/css_test.rs` (add tests)
+- Modify: `crates/tama-web/style.css` (add rules)
 
 **What to implement:**
 1. Add failing CSS contract tests following the existing `style_css_defines_dashboard_models_section_spacing` pattern
@@ -117,12 +117,12 @@ The HTML structure needs corresponding CSS to provide visual separation between 
    ```
 
 **Steps:**
-- [ ] Open `crates/koji-web/tests/css_test.rs` and study the existing CSS contract test pattern
+- [ ] Open `crates/tama-web/tests/css_test.rs` and study the existing CSS contract test pattern
 - [ ] Add failing tests for `.model-section`, `.model-section:last-child`, and `.model-section__title` rules
-- [ ] Run `cargo test -p koji-web` and verify tests fail (TDD red)
+- [ ] Run `cargo test -p tama-web` and verify tests fail (TDD red)
 - [ ] Add the CSS rules to `style.css` in section 17 (after the `/* 17. Models grid & cards */` comment)
-- [ ] Run `cargo test -p koji-web` and verify tests pass (TDD green)
-- [ ] Run `cargo check -p koji-web`
+- [ ] Run `cargo test -p tama-web` and verify tests pass (TDD green)
+- [ ] Run `cargo check -p tama-web`
 - [ ] Run `cargo fmt --all`
 - [ ] Commit with message: "style(web): add section styling for model grid separation"
 

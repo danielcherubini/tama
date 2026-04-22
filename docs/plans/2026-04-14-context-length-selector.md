@@ -12,9 +12,9 @@
 Standard context length presets are used in multiple places. Moving them to a central constants module avoids duplication and prevents circular dependencies between the `ModelEditor` and `PullQuantWizard`.
 
 **Files:**
-- Create: `crates/koji-web/src/constants.rs`
-- Modify: `crates/koji-web/src/lib.rs`
-- Modify: `crates/koji-web/src/components/pull_wizard/mod.rs`
+- Create: `crates/tama-web/src/constants.rs`
+- Modify: `crates/tama-web/src/lib.rs`
+- Modify: `crates/tama-web/src/components/pull_wizard/mod.rs`
 
 **What to implement:**
 1. Create `constants.rs` as a top-level module and export `pub const CONTEXT_VALUES: &[u32]`.
@@ -22,14 +22,14 @@ Standard context length presets are used in multiple places. Moving them to a ce
 3. Remove the hardcoded `CONTEXT_VALUES` array from `pull_wizard/mod.rs` and import it from `crate::constants`.
 
 **Steps:**
-- [ ] Create `crates/koji-web/src/constants.rs` with the 16 predefined context values.
-- [ ] Add `pub mod constants;` to `crates/koji-web/src/lib.rs`.
-- [ ] Replace local `CONTEXT_VALUES` in `crates/koji-web/src/components/pull_wizard/mod.rs` with `use crate::constants::CONTEXT_VALUES;`.
+- [ ] Create `crates/tama-web/src/constants.rs` with the 16 predefined context values.
+- [ ] Add `pub mod constants;` to `crates/tama-web/src/lib.rs`.
+- [ ] Replace local `CONTEXT_VALUES` in `crates/tama-web/src/components/pull_wizard/mod.rs` with `use crate::constants::CONTEXT_VALUES;`.
 - [ ] Run `cargo build` to verify no compilation errors.
 - [ ] Commit with message: "refactor(web): extract context length presets to shared constants"
 
 **Acceptance criteria:**
-- [ ] `CONTEXT_VALUES` is accessible from any module in `koji-web`.
+- [ ] `CONTEXT_VALUES` is accessible from any module in `tama-web`.
 - [ ] `pull_wizard` still functions correctly using the imported constants.
 
 ---
@@ -40,8 +40,8 @@ Standard context length presets are used in multiple places. Moving them to a ce
 The current numeric inputs in Leptos suffer from the "cursor-jump" bug when `prop:value` is updated reactively. This component solves this by using an imperative `set_value` call via a `StoredValue` reference to the DOM element, combined with a dropdown for common presets.
 
 **Files:**
-- Create: `crates/koji-web/src/components/context_length_selector.rs`
-- Modify: `crates/koji-web/src/components/mod.rs`
+- Create: `crates/tama-web/src/components/context_length_selector.rs`
+- Modify: `crates/tama-web/src/components/mod.rs`
 
 **What to implement:**
 1. Implement `ContextLengthSelector` with props: `value: Signal<Option<u32>>`, `on_change: Callback<Option<u32>>`, `reset_key: Signal<String>`, and `class: Option<String>`.
@@ -58,8 +58,8 @@ The current numeric inputs in Leptos suffer from the "cursor-jump" bug when `pro
     - Use an `Effect` to set `is_custom = false` if the external `value` changes to one of the presets.
 
 **Steps:**
-- [ ] Implement the component in `crates/koji-web/src/components/context_length_selector.rs`.
-- [ ] Register the module in `crates/koji-web/src/components/mod.rs`.
+- [ ] Implement the component in `crates/tama-web/src/components/context_length_selector.rs`.
+- [ ] Register the module in `crates/tama-web/src/components/mod.rs`.
 - [ ] Run `cargo build`.
 - [ ] Commit with message: "feat(web): implement ContextLengthSelector component"
 
@@ -76,7 +76,7 @@ The current numeric inputs in Leptos suffer from the "cursor-jump" bug when `pro
 The global context length for a model needs the dropdown UI. Because closures do not auto-convert to `Signal` in Leptos 0.7, `Signal::derive` must be used.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/model_editor/general_form.rs`
+- Modify: `crates/tama-web/src/pages/model_editor/general_form.rs`
 
 **What to implement:**
 1. Replace the `field-ctx` `<input type="number">` with `<ContextLengthSelector />`.
@@ -103,7 +103,7 @@ The global context length for a model needs the dropdown UI. Because closures do
 Each quant in a model can have its own context length override. These are rendered in a table.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/model_editor/quants_vision_form.rs`
+- Modify: `crates/tama-web/src/pages/model_editor/quants_vision_form.rs`
 
 **What to implement:**
 1. Replace the numeric input in the quants table with `<ContextLengthSelector />`.
@@ -130,7 +130,7 @@ Each quant in a model can have its own context length override. These are render
 The wizard's `ContextFileDropdown` currently duplicates the dropdown logic. This should be replaced by the shared component.
 
 **Files:**
-- Modify: `crates/koji-web/src/components/pull_wizard/components/context_step.rs`
+- Modify: `crates/tama-web/src/components/pull_wizard/components/context_step.rs`
 
 **What to implement:**
 1. Remove the `is_custom` signal and the manual `<select>`/`<input>` logic from `ContextFileDropdown`.

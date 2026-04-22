@@ -14,25 +14,25 @@
 The `target_value` function (which extracts a value from an input/select/textarea event) is currently defined in `config_editor.rs` and will be needed by the model editor's new section components. It should be in a shared location so both can use it. This also includes updating config_editor to import from the new location.
 
 **Files:**
-- Create: `crates/koji-web/src/utils.rs`
-- Modify: `crates/koji-web/src/lib.rs` (add `mod utils`)
-- Modify: `crates/koji-web/src/pages/config_editor.rs` (remove local `target_value`, import from `crate::utils`)
+- Create: `crates/tama-web/src/utils.rs`
+- Modify: `crates/tama-web/src/lib.rs` (add `mod utils`)
+- Modify: `crates/tama-web/src/pages/config_editor.rs` (remove local `target_value`, import from `crate::utils`)
 
 **What to implement:**
-- Create `crates/koji-web/src/utils.rs` containing the `pub fn target_value(ev: &leptos::ev::Event) -> String` function, identical to the one currently in `config_editor.rs`. This function handles `<input>`, `<select>`, and `<textarea>` elements.
-- In `crates/koji-web/src/lib.rs`, add `pub mod utils;` alongside the existing module declarations.
+- Create `crates/tama-web/src/utils.rs` containing the `pub fn target_value(ev: &leptos::ev::Event) -> String` function, identical to the one currently in `config_editor.rs`. This function handles `<input>`, `<select>`, and `<textarea>` elements.
+- In `crates/tama-web/src/lib.rs`, add `pub mod utils;` alongside the existing module declarations.
 - In `config_editor.rs`, remove the local `fn target_value` function and add `use crate::utils::target_value;`.
 - In `model_editor.rs`, replace all `event_target_value(&e)` calls with `target_value(&ev)`. Note: the model editor currently uses Leptos's `event_target_value` which only handles `<input>` elements. The new `target_value` from `crate::utils` also handles `<select>` and `<textarea>`, making it more robust.
 
 **Important note:** `rw_signal_to_signal` (line 13), `format_bytes_opt` (line 78), and `short_sha` (line 97) are private helper functions in `model_editor.rs`. These remain as private functions in the same file and will be accessible to all section components since Leptos components in the same file share scope.
 
 **Steps:**
-- [ ] Create `crates/koji-web/src/utils.rs` with the `target_value` function
-- [ ] Add `pub mod utils;` to `crates/koji-web/src/lib.rs`
+- [ ] Create `crates/tama-web/src/utils.rs` with the `target_value` function
+- [ ] Add `pub mod utils;` to `crates/tama-web/src/lib.rs`
 - [ ] Remove `fn target_value` from `config_editor.rs` and add `use crate::utils::target_value;`
-- [ ] Run `cargo build --package koji-web`
+- [ ] Run `cargo build --package tama-web`
   - Did it compile? If not, fix any import errors and re-run.
-- [ ] Run `cargo test --package koji-web`
+- [ ] Run `cargo test --package tama-web`
   - Did all tests pass? If not, fix and re-run.
 - [ ] Run `cargo fmt --all`
 - [ ] Commit with message: "refactor: extract target_value helper to shared utils module"
@@ -41,7 +41,7 @@ The `target_value` function (which extracts a value from an input/select/textare
 - [ ] `target_value` is available at `crate::utils::target_value`
 - [ ] Config editor compiles and works identically
 - [ ] No `target_value` duplicate remains in `config_editor.rs`
-- [ ] All koji-web tests pass
+- [ ] All tama-web tests pass
 
 ---
 
@@ -51,7 +51,7 @@ The `target_value` function (which extracts a value from an input/select/textare
 This is the core structural change. The `ModelEditor` component currently uses ~15 individual `RwSignal`s and renders everything in a single scrolling form. This task adds the `Section` enum, converts state management to `RwSignal<Option<ModelForm>>`, builds the side-nav + main area layout, and moves Save/Delete buttons to the page header. All form content remains in the component body (inside match arms for each section) — extraction into separate components happens in Tasks 3-6. The layout switches from `form-grid` to vertical label-on-top stacks.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/model_editor.rs`
+- Modify: `crates/tama-web/src/pages/model_editor.rs`
 
 **What to implement:**
 
@@ -176,12 +176,12 @@ impl Section {
 - [ ] Convert sampling fields to use `form.update(|f| f.sampling...)`
 - [ ] Convert quants rendering to derive Vec from `form.get().quants`
 - [ ] Switch form layout from `form-grid` to vertical label-on-top in `<div class="card">` sections
-- [ ] Run `cargo build --package koji-web`
+- [ ] Run `cargo build --package tama-web`
   - Did it compile? If not, fix errors and re-run.
-- [ ] Run `cargo test --package koji-web`
+- [ ] Run `cargo test --package tama-web`
   - Did all tests pass? If not, fix and re-run.
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo clippy --package koji-web -- -D warnings`
+- [ ] Run `cargo clippy --package tama-web -- -D warnings`
   - Did it pass? If not, fix warnings and re-run.
 - [ ] Commit with message: "refactor: redesign model editor with side-nav tabs and consolidated state"
 
@@ -202,7 +202,7 @@ impl Section {
 The General section's form content is currently inline in the ModelEditor match arm. Extract it into a separate `GeneralForm` component that receives `form: RwSignal<Option<ModelForm>>` and `backends: RwSignal<Vec<String>>` as props. This makes the code match the config editor's pattern where each section is a separate component.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/model_editor.rs`
+- Modify: `crates/tama-web/src/pages/model_editor.rs`
 
 **What to implement:**
 
@@ -242,9 +242,9 @@ Section::General => view! { <GeneralForm form=form backends=backends /> }.into_a
 - [ ] Create `GeneralForm` component function with proper props
 - [ ] Move all General section field markup from the match arm into `GeneralForm`
 - [ ] Replace inline content in `ModelEditor` match arm with `<GeneralForm form=form backends=backends />`
-- [ ] Run `cargo build --package koji-web`
+- [ ] Run `cargo build --package tama-web`
   - Did it compile? If not, fix errors and re-run.
-- [ ] Run `cargo test --package koji-web`
+- [ ] Run `cargo test --package tama-web`
 - [ ] Run `cargo fmt --all`
 - [ ] Commit with message: "refactor: extract GeneralForm component from model editor"
 
@@ -262,7 +262,7 @@ Section::General => view! { <GeneralForm form=form backends=backends /> }.into_a
 The Sampling section has 7 per-parameter checkbox+input pairs with a preset dropdown. Extract it into a `SamplingForm` component that receives `form: RwSignal<Option<ModelForm>>` and the templates `LocalResource` for preset loading.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/model_editor.rs`
+- Modify: `crates/tama-web/src/pages/model_editor.rs`
 
 **What to implement:**
 
@@ -285,9 +285,9 @@ The preset dropdown dispatches `load_preset_action` which now updates the `form`
 - [ ] Move all Sampling section markup from the match arm into `SamplingForm`
 - [ ] Update `load_preset_action` to use `form.update(|f| f.sampling...)` instead of `sampling_fields.update(|fields| ...)`
 - [ ] Replace inline content in `ModelEditor` match arm with `<SamplingForm form=form templates=templates load_preset_action=load_preset_action />`
-- [ ] Run `cargo build --package koji-web`
+- [ ] Run `cargo build --package tama-web`
   - Did it compile? If not, fix errors and re-run.
-- [ ] Run `cargo test --package koji-web`
+- [ ] Run `cargo test --package tama-web`
 - [ ] Run `cargo fmt --all`
 - [ ] Commit with message: "refactor: extract SamplingForm component from model editor"
 
@@ -305,7 +305,7 @@ The preset dropdown dispatches `load_preset_action` which now updates the `form`
 The Quantizations & Vision section is the most complex — it includes the quants table with inline editing, Pull Quant button/modal, Refresh/Verify action buttons, mmproj toggle and dropdown, and repo-level metadata display. Extract it into `QuantsVisionForm` which receives the `form` signal plus several UI signals and actions.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/model_editor.rs`
+- Modify: `crates/tama-web/src/pages/model_editor.rs`
 
 **What to implement:**
 
@@ -349,11 +349,11 @@ The mmproj toggle reads from `form.get().and_then(|f| f.mmproj.as_ref())` — if
 - [ ] Move refresh/verify status alert markup
 - [ ] Adapt quants rendering to work from `form` signal's `quants` BTreeMap
 - [ ] Replace inline content in `ModelEditor` match arm with `<QuantsVisionForm ... />`
-- [ ] Run `cargo build --package koji-web`
+- [ ] Run `cargo build --package tama-web`
   - Did it compile? If not, fix errors and re-run.
-- [ ] Run `cargo test --package koji-web`
+- [ ] Run `cargo test --package tama-web`
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo clippy --package koji-web -- -D warnings`
+- [ ] Run `cargo clippy --package tama-web -- -D warnings`
 - [ ] Commit with message: "refactor: extract QuantsVisionForm component from model editor"
 
 **Acceptance criteria:**
@@ -372,8 +372,8 @@ The mmproj toggle reads from `form.get().and_then(|f| f.mmproj.as_ref())` — if
 The Extra Args section is the simplest — just a textarea for extra args with a hint. Extract it, then clean up any remaining inline code, remove unused `form-grid` references from model_editor, and verify the entire page works end-to-end.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/model_editor.rs`
-- Modify: `crates/koji-web/style.css` (optional: if any model-editor-specific styles need updating)
+- Modify: `crates/tama-web/src/pages/model_editor.rs`
+- Modify: `crates/tama-web/style.css` (optional: if any model-editor-specific styles need updating)
 
 **What to implement:**
 
@@ -433,11 +433,11 @@ fn ExtraArgsForm(form: RwSignal<Option<ModelForm>>) -> impl IntoView {
 - [ ] Remove `hr.section-divider` that separated sections (no longer needed)
 - [ ] Verify Modal + PullQuantWizard wiring still works
 - [ ] Verify rename logic (old_id vs new_id) still works
-- [ ] Run `cargo build --package koji-web`
+- [ ] Run `cargo build --package tama-web`
   - Did it compile? If not, fix errors and re-run.
-- [ ] Run `cargo test --package koji-web`
+- [ ] Run `cargo test --package tama-web`
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo clippy --package koji-web -- -D warnings`
+- [ ] Run `cargo clippy --package tama-web -- -D warnings`
 - [ ] Run `cargo test --workspace`
   - Did all tests pass? If not, fix and re-run.
 - [ ] Commit with message: "refactor: extract ExtraArgsForm and finalize model editor redesign"

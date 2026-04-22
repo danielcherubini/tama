@@ -1,8 +1,8 @@
 # TTS Backend Plan
 
-**Goal:** Add text-to-speech (TTS) support to Koji with Kokoro and Piper engines, exposed as OpenAI-compatible `/v1/audio/*` endpoints on the existing proxy server.
+**Goal:** Add text-to-speech (TTS) support to Tama with Kokoro and Piper engines, exposed as OpenAI-compatible `/v1/audio/*` endpoints on the existing proxy server.
 
-**Architecture:** Two new crates (`koji-tts` for the engine library, `koji-tts-server` for standalone HTTP serving) plus backend installers in `koji-core`. TTS routes are added directly to the existing proxy router on port 11434 so Open WebUI connects to a single URL. TTS config lives in a new `tts_configs` SQLite table following Koji's established migration pattern. TTS is isolated from LLM backends — never evicts LLMs, managed as a singleton.
+**Architecture:** Two new crates (`tama-tts` for the engine library, `tama-tts-server` for standalone HTTP serving) plus backend installers in `tama-core`. TTS routes are added directly to the existing proxy router on port 11434 so Open WebUI connects to a single URL. TTS config lives in a new `tts_configs` SQLite table following Tama's established migration pattern. TTS is isolated from LLM backends — never evicts LLMs, managed as a singleton.
 
 **Tech Stack:** Rust, tokio, axum (existing), kokoro-micro or tts-rs (new dependency for Kokoro engine), piper-rs (new dependency for Piper engine), SQLite via rusqlite (existing).
 
@@ -11,15 +11,15 @@
 ### Task 1: Database Foundation — `tts_configs` Table + Queries
 
 **Context:**
-Koji stores all persistent configuration in SQLite with a migration system. TTS config needs the same treatment — not just TOML, but a proper table with CRUD operations, case-insensitive lookups, and timestamps. This task creates the foundation that every other TTS task depends on.
+Tama stores all persistent configuration in SQLite with a migration system. TTS config needs the same treatment — not just TOML, but a proper table with CRUD operations, case-insensitive lookups, and timestamps. This task creates the foundation that every other TTS task depends on.
 
 The `tts_configs` table mirrors the existing `model_configs` pattern: autoincrement PK, UNIQUE engine column with COLLATE NOCASE, JSON-serializable fields where needed, created_at/updated_at timestamps.
 
 **Files:**
-- Create: `crates/koji-core/src/db/migrations.rs` (modify — add migration entry)
-- Create: `crates/koji-core/src/db/queries/tts_config_queries.rs` (new file)
-- Create: `crates/koji-core/src/db/queries/mod.rs` (modify — export new module)
-- Create: `crates/koji-core/src/db/types.rs` (modify — add TtsConfigRecord struct)
+- Create: `crates/tama-core/src/db/migrations.rs` (modify — add migration entry)
+- Create: `crates/tama-core/src/db/queries/tts_config_queries.rs` (new file)
+- Create: `crates/tama-core/src/db/queries/mod.rs` (modify — export new module)
+- Create: `crates/tama-core/src/db/types.rs` (modify — add TtsConfigRecord struct)
 
 **What to implement:**
 
@@ -66,25 +66,25 @@ pub struct TtsConfigRecord {
 - [ ] Create `tts_config_queries.rs` with all four query functions, following the exact pattern from `model_config_queries.rs` (same error handling, same use of rusqlite helpers)
 - [ ] Export module in `db/queries/mod.rs`
 - [ ] Run `cargo fmt --all` — did it succeed? If not, fix and re-run before continuing.
-- [ ] Run `cargo build --package koji-core` — did it succeed? If not, fix and re-run before continuing.
+- [ ] Run `cargo build --package tama-core` — did it succeed? If not, fix and re-run before continuing.
 - [ ] Commit with message: "feat(db): add tts_configs table with CRUD queries"
 
 **Acceptance criteria:**
 - [ ] Migration 11 creates the `tts_configs` table with all columns matching the SQL above
 - [ ] All four query functions compile and follow existing patterns (upsert, get by engine, get all, delete)
 - [ ] `TtsConfigRecord` struct has all fields matching the table schema
-- [ ] `cargo build --package koji-core` succeeds with no warnings
+- [ ] `cargo build --package tama-core` succeeds with no warnings
 
 ---
 
 ### Task 2: Backend Type Extension + Registry Support
 
 **Context:**
-Koji's backend registry uses a `BackendType` enum to distinguish between llama.cpp, ik_llama, and custom backends. TTS needs two new variants (`TtsKokoro`, `TtsPiper`) so the installer, registry, and lifecycle manager can identify TTS backends separately from LLM backends. This is needed before any TTS installation or inference can happen.
+Tama's backend registry uses a `BackendType` enum to distinguish between llama.cpp, ik_llama, and custom backends. TTS needs two new variants (`TtsKokoro`, `TtsPiper`) so the installer, registry, and lifecycle manager can identify TTS backends separately from LLM backends. This is needed before any TTS installation or inference can happen.
 
 **Files:**
-- Modify: `crates/koji-core/src/backends/registry/registry_ops.rs` — add enum variants, update Display/FromStr impls
-- Modify: `crates/koji-core/src/backends/mod.rs` — verify no changes needed (re-exports already cover mod)
+- Modify: `crates/tama-core/src/backends/registry/registry_ops.rs` — add enum variants, update Display/FromStr impls
+- Modify: `crates/tama-core/src/backends/mod.rs` — verify no changes needed (re-exports already cover mod)
 
 **What to implement:**
 
@@ -128,8 +128,8 @@ This is used later by the lifecycle manager to filter LLM vs TTS backends.
 - [ ] Update `FromStr` impl with new match arms (accept both `tts_kokoro` and `ttskokoro` forms for user-friendliness)
 - [ ] Add `is_tts()` helper method to `BackendType` impl block
 - [ ] Run `cargo fmt --all` — did it succeed? If not, fix and re-run before continuing.
-- [ ] Run `cargo test --package koji-core -- backends::registry` — did all tests pass? If not, fix and re-run before continuing.
-- [ ] Run `cargo build --package koji-core` — did it succeed? If not, fix and re-run before continuing.
+- [ ] Run `cargo test --package tama-core -- backends::registry` — did all tests pass? If not, fix and re-run before continuing.
+- [ ] Run `cargo build --package tama-core` — did it succeed? If not, fix and re-run before continuing.
 - [ ] Commit with message: "feat(core): add TtsKokoro and TtsPiper backend types"
 
 **Acceptance criteria:**
@@ -138,23 +138,23 @@ This is used later by the lifecycle manager to filter LLM vs TTS backends.
 - [ ] `FromStr` parses both kebab-case (`tts_kokoro`) and concatenated (`ttskokoro`) forms
 - [ ] `is_tts()` returns `true` only for TtsKokoro and TtsPiper
 - [ ] All existing registry tests still pass
-- [ ] `cargo build --package koji-core` succeeds with no warnings
+- [ ] `cargo build --package tama-core` succeeds with no warnings
 
 ---
 
 ### Task 3: Kokoro Backend Installer (`tts_kokoro`)
 
 **Context:**
-LLM backends in Koji have an installer that downloads prebuilt binaries or builds from source, verifies checksums, and registers the backend in the SQLite registry. TTS backends need the same treatment — but instead of a binary server, they download model files (ONNX) and voice packs.
+LLM backends in Tama have an installer that downloads prebuilt binaries or builds from source, verifies checksums, and registers the backend in the SQLite registry. TTS backends need the same treatment — but instead of a binary server, they download model files (ONNX) and voice packs.
 
-This task creates the Kokoro-specific installer: downloads the ONNX model (~310MB) and all voice files (~27MB) from HuggingFace, stores them in `~/.config/koji/backends/tts_kokoro/`, and registers a `BackendType::TtsKokoro` entry in the registry.
+This task creates the Kokoro-specific installer: downloads the ONNX model (~310MB) and all voice files (~27MB) from HuggingFace, stores them in `~/.config/tama/backends/tts_kokoro/`, and registers a `BackendType::TtsKokoro` entry in the registry.
 
 **Files:**
-- Create: `crates/koji-core/src/backends/tts_kokoro/mod.rs` (new file)
-- Create: `crates/koji-core/src/backends/tts_kokoro/download.rs` (new file)
-- Create: `crates/koji-core/src/backends/tts_kokoro/paths.rs` (new file)
-- Modify: `crates/koji-core/src/backends/mod.rs` — add tts_kokoro module, re-export install function
-- Modify: `crates/koji-core/Cargo.toml` — ensure reqwest and hf-hub dependencies are present
+- Create: `crates/tama-core/src/backends/tts_kokoro/mod.rs` (new file)
+- Create: `crates/tama-core/src/backends/tts_kokoro/download.rs` (new file)
+- Create: `crates/tama-core/src/backends/tts_kokoro/paths.rs` (new file)
+- Modify: `crates/tama-core/src/backends/mod.rs` — add tts_kokoro module, re-export install function
+- Modify: `crates/tama-core/Cargo.toml` — ensure reqwest and hf-hub dependencies are present
 
 **What to implement:**
 
@@ -172,7 +172,7 @@ pub fn voice_file(base: &Path, name: &str) -> PathBuf { voices_dir(base).join(fo
 - Function `download_kokoro_model(progress: &dyn ProgressSink) -> Result<()>`
   - Downloads `hexgrad/Kokoro-82M` ONNX model file from HF releases or models page
   - Uses same download pattern as existing LLM backends (progress reporting, checksum verification)
-  - Saves to `~/.config/koji/backends/tts_kokoro/kokoro-82m.onnx`
+  - Saves to `~/.config/tama/backends/tts_kokoro/kokoro-82m.onnx`
 - Function `download_kokoro_voices(progress: &dyn ProgressSink) -> Result<()>`
   - Downloads all 26 voice ONNX files to `voices/` subdirectory
   - Uses same download pattern
@@ -208,9 +208,9 @@ pub use tts_kokoro::download::install_tts_kokoro as install_tts_backend;  // or 
 - [ ] Create `download.rs` with download functions for model and voices, following existing backend installer patterns (progress reporting, error handling)
 - [ ] Create `mod.rs` with public API (`install_tts_kokoro`, `verify_tts_kokoro`)
 - [ ] Update `backends/mod.rs` to declare and re-export the new module
-- [ ] **Dependency check:** Before building, verify kokoro-micro is available on crates.io. If not, use a GitHub path dependency in `koji-core/Cargo.toml`. The exact crate choice (kokoro-micro vs kokoro-tiny vs tts-rs) should be resolved by checking crates.io — pick whichever has the most recent update and good docs.
+- [ ] **Dependency check:** Before building, verify kokoro-micro is available on crates.io. If not, use a GitHub path dependency in `tama-core/Cargo.toml`. The exact crate choice (kokoro-micro vs kokoro-tiny vs tts-rs) should be resolved by checking crates.io — pick whichever has the most recent update and good docs.
 - [ ] Run `cargo fmt --all` — did it succeed? If not, fix and re-run before continuing.
-- [ ] Run `cargo build --package koji-core` — did it succeed? If not, fix and re-run before continuing.
+- [ ] Run `cargo build --package tama-core` — did it succeed? If not, fix and re-run before continuing.
 - [ ] Commit with message: "feat(core): add Kokoro TTS backend installer"
 
 **Acceptance criteria:**
@@ -218,7 +218,7 @@ pub use tts_kokoro::download::install_tts_kokoro as install_tts_backend;  // or 
 - [ ] `download.rs` has download functions that accept `ProgressSink` and report progress
 - [ ] `mod.rs` exports `install_tts_kokoro` and `verify_tts_kokoro`
 - [ ] Backend is registered as `BackendType::TtsKokoro` after installation
-- [ ] `cargo build --package koji-core` succeeds with no warnings
+- [ ] `cargo build --package tama-core` succeeds with no warnings
 
 ---
 
@@ -228,10 +228,10 @@ pub use tts_kokoro::download::install_tts_kokoro as install_tts_backend;  // or 
 Mirrors Task 3 but for the Piper TTS engine. Piper uses VITS models — each voice is a separate model file (~50-100MB). The installer downloads one default voice and registers `BackendType::TtsPiper`. Additional voices can be installed later (future enhancement, not in scope here).
 
 **Files:**
-- Create: `crates/koji-core/src/backends/tts_piper/mod.rs` (new file)
-- Create: `crates/koji-core/src/backends/tts_piper/download.rs` (new file)
-- Create: `crates/koji-core/src/backends/tts_piper/paths.rs` (new file)
-- Modify: `crates/koji-core/src/backends/mod.rs` — add tts_piper module, re-export
+- Create: `crates/tama-core/src/backends/tts_piper/mod.rs` (new file)
+- Create: `crates/tama-core/src/backends/tts_piper/download.rs` (new file)
+- Create: `crates/tama-core/src/backends/tts_piper/paths.rs` (new file)
+- Modify: `crates/tama-core/src/backends/mod.rs` — add tts_piper module, re-export
 
 **What to implement:**
 
@@ -245,7 +245,7 @@ pub fn config_file(base: &Path) -> PathBuf { models_dir(base).join("piper.json")
 2. **`download.rs`**:
 - Function `download_piper_model(progress: &dyn ProgressSink) -> Result<()>`
   - Downloads default voice (en_US-lessac-medium) from HuggingFace `rhasspy/piper`
-  - Saves ONNX model and JSON config to `~/.config/koji/backends/tts_piper/`
+  - Saves ONNX model and JSON config to `~/.config/tama/backends/tts_piper/`
 
 3. **`mod.rs`**:
 ```rust
@@ -262,18 +262,18 @@ pub fn verify_tts_piper(info: &BackendInfo) -> Result<()>;
 - [ ] Create `paths.rs`, `download.rs`, `mod.rs` following the exact same pattern as Task 3 (tts_kokoro)
 - [ ] Update `backends/mod.rs` to declare and re-export the new module
 - [ ] Run `cargo fmt --all` — did it succeed? If not, fix and re-run before continuing.
-- [ ] Run `cargo build --package koji-core` — did it succeed? If not, fix and re-run before continuing.
+- [ ] Run `cargo build --package tama-core` — did it succeed? If not, fix and re-run before continuing.
 - [ ] Commit with message: "feat(core): add Piper TTS backend installer"
 
 **Acceptance criteria:**
 - [ ] `paths.rs`, `download.rs`, `mod.rs` follow the same pattern as tts_kokoro
 - [ ] Backend is registered as `BackendType::TtsPiper` after installation
 - [ ] Default voice (en_US-lessac-medium) is downloaded from HuggingFace
-- [ ] `cargo build --package koji-core` succeeds with no warnings
+- [ ] `cargo build --package tama-core` succeeds with no warnings
 
 ---
 
-### Task 5: TTS Engine Library (`koji-tts` crate)
+### Task 5: TTS Engine Library (`tama-tts` crate)
 
 **Context:**
 This is the core inference engine — the bridge between Rust code and actual audio synthesis. It wraps external TTS libraries (kokoro-micro for Kokoro, piper-rs for Piper) behind a unified `TtsEngine` trait. This trait is what the HTTP handlers call to synthesize speech.
@@ -285,20 +285,20 @@ The crate provides:
 - Audio format handling (mp3, wav, ogg)
 
 **Files:**
-- Create: `crates/koji-tts/Cargo.toml` (new file)
-- Create: `crates/koji-tts/src/lib.rs` (new file)
-- Create: `crates/koji-tts/src/kokoro.rs` (new file)
-- Create: `crates/koji-tts/src/piper.rs` (new file)
-- Create: `crates/koji-tts/src/config.rs` (new file)
-- Create: `crates/koji-tts/src/streaming.rs` (new file)
-- Modify: `Cargo.toml` (workspace root) — add koji-tts to workspace members
+- Create: `crates/tama-tts/Cargo.toml` (new file)
+- Create: `crates/tama-tts/src/lib.rs` (new file)
+- Create: `crates/tama-tts/src/kokoro.rs` (new file)
+- Create: `crates/tama-tts/src/piper.rs` (new file)
+- Create: `crates/tama-tts/src/config.rs` (new file)
+- Create: `crates/tama-tts/src/streaming.rs` (new file)
+- Modify: `Cargo.toml` (workspace root) — add tama-tts to workspace members
 
 **What to implement:**
 
 1. **`Cargo.toml`**:
 ```toml
 [package]
-name = "koji-tts"
+name = "tama-tts"
 version.workspace = true
 edition.workspace = true
 
@@ -406,16 +406,16 @@ impl TtsEngine for PiperEngine { ... }
 
 **Steps:**
 - [ ] Create workspace entry in root `Cargo.toml`
-- [ ] Create `koji-tts/Cargo.toml` — **first check crates.io** for kokoro-micro and piper-rs. If available, use version constraints. If NOT available, use GitHub path dependencies (see dependency notes at bottom of plan) and add a TODO comment.
+- [ ] Create `tama-tts/Cargo.toml` — **first check crates.io** for kokoro-micro and piper-rs. If available, use version constraints. If NOT available, use GitHub path dependencies (see dependency notes at bottom of plan) and add a TODO comment.
 - [ ] Create `config.rs` with TtsRequest, AudioFormat, VoiceInfo, AudioChunk structs
 - [ ] Create `lib.rs` with TtsEngine trait + Engine enum + load_engine factory
 - [ ] Create `kokoro.rs` implementing KokoroEngine wrapping kokoro-micro (or whichever crate is chosen)
 - [ ] Create `piper.rs` implementing PiperEngine wrapping piper-rs (or whichever crate is chosen)
 - [ ] Create `streaming.rs` with SSE formatting helpers
 - [ ] Run `cargo fmt --all` — did it succeed? If not, fix and re-run before continuing.
-- [ ] Run `cargo build --package koji-tts --features kokoro` — did it succeed? If it fails due to missing crate, resolve the dependency (crates.io version or GitHub path) and retry.
+- [ ] Run `cargo build --package tama-tts --features kokoro` — did it succeed? If it fails due to missing crate, resolve the dependency (crates.io version or GitHub path) and retry.
 - [ ] Run `cargo build --workspace` — did it succeed? If not, fix and re-run before continuing.
-- [ ] Commit with message: "feat(core): add koji-tts engine library with Kokoro and Piper support"
+- [ ] Commit with message: "feat(core): add tama-tts engine library with Kokoro and Piper support"
 
 **Acceptance criteria:**
 - [ ] `TtsEngine` trait has all four methods: name(), voices(), synthesize(), synthesize_stream()
@@ -429,7 +429,7 @@ impl TtsEngine for PiperEngine { ... }
 ### Task 6: HTTP API Handlers — `/v1/audio/*` Routes
 
 **Context:**
-This task wires the TTS engine into Koji's existing proxy server. Three new routes are added to the axum router in-process (not a separate server), so everything runs on port 11434. Open WebUI connects to `http://localhost:11434/v1` and finds TTS endpoints alongside chat completions.
+This task wires the TTS engine into Tama's existing proxy server. Three new routes are added to the axum router in-process (not a separate server), so everything runs on port 11434. Open WebUI connects to `http://localhost:11434/v1` and finds TTS endpoints alongside chat completions.
 
 The handlers follow the OpenAI API format exactly:
 - `POST /v1/audio/speech` — takes `{ model, input, voice, response_format }`, returns binary audio
@@ -437,10 +437,10 @@ The handlers follow the OpenAI API format exactly:
 - `GET /v1/audio/voices` — returns JSON array of available voices
 
 **Files:**
-- Create: `crates/koji-core/src/proxy/handlers/tts.rs` (new file)
-- Modify: `crates/koji-core/src/proxy/handlers/mod.rs` — export tts module
-- Modify: `crates/koji-core/src/proxy/server/router.rs` — add three new routes
-- Modify: `crates/koji-core/src/proxy/state.rs` — add tts_engine field to ProxyState
+- Create: `crates/tama-core/src/proxy/handlers/tts.rs` (new file)
+- Modify: `crates/tama-core/src/proxy/handlers/mod.rs` — export tts module
+- Modify: `crates/tama-core/src/proxy/server/router.rs` — add three new routes
+- Modify: `crates/tama-core/src/proxy/state.rs` — add tts_engine field to ProxyState
 
 **What to implement:**
 
@@ -492,7 +492,7 @@ pub async fn handle_audio_speech(
 ) -> impl IntoResponse {
     let engine = state.tts_engine.read().await;
     let eng = engine.as_ref().context("TTS not installed")?;
-    let audio = eng.synthesize(&koji_tts::config::TtsRequest { ... }).await?;
+    let audio = eng.synthesize(&tama_tts::config::TtsRequest { ... }).await?;
     axum::response::Binary(audio).into_response()
 }
 
@@ -506,7 +506,7 @@ pub async fn handle_audio_stream(
 
     let engine = state.tts_engine.read().await;
     let eng = engine.as_ref().context("TTS not installed")?;
-    let stream = eng.synthesize_stream(&koji_tts::config::TtsRequest { ... }).await?;
+    let stream = eng.synthesize_stream(&tama_tts::config::TtsRequest { ... }).await?;
 
     // Convert AudioChunks to SSE events:
     // Each chunk becomes: event: audio\ndata: <base64_encoded_audio>\n\n
@@ -541,7 +541,7 @@ pub async fn handle_audio_stream(
 ```rust
 pub struct ProxyState {
     // ... existing fields ...
-    pub tts_engine: RwLock<Option<koji_tts::Engine>>,
+    pub tts_engine: RwLock<Option<tama_tts::Engine>>,
 }
 ```
 
@@ -551,10 +551,10 @@ The engine is loaded lazily on first TTS request (or at startup if configured). 
 - [ ] Create `tts.rs` with three handler functions matching OpenAI API format exactly
 - [ ] Update `handlers/mod.rs` to export the tts module
 - [ ] Update `router.rs` to add the three new routes
-- [ ] Update `state.rs` to add `tts_engine: RwLock<Option<koji_tts::Engine>>` field
-- [ ] Ensure koji-core Cargo.toml depends on koji-tts crate
+- [ ] Update `state.rs` to add `tts_engine: RwLock<Option<tama_tts::Engine>>` field
+- [ ] Ensure tama-core Cargo.toml depends on tama-tts crate
 - [ ] Run `cargo fmt --all` — did it succeed? If not, fix and re-run before continuing.
-- [ ] Run `cargo build --package koji-core` — did it succeed? If not, fix and re-run before continuing.
+- [ ] Run `cargo build --package tama-core` — did it succeed? If not, fix and re-run before continuing.
 - [ ] Commit with message: "feat(proxy): add TTS API handlers for /v1/audio/* endpoints"
 
 **Acceptance criteria:**
@@ -563,7 +563,7 @@ The engine is loaded lazily on first TTS request (or at startup if configured). 
 - [ ] `handle_audio_speech` accepts `{ model, input, voice, response_format }` and returns binary audio
 - [ ] `handle_audio_stream` returns SSE stream of audio chunks
 - [ ] Requests return 404 when TTS engine is not loaded/installed
-- [ ] `cargo build --package koji-core` succeeds with no warnings
+- [ ] `cargo build --package tama-core` succeeds with no warnings
 
 ---
 
@@ -575,8 +575,8 @@ This task ensures TTS backends are properly isolated from LLM backends in the li
 2. TTS engine loading/unloading happens on-demand via the API handlers, not through the model lifecycle system. Loading a new TTS engine unloads the previous TTS engine (singleton behavior) without touching any LLM models.
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy/lifecycle.rs` — update `evict_lru_if_needed()` to filter by backend type
-- Modify: `crates/koji-core/src/proxy/handlers/tts.rs` — add engine loading logic (or create a separate module)
+- Modify: `crates/tama-core/src/proxy/lifecycle.rs` — update `evict_lru_if_needed()` to filter by backend type
+- Modify: `crates/tama-core/src/proxy/handlers/tts.rs` — add engine loading logic (or create a separate module)
 
 **What to implement:**
 
@@ -599,7 +599,7 @@ if llm_count < max as usize {
 
 2. **TTS engine loading in `tts.rs` or a new module:**
 ```rust
-async fn load_or_get_engine(state: &ProxyState, engine_kind: EngineKind) -> Result<koji_tts::Engine> {
+async fn load_or_get_engine(state: &ProxyState, engine_kind: EngineKind) -> Result<tama_tts::Engine> {
     // Check if already loaded
     {
         let current = state.tts_engine.read().await;
@@ -611,12 +611,12 @@ async fn load_or_get_engine(state: &ProxyState, engine_kind: EngineKind) -> Resu
     }
 
     // Need to load/switch — find installed backend from registry
-    let registry = BackendRegistry::open(Config::base_dir()?.join("koji.db"))?;
+    let registry = BackendRegistry::open(Config::base_dir()?.join("tama.db"))?;
     let backend = match engine_kind {
         EngineKind::Kokoro => registry.get("tts_kokoro")?,
         EngineKind::Piper => registry.get("tts_piper")?,
     };
-    let info = backend.context("TTS backend not installed. Run: koji backend add tts_<engine>")?;
+    let info = backend.context("TTS backend not installed. Run: tama backend add tts_<engine>")?;
 
     // Load the engine from the installed model files
     let engine = load_engine_from_path(engine_kind, &info.path).await?;
@@ -637,7 +637,7 @@ async fn load_or_get_engine(state: &ProxyState, engine_kind: EngineKind) -> Resu
 - [ ] Ensure loading a new TTS engine replaces (not adds alongside) the previous one
 - [ ] Verify LLM models are never evicted during TTS operations
 - [ ] Run `cargo fmt --all` — did it succeed? If not, fix and re-run before continuing.
-- [ ] Run `cargo test --package koji-core -- proxy::lifecycle` — did all tests pass? If not, fix and re-run before continuing.
+- [ ] Run `cargo test --package tama-core -- proxy::lifecycle` — did all tests pass? If not, fix and re-run before continuing.
 - [ ] Run `cargo build --workspace` — did it succeed? If not, fix and re-run before continuing.
 - [ ] Commit with message: "feat(proxy): isolate TTS from LLM lifecycle, add engine loading"
 
@@ -649,20 +649,20 @@ async fn load_or_get_engine(state: &ProxyState, engine_kind: EngineKind) -> Resu
 
 ---
 
-### Task 8: CLI Commands — `koji backend add tts_*`, `koji tts` subcommand
+### Task 8: CLI Commands — `tama backend add tts_*`, `tama tts` subcommand
 
 **Context:**
 Users need a CLI interface to install, configure, and test TTS backends. This task adds:
 1. Backend installation commands that work alongside existing LLM backend commands (reusing the installer infrastructure)
-2. A new `koji tts` subcommand group for synthesis, voice listing, and configuration
+2. A new `tama tts` subcommand group for synthesis, voice listing, and configuration
 3. DB-backed config management for TTS settings (reading/writing to `tts_configs`)
 
 **Files:**
-- Modify: `crates/koji-cli/src/commands/backend/add.rs` — add tts_kokoro/tts_piper options
-- Create: `crates/koji-cli/src/commands/tts.rs` (new file)
-- Modify: `crates/koji-cli/src/commands/mod.rs` — export tts module
-- Modify: `crates/koji-cli/src/main.rs` or command entry point — register tts subcommand
-- Create: `crates/koji-cli/src/commands/tts/config.rs` (new file) — config management
+- Modify: `crates/tama-cli/src/commands/backend/add.rs` — add tts_kokoro/tts_piper options
+- Create: `crates/tama-cli/src/commands/tts.rs` (new file)
+- Modify: `crates/tama-cli/src/commands/mod.rs` — export tts module
+- Modify: `crates/tama-cli/src/main.rs` or command entry point — register tts subcommand
+- Create: `crates/tama-cli/src/commands/tts/config.rs` (new file) — config management
 
 **What to implement:**
 
@@ -688,7 +688,7 @@ impl BackendAddKind {
 }
 ```
 
-2. **`koji tts` subcommand group** in `tts.rs`:
+2. **`tama tts` subcommand group** in `tts.rs`:
 ```rust
 #[derive(Parser)]
 pub struct TtsCmd {
@@ -722,7 +722,7 @@ pub enum TtsSubCmd {
 }
 ```
 
-3. **`koji tts config` subcommand** in `tts/config.rs`:
+3. **`tama tts config` subcommand** in `tts/config.rs`:
 ```rust
 enum TtsConfigCmd {
     /// Set TTS configuration
@@ -750,17 +750,17 @@ enum TtsConfigCmd {
 - [ ] Create `tts/config.rs` with `Set`, `Show` subcommands that read/write `tts_configs` table
 - [ ] Register the tts module and subcommand in CLI entry point
 - [ ] Run `cargo fmt --all` — did it succeed? If not, fix and re-run before continuing.
-- [ ] Run `cargo build --package koji-cli` — did it succeed? If not, fix and re-run before continuing.
+- [ ] Run `cargo build --package tama-cli` — did it succeed? If not, fix and re-run before continuing.
 - [ ] Commit with message: "feat(cli): add TTS backend install commands and tts subcommand group"
 
 **Acceptance criteria:**
-- [ ] `koji backend add tts_kokoro` installs the Kokoro backend
-- [ ] `koji backend add tts_piper` installs the Piper backend
-- [ ] `koji tts say "hello"` synthesizes speech to stdout
-- [ ] `koji tts voices --engine kokoro` lists available Kokoro voices
-- [ ] `koji tts config set --engine kokoro --voice af_sky` writes to DB
-- [ ] `koji tts config show --engine kokoro` reads from DB
-- [ ] `cargo build --package koji-cli` succeeds with no warnings
+- [ ] `tama backend add tts_kokoro` installs the Kokoro backend
+- [ ] `tama backend add tts_piper` installs the Piper backend
+- [ ] `tama tts say "hello"` synthesizes speech to stdout
+- [ ] `tama tts voices --engine kokoro` lists available Kokoro voices
+- [ ] `tama tts config set --engine kokoro --voice af_sky` writes to DB
+- [ ] `tama tts config show --engine kokoro` reads from DB
+- [ ] `cargo build --package tama-cli` succeeds with no warnings
 
 ---
 
@@ -774,14 +774,14 @@ The final task adds tests that verify the TTS system works end-to-end. Since act
 4. CLI command tests for backend add and tts subcommands
 
 **Files:**
-- Create: `crates/koji-tts/src/tests.rs` (new file, `#[cfg(test)]` module in lib.rs)
-- Modify: `crates/koji-core/src/proxy/handlers/tts.rs` — add `#[cfg(test)]` module
-- Modify: `crates/koji-core/src/db/queries/tts_config_queries.rs` — add tests
-- Create: `crates/koji-cli/tests/tts_integration.rs` (new file, integration tests)
+- Create: `crates/tama-tts/src/tests.rs` (new file, `#[cfg(test)]` module in lib.rs)
+- Modify: `crates/tama-core/src/proxy/handlers/tts.rs` — add `#[cfg(test)]` module
+- Modify: `crates/tama-core/src/db/queries/tts_config_queries.rs` — add tests
+- Create: `crates/tama-cli/tests/tts_integration.rs` (new file, integration tests)
 
 **What to implement:**
 
-1. **Unit tests in `koji-tts/src/tests.rs`:**
+1. **Unit tests in `tama-tts/src/tests.rs`:**
 ```rust
 #[test]
 fn test_audio_format_serialization() { ... }
@@ -824,7 +824,7 @@ fn test_backend_list_filters_by_type() { ... }
 ```
 
 **Steps:**
-- [ ] Add unit tests for audio format, request defaults, and SSE formatting in koji-tts
+- [ ] Add unit tests for audio format, request defaults, and SSE formatting in tama-tts
 - [ ] Add handler tests with mocked engine returning test data
 - [ ] Add DB CRUD tests for tts_configs table (upsert, get, get_all, delete, case-insensitive)
 - [ ] Add CLI integration tests for tts subcommands and backend list filtering
@@ -833,7 +833,7 @@ fn test_backend_list_filters_by_type() { ... }
 - [ ] Commit with message: "test: add TTS integration tests for handlers, DB, CLI"
 
 **Acceptance criteria:**
-- [ ] All unit tests for koji-tts crate pass
+- [ ] All unit tests for tama-tts crate pass
 - [ ] Handler tests verify 404 when engine not loaded, binary response when loaded
 - [ ] DB tests verify all CRUD operations and case-insensitive lookups
 - [ ] CLI tests verify tts subcommands appear in help output

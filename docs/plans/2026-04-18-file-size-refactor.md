@@ -4,27 +4,27 @@
 
 **Architecture:** Each large file is split by logical concern — DTOs/types go together, endpoints group by resource, CLI commands group by action. All changes are within existing crate directories; no new crates are created.
 
-**Tech Stack:** Rust, cargo workspace (koji-core, koji-cli, koji-web)
+**Tech Stack:** Rust, cargo workspace (tama-core, tama-cli, tama-web)
 
 ---
 
 ### Task 1: Split `model.rs` (2,410 lines) into sub-modules
 
 **Context:**
-The CLI model command handler (`crates/koji-cli/src/commands/model.rs`) is the largest file at 2,410 lines. It contains helper utilities, multiple independent command handlers (pull, ls, rm, scan, prune, enable, disable, create, update, search, verify, migrate), and tests. Splitting by logical concern makes each handler easier to find and modify.
+The CLI model command handler (`crates/tama-cli/src/commands/model.rs`) is the largest file at 2,410 lines. It contains helper utilities, multiple independent command handlers (pull, ls, rm, scan, prune, enable, disable, create, update, search, verify, migrate), and tests. Splitting by logical concern makes each handler easier to find and modify.
 
 **Files:**
-- Create: `crates/koji-cli/src/commands/model/utils.rs` — helper functions
-- Create: `crates/koji-cli/src/commands/model/pull.rs` — cmd_pull + cmd_scan
-- Create: `crates/koji-cli/src/commands/model/list_rm.rs` — cmd_ls + cmd_rm
-- Create: `crates/koji-cli/src/commands/model/prune.rs` — cmd_prune
-- Create: `crates/koji-cli/src/commands/model/enable_disable.rs` — cmd_enable + cmd_disable
-- Create: `crates/koji-cli/src/commands/model/create.rs` — cmd_create
-- Create: `crates/koji-cli/src/commands/model/update.rs` — cmd_update + cmd_search
-- Create: `crates/koji-cli/src/commands/model/verify.rs` — cmd_verify + cmd_verify_existing
-- Create: `crates/koji-cli/src/commands/model/migrate.rs` — cmd_migrate
-- Modify: `crates/koji-cli/src/commands/model/mod.rs` — declare sub-modules, re-export `run` and `ModelCommands`
-- Modify: `crates/koji-cli/src/commands/model.rs` — delete (all code moved to sub-modules)
+- Create: `crates/tama-cli/src/commands/model/utils.rs` — helper functions
+- Create: `crates/tama-cli/src/commands/model/pull.rs` — cmd_pull + cmd_scan
+- Create: `crates/tama-cli/src/commands/model/list_rm.rs` — cmd_ls + cmd_rm
+- Create: `crates/tama-cli/src/commands/model/prune.rs` — cmd_prune
+- Create: `crates/tama-cli/src/commands/model/enable_disable.rs` — cmd_enable + cmd_disable
+- Create: `crates/tama-cli/src/commands/model/create.rs` — cmd_create
+- Create: `crates/tama-cli/src/commands/model/update.rs` — cmd_update + cmd_search
+- Create: `crates/tama-cli/src/commands/model/verify.rs` — cmd_verify + cmd_verify_existing
+- Create: `crates/tama-cli/src/commands/model/migrate.rs` — cmd_migrate
+- Modify: `crates/tama-cli/src/commands/model/mod.rs` — declare sub-modules, re-export `run` and `ModelCommands`
+- Modify: `crates/tama-cli/src/commands/model.rs` — delete (all code moved to sub-modules)
 
 **What to implement:**
 
@@ -81,7 +81,7 @@ pub mod migrate;
 
 pub use crate::cli::ModelCommands;
 
-pub async fn run(config: &koji_core::config::Config, command: ModelCommands) -> anyhow::Result<()> {
+pub async fn run(config: &tama_core::config::Config, command: ModelCommands) -> anyhow::Result<()> {
     use crate::cli::ModelCommands;
     match command {
         ModelCommands::Pull { repo } => pull::cmd_pull(config, &repo).await,
@@ -111,56 +111,56 @@ pub async fn run(config: &koji_core::config::Config, command: ModelCommands) -> 
 12. **Delete** `model.rs` after all code is moved. The module entry point is now `model/mod.rs`.
 
 **Steps:**
-- [ ] Create `crates/koji-cli/src/commands/model/utils.rs` with: `manual_timestamp`, `secs_to_datetime`, `unique_quant_key`, `format_downloads`, and their tests
-- [ ] Create `crates/koji-cli/src/commands/model/pull.rs` with: `cmd_pull`, `cmd_scan` and their imports
-- [ ] Create `crates/koji-cli/src/commands/model/list_rm.rs` with: `cmd_ls`, `cmd_rm` and their imports
-- [ ] Create `crates/koji-cli/src/commands/model/prune.rs` with: `cmd_prune`
-- [ ] Create `crates/koji-cli/src/commands/model/enable_disable.rs` with: `cmd_enable`, `cmd_disable`
-- [ ] Create `crates/koji-cli/src/commands/model/create.rs` with: `cmd_create`
-- [ ] Create `crates/koji-cli/src/commands/model/update.rs` with: `cmd_update`, `cmd_search`
-- [ ] Create `crates/koji-cli/src/commands/model/verify.rs` with: `cmd_verify`, `cmd_verify_existing`
-- [ ] Create `crates/koji-cli/src/commands/model/migrate.rs` with: `cmd_migrate`
-- [ ] Create `crates/koji-cli/src/commands/model/mod.rs` with module declarations and the `run` dispatcher
-- [ ] Delete `crates/koji-cli/src/commands/model.rs`
+- [ ] Create `crates/tama-cli/src/commands/model/utils.rs` with: `manual_timestamp`, `secs_to_datetime`, `unique_quant_key`, `format_downloads`, and their tests
+- [ ] Create `crates/tama-cli/src/commands/model/pull.rs` with: `cmd_pull`, `cmd_scan` and their imports
+- [ ] Create `crates/tama-cli/src/commands/model/list_rm.rs` with: `cmd_ls`, `cmd_rm` and their imports
+- [ ] Create `crates/tama-cli/src/commands/model/prune.rs` with: `cmd_prune`
+- [ ] Create `crates/tama-cli/src/commands/model/enable_disable.rs` with: `cmd_enable`, `cmd_disable`
+- [ ] Create `crates/tama-cli/src/commands/model/create.rs` with: `cmd_create`
+- [ ] Create `crates/tama-cli/src/commands/model/update.rs` with: `cmd_update`, `cmd_search`
+- [ ] Create `crates/tama-cli/src/commands/model/verify.rs` with: `cmd_verify`, `cmd_verify_existing`
+- [ ] Create `crates/tama-cli/src/commands/model/migrate.rs` with: `cmd_migrate`
+- [ ] Create `crates/tama-cli/src/commands/model/mod.rs` with module declarations and the `run` dispatcher
+- [ ] Delete `crates/tama-cli/src/commands/model.rs`
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo build --workspace` to verify compilation
-- [ ] Run `cargo test --package koji -- commands::model` to verify tests pass
+- [ ] Run `cargo test --package tama -- commands::model` to verify tests pass
 - [ ] Commit with message: "refactor(cli): split model.rs into focused sub-modules"
 
 **Acceptance criteria:**
-- [ ] `crates/koji-cli/src/commands/model.rs` no longer exists
-- [ ] `crates/koji-cli/src/commands/model/mod.rs` is the module entry point with `pub mod` declarations
+- [ ] `crates/tama-cli/src/commands/model.rs` no longer exists
+- [ ] `crates/tama-cli/src/commands/model/mod.rs` is the module entry point with `pub mod` declarations
 - [ ] Each sub-module file is under 400 lines
 - [ ] `cargo build --workspace` succeeds
-- [ ] All model-related tests pass: `cargo test --package koji -- commands::model`
+- [ ] All model-related tests pass: `cargo test --package tama -- commands::model`
 
 ---
 
 ### Task 2: Split `backends.rs` (2,174 lines) into sub-modules
 
 **Context:**
-The web API backends endpoint file (`crates/koji-web/src/api/backends.rs`) is 2,174 lines. It contains DTOs/types, trait implementations, a capabilities cache, and many endpoint handlers for backend CRUD + lifecycle operations. Splitting separates data types from business logic.
+The web API backends endpoint file (`crates/tama-web/src/api/backends.rs`) is 2,174 lines. It contains DTOs/types, trait implementations, a capabilities cache, and many endpoint handlers for backend CRUD + lifecycle operations. Splitting separates data types from business logic.
 
 **Files:**
-- Create: `crates/koji-web/src/api/backends/types.rs` — all DTOs, From impls, UpdateStatusDto, ActiveJobDto, JobAdapter, CapabilitiesCache
-- Create: `crates/koji-web/src/api/backends/install.rs` — install_backend, remove_backend endpoints
-- Create: `crates/koji-web/src/api/backends/manage.rs` — update_backend, remove_backend_version, check_backend_updates, list_backend_versions, activate_backend_version, update_backend_default_args endpoints
-- Create: `crates/koji-web/src/api/backends/jobs.rs` — get_job, job_events_sse, JobSnapshotDto
-- Create: `crates/koji-web/src/api/backends/capabilities.rs` — system_capabilities endpoint
-- Create: `crates/koji-web/src/api/backends/list.rs` — list_backends endpoint
-- Modify: `crates/koji-web/src/api/backends/mod.rs` — declare sub-modules, re-export all public items
-- Modify: `crates/koji-web/src/api/backends.rs` — delete (all code moved to sub-modules)
+- Create: `crates/tama-web/src/api/backends/types.rs` — all DTOs, From impls, UpdateStatusDto, ActiveJobDto, JobAdapter, CapabilitiesCache
+- Create: `crates/tama-web/src/api/backends/install.rs` — install_backend, remove_backend endpoints
+- Create: `crates/tama-web/src/api/backends/manage.rs` — update_backend, remove_backend_version, check_backend_updates, list_backend_versions, activate_backend_version, update_backend_default_args endpoints
+- Create: `crates/tama-web/src/api/backends/jobs.rs` — get_job, job_events_sse, JobSnapshotDto
+- Create: `crates/tama-web/src/api/backends/capabilities.rs` — system_capabilities endpoint
+- Create: `crates/tama-web/src/api/backends/list.rs` — list_backends endpoint
+- Modify: `crates/tama-web/src/api/backends/mod.rs` — declare sub-modules, re-export all public items
+- Modify: `crates/tama-web/src/api/backends.rs` — delete (all code moved to sub-modules)
 
 **What to implement:**
 
 1. **`backends/types.rs`** — Move ALL public types and their impls:
    - `BackendListResponse` struct
    - `BackendCardDto` struct + its impl block
-   - `impl From<koji_core::backends::BackendInfo> for BackendInfoDto`
+   - `impl From<tama_core::backends::BackendInfo> for BackendInfoDto`
    - `GpuTypeDto` enum
-   - `impl From<&koji_core::gpu::GpuType> for GpuTypeDto`
+   - `impl From<&tama_core::gpu::GpuType> for GpuTypeDto`
    - `BackendSourceDto` enum
-   - `impl From<&koji_core::backends::BackendSource> for BackendSourceDto`
+   - `impl From<&tama_core::backends::BackendSource> for BackendSourceDto`
    - `UpdateStatusDto` struct + `is_default()` impl
    - `ActiveJobDto` struct
    - `job_to_active_dto(j: &crate::jobs::Job) -> ActiveJobDto` function
@@ -175,7 +175,7 @@ The web API backends endpoint file (`crates/koji-web/src/api/backends.rs`) is 2,
    - `CheckUpdatesResponse` struct
    - `JobSnapshotDto` struct
    - `UpdateDefaultArgsRequest` struct
-   - `ProgressSink` trait (imported from koji_core, only move the `impl ProgressSink for JobAdapter` block)
+   - `ProgressSink` trait (imported from tama_core, only move the `impl ProgressSink for JobAdapter` block)
    - `JobAdapter` struct + its impls (`ProgressSink`, any other)
    - `CapabilitiesCache` struct + `new()` and `Default` impl
 
@@ -227,37 +227,37 @@ pub use list::*;
 7. **Delete** `backends.rs` after all code is moved. The module entry point is now `backends/mod.rs`.
 
 **Steps:**
-- [ ] Create `crates/koji-web/src/api/backends/types.rs` with all DTO types, From impls, JobAdapter, CapabilitiesCache, and tests
-- [ ] Create `crates/koji-web/src/api/backends/install.rs` with install/uninstall/restore endpoints
-- [ ] Create `crates/koji-web/src/api/backends/manage.rs` with enable/disable/update/version/list endpoints
-- [ ] Create `crates/koji-web/src/api/backends/capabilities.rs` with capabilities endpoint
-- [ ] Create `crates/koji-web/src/api/backends/mod.rs` with module declarations and re-exports
-- [ ] Delete `crates/koji-web/src/api/backends.rs`
+- [ ] Create `crates/tama-web/src/api/backends/types.rs` with all DTO types, From impls, JobAdapter, CapabilitiesCache, and tests
+- [ ] Create `crates/tama-web/src/api/backends/install.rs` with install/uninstall/restore endpoints
+- [ ] Create `crates/tama-web/src/api/backends/manage.rs` with enable/disable/update/version/list endpoints
+- [ ] Create `crates/tama-web/src/api/backends/capabilities.rs` with capabilities endpoint
+- [ ] Create `crates/tama-web/src/api/backends/mod.rs` with module declarations and re-exports
+- [ ] Delete `crates/tama-web/src/api/backends.rs`
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo build --workspace` to verify compilation
-- [ ] Run `cargo test --package koji-web` to verify tests pass
+- [ ] Run `cargo test --package tama-web` to verify tests pass
 - [ ] Commit with message: "refactor(web): split backends.rs into focused sub-modules"
 
 **Acceptance criteria:**
-- [ ] `crates/koji-web/src/api/backends.rs` no longer exists
-- [ ] `crates/koji-web/src/api/backends/mod.rs` is the module entry point
+- [ ] `crates/tama-web/src/api/backends.rs` no longer exists
+- [ ] `crates/tama-web/src/api/backends/mod.rs` is the module entry point
 - [ ] Each sub-module file is under 400 lines
 - [ ] `cargo build --workspace` succeeds
-- [ ] All web API tests pass: `cargo test --package koji-web`
+- [ ] All web API tests pass: `cargo test --package tama-web`
 
 ---
 
 ### Task 3: Split `api.rs` (1,813 lines) model endpoints into sub-modules
 
 **Context:**
-The web API model endpoints file (`crates/koji-web/src/api.rs`) is 1,813 lines. It's the main module file for the `api` module in koji-web. It contains model CRUD endpoints, helper functions, refresh/verify endpoints, and tests. The api module already has sub-modules (backends, backup, self_update, updates) but api.rs itself is still a single file.
+The web API model endpoints file (`crates/tama-web/src/api.rs`) is 1,813 lines. It's the main module file for the `api` module in tama-web. It contains model CRUD endpoints, helper functions, refresh/verify endpoints, and tests. The api module already has sub-modules (backends, backup, self_update, updates) but api.rs itself is still a single file.
 
 **Files:**
-- Create: `crates/koji-web/src/api/models/info.rs` — list_models, get_model, helper functions (`resolve_model_id`, `model_entry_json`, `load_repo_db_meta`, `RepoDbMeta`)
-- Create: `crates/koji-web/src/api/models/crud.rs` — create_model, update_model, rename_model, delete_model, delete_quant, ModelBody, CreateModelBody, RenameBody, apply_model_body
-- Create: `crates/koji-web/src/api/models/files.rs` — refresh_model_metadata, verify_model_files, file_record_json
-- Create: `crates/koji-web/src/api/models/mod.rs` — module declarations, re-exports
-- Modify: `crates/koji-web/src/api.rs` — keep non-model items at top level, add `pub mod models;` and `pub use models::*;`
+- Create: `crates/tama-web/src/api/models/info.rs` — list_models, get_model, helper functions (`resolve_model_id`, `model_entry_json`, `load_repo_db_meta`, `RepoDbMeta`)
+- Create: `crates/tama-web/src/api/models/crud.rs` — create_model, update_model, rename_model, delete_model, delete_quant, ModelBody, CreateModelBody, RenameBody, apply_model_body
+- Create: `crates/tama-web/src/api/models/files.rs` — refresh_model_metadata, verify_model_files, file_record_json
+- Create: `crates/tama-web/src/api/models/mod.rs` — module declarations, re-exports
+- Modify: `crates/tama-web/src/api.rs` — keep non-model items at top level, add `pub mod models;` and `pub use models::*;`
 
 **What to implement:**
 
@@ -364,36 +364,36 @@ async fn trigger_proxy_reload(state: &AppState) -> Result<(), (StatusCode, serde
 Key decision: `load_config_from_state`, `sync_proxy_config`, and `trigger_proxy_reload` stay at the top level of `api.rs` because they are used by both model endpoints (in the models/ sub-module) and non-model endpoints. They are imported from `super::` within the models/ sub-modules.
 
 **Steps:**
-- [ ] Create `crates/koji-web/src/api/models/info.rs` with info-related functions and list/get endpoints
-- [ ] Create `crates/koji-web/src/api/models/crud.rs` with types, apply_model_body, and CRUD endpoints + tests
-- [ ] Create `crates/koji-web/src/api/models/files.rs` with file operations endpoints
-- [ ] Create `crates/koji-web/src/api/models/mod.rs` with module declarations and re-exports
-- [ ] Replace `crates/koji-web/src/api.rs` with module declaration
+- [ ] Create `crates/tama-web/src/api/models/info.rs` with info-related functions and list/get endpoints
+- [ ] Create `crates/tama-web/src/api/models/crud.rs` with types, apply_model_body, and CRUD endpoints + tests
+- [ ] Create `crates/tama-web/src/api/models/files.rs` with file operations endpoints
+- [ ] Create `crates/tama-web/src/api/models/mod.rs` with module declarations and re-exports
+- [ ] Replace `crates/tama-web/src/api.rs` with module declaration
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo build --workspace` to verify compilation
-- [ ] Run `cargo test --package koji-web` to verify tests pass
+- [ ] Run `cargo test --package tama-web` to verify tests pass
 - [ ] Commit with message: "refactor(web): split api.rs model endpoints into sub-modules"
 
 **Acceptance criteria:**
-- [ ] `crates/koji-web/src/api.rs` contains module declarations + non-model items (LogsQuery, ConfigBody, StructuredConfigBody, get_logs, get_config, save_config, get_structured_config, save_structured_config, load_config_from_state, sync_proxy_config, trigger_proxy_reload)
-- [ ] `crates/koji-web/src/api/models/mod.rs` is the module entry point
+- [ ] `crates/tama-web/src/api.rs` contains module declarations + non-model items (LogsQuery, ConfigBody, StructuredConfigBody, get_logs, get_config, save_config, get_structured_config, save_structured_config, load_config_from_state, sync_proxy_config, trigger_proxy_reload)
+- [ ] `crates/tama-web/src/api/models/mod.rs` is the module entry point
 - [ ] Each sub-module file is under 400 lines
 - [ ] `cargo build --workspace` succeeds
-- [ ] All web API tests pass: `cargo test --package koji-web`
+- [ ] All web API tests pass: `cargo test --package tama-web`
 
 ---
 
 ### Task 4: Split `gpu.rs` (887 lines) into sub-modules
 
 **Context:**
-The GPU utilities file (`crates/koji-core/src/gpu.rs`) is 887 lines. It contains GPU detection (NVIDIA, AMD), VRAM querying, system metrics collection, build prerequisite detection, CUDA version detection, ROCm target detection, and context size suggestions. These are distinct concerns that should be separated.
+The GPU utilities file (`crates/tama-core/src/gpu.rs`) is 887 lines. It contains GPU detection (NVIDIA, AMD), VRAM querying, system metrics collection, build prerequisite detection, CUDA version detection, ROCm target detection, and context size suggestions. These are distinct concerns that should be separated.
 
 **Files:**
-- Create: `crates/koji-core/src/gpu/vram.rs` — VramInfo struct, query_vram, query_nvidia_vram, query_amd_vram, available_mib/bytes/total_bytes methods
-- Create: `crates/koji-core/src/gpu/system.rs` — SystemMetrics, collect_system_metrics, query_gpu_utilization (NVIDIA + AMD)
-- Create: `crates/koji-core/src/gpu/detect.rs` — detect_build_prerequisites, BuildPrerequisites, detect_cuda_version (+ nvcc/nvidia_smi helpers), detect_amdgpu_targets, parse_rocminfo_gfx_names, suggest_context_sizes
-- Modify: `crates/koji-core/src/gpu/mod.rs` — declare sub-modules, re-export public items
-- Modify: `crates/koji-core/src/gpu.rs` — delete (all code moved to sub-modules)
+- Create: `crates/tama-core/src/gpu/vram.rs` — VramInfo struct, query_vram, query_nvidia_vram, query_amd_vram, available_mib/bytes/total_bytes methods
+- Create: `crates/tama-core/src/gpu/system.rs` — SystemMetrics, collect_system_metrics, query_gpu_utilization (NVIDIA + AMD)
+- Create: `crates/tama-core/src/gpu/detect.rs` — detect_build_prerequisites, BuildPrerequisites, detect_cuda_version (+ nvcc/nvidia_smi helpers), detect_amdgpu_targets, parse_rocminfo_gfx_names, suggest_context_sizes
+- Modify: `crates/tama-core/src/gpu/mod.rs` — declare sub-modules, re-export public items
+- Modify: `crates/tama-core/src/gpu.rs` — delete (all code moved to sub-modules)
 
 **What to implement:**
 
@@ -450,22 +450,22 @@ pub use detect::{
 6. **Delete** `gpu.rs` after all code is moved. The module entry point is now `gpu/mod.rs`.
 
 **Steps:**
-- [ ] Create `crates/koji-core/src/gpu/vram.rs` with VramInfo, query functions, and VRAM tests
-- [ ] Create `crates/koji-core/src/gpu/system.rs` with SystemMetrics, system metrics collection, GPU utilization, and related tests
-- [ ] Create `crates/koji-core/src/gpu/detect.rs` with detection functions and related tests
-- [ ] Create `crates/koji-core/src/gpu/mod.rs` with module declarations and re-exports
-- [ ] Delete `crates/koji-core/src/gpu.rs`
+- [ ] Create `crates/tama-core/src/gpu/vram.rs` with VramInfo, query functions, and VRAM tests
+- [ ] Create `crates/tama-core/src/gpu/system.rs` with SystemMetrics, system metrics collection, GPU utilization, and related tests
+- [ ] Create `crates/tama-core/src/gpu/detect.rs` with detection functions and related tests
+- [ ] Create `crates/tama-core/src/gpu/mod.rs` with module declarations and re-exports
+- [ ] Delete `crates/tama-core/src/gpu.rs`
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo build --workspace` to verify compilation
-- [ ] Run `cargo test --package koji-core -- gpu` to verify tests pass
+- [ ] Run `cargo test --package tama-core -- gpu` to verify tests pass
 - [ ] Commit with message: "refactor(core): split gpu.rs into focused sub-modules"
 
 **Acceptance criteria:**
-- [ ] `crates/koji-core/src/gpu.rs` no longer exists
-- [ ] `crates/koji-core/src/gpu/mod.rs` is the module entry point
+- [ ] `crates/tama-core/src/gpu.rs` no longer exists
+- [ ] `crates/tama-core/src/gpu/mod.rs` is the module entry point
 - [ ] Each sub-module file is under 400 lines
 - [ ] `cargo build --workspace` succeeds
-- [ ] All GPU-related tests pass: `cargo test --package koji-core -- gpu`
+- [ ] All GPU-related tests pass: `cargo test --package tama-core -- gpu`
 
 ---
 
@@ -473,28 +473,28 @@ pub use detect::{
 
 **Context:**
 Three remaining files exceed 400 lines that haven't been addressed yet:
-- `crates/koji-core/src/backends/installer/source.rs` (1,018 lines) — installer source detection
-- `crates/koji-cli/src/commands/backend.rs` (913 lines) — CLI backend commands
-- `crates/koji-web/src/pages/model_editor/mod.rs` (848 lines) — Leptos page component
+- `crates/tama-core/src/backends/installer/source.rs` (1,018 lines) — installer source detection
+- `crates/tama-cli/src/commands/backend.rs` (913 lines) — CLI backend commands
+- `crates/tama-web/src/pages/model_editor/mod.rs` (848 lines) — Leptos page component
 
 **Files:**
 
 For `source.rs`:
-- Create: `crates/koji-core/src/backends/installer/source/detect.rs` — `find_llvm_bin`, `find_vcvarsall`, `detect_hip_env`, `hip_env_from_hipconfig_output`
-- Create: `crates/koji-core/src/backends/installer/source/build.rs` — `emit`, `build_cmake_args`
-- Create: `crates/koji-core/src/backends/installer/source/install.rs` — `install_from_source`, `clone_repository`, `try_clone_latest_tag`, `configure_cmake`, `configure_cmake_windows`, `build_cmake`, `install_binary`
-- Modify: `crates/koji-core/src/backends/installer/source/mod.rs` — module declarations, re-exports
-- Modify: `crates/koji-core/src/backends/installer/source.rs` — delete
+- Create: `crates/tama-core/src/backends/installer/source/detect.rs` — `find_llvm_bin`, `find_vcvarsall`, `detect_hip_env`, `hip_env_from_hipconfig_output`
+- Create: `crates/tama-core/src/backends/installer/source/build.rs` — `emit`, `build_cmake_args`
+- Create: `crates/tama-core/src/backends/installer/source/install.rs` — `install_from_source`, `clone_repository`, `try_clone_latest_tag`, `configure_cmake`, `configure_cmake_windows`, `build_cmake`, `install_binary`
+- Modify: `crates/tama-core/src/backends/installer/source/mod.rs` — module declarations, re-exports
+- Modify: `crates/tama-core/src/backends/installer/source.rs` — delete
 
 For `backend.rs`:
-- Create: `crates/koji-cli/src/commands/backend/parse.rs` — `parse_backend_type`, `parse_gpu_type`, `registry_config_dir`, `current_unix_timestamp`
-- Modify: `crates/koji-cli/src/commands/backend/mod.rs` — module declarations, re-exports
-- Modify: `crates/koji-cli/src/commands/backend.rs` — keep command handlers here (they're the main concern), move parsing utilities to parse.rs
+- Create: `crates/tama-cli/src/commands/backend/parse.rs` — `parse_backend_type`, `parse_gpu_type`, `registry_config_dir`, `current_unix_timestamp`
+- Modify: `crates/tama-cli/src/commands/backend/mod.rs` — module declarations, re-exports
+- Modify: `crates/tama-cli/src/commands/backend.rs` — keep command handlers here (they're the main concern), move parsing utilities to parse.rs
 
 For `model_editor/mod.rs`:
-- Create: `crates/koji-web/src/pages/model_editor/sections.rs` — Section enum, section rendering logic
-- Create: `crates/koji-web/src/pages/model_editor/form.rs` — form components and state management
-- Modify: `crates/koji-web/src/pages/model_editor/mod.rs` — module declarations, re-export `ModelEditor`
+- Create: `crates/tama-web/src/pages/model_editor/sections.rs` — Section enum, section rendering logic
+- Create: `crates/tama-web/src/pages/model_editor/form.rs` — form components and state management
+- Modify: `crates/tama-web/src/pages/model_editor/mod.rs` — module declarations, re-export `ModelEditor`
 
 **What to implement:**
 
@@ -544,16 +544,16 @@ Note: `model_editor/mod.rs` already has sub-modules (`api`, `extra_args_form`, `
 9. **Tests for model_editor** — There are no tests in this file.
 
 **Steps:**
-- [ ] Create `crates/koji-core/src/backends/installer/source/detect.rs` with detection functions
-- [ ] Create `crates/koji-core/src/backends/installer/source/build.rs` with emit and build_cmake_args
-- [ ] Create `crates/koji-core/src/backends/installer/source/install.rs` with install_from_source, clone_repository, try_clone_latest_tag, configure_cmake, configure_cmake_windows, build_cmake, install_binary
-- [ ] Create `crates/koji-core/src/backends/installer/source/mod.rs` with module declarations and re-exports (re-export `install_from_source`)
-- [ ] Delete `crates/koji-core/src/backends/installer/source.rs`
-- [ ] Create `crates/koji-cli/src/commands/backend/parse.rs` with parsing utilities
-- [ ] Update `crates/koji-cli/src/commands/backend/mod.rs` to declare parse submodule
+- [ ] Create `crates/tama-core/src/backends/installer/source/detect.rs` with detection functions
+- [ ] Create `crates/tama-core/src/backends/installer/source/build.rs` with emit and build_cmake_args
+- [ ] Create `crates/tama-core/src/backends/installer/source/install.rs` with install_from_source, clone_repository, try_clone_latest_tag, configure_cmake, configure_cmake_windows, build_cmake, install_binary
+- [ ] Create `crates/tama-core/src/backends/installer/source/mod.rs` with module declarations and re-exports (re-export `install_from_source`)
+- [ ] Delete `crates/tama-core/src/backends/installer/source.rs`
+- [ ] Create `crates/tama-cli/src/commands/backend/parse.rs` with parsing utilities
+- [ ] Update `crates/tama-cli/src/commands/backend/mod.rs` to declare parse submodule
 - [ ] Move parsing functions from `backend.rs` to `backend/parse.rs`
-- [ ] Create `crates/koji-web/src/pages/model_editor/sections.rs` with Section enum
-- [ ] Update `crates/koji-web/src/pages/model_editor/mod.rs` to import Section from sections module
+- [ ] Create `crates/tama-web/src/pages/model_editor/sections.rs` with Section enum
+- [ ] Update `crates/tama-web/src/pages/model_editor/mod.rs` to import Section from sections module
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo build --workspace` to verify compilation
 - [ ] Run `cargo test --workspace` to verify all tests pass
@@ -572,7 +572,7 @@ Note: `model_editor/mod.rs` already has sub-modules (`api`, `extra_args_form`, `
 After all splits are complete, verify that no file exceeds 400 lines, run the full test suite, and ensure code formatting is correct.
 
 **Files:**
-- Verify: All source files in `crates/koji-core/`, `crates/koji-cli/`, `crates/koji-web/`
+- Verify: All source files in `crates/tama-core/`, `crates/tama-cli/`, `crates/tama-web/`
 
 **What to implement:**
 - Run the verification script (same command used at the start)

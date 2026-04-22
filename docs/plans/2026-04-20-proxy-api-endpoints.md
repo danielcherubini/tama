@@ -1,14 +1,14 @@
 # Proxy API Endpoints Plan
 
-**Goal:** Add all missing llama.cpp-compatible API endpoints to the Koji proxy using a wildcard routing approach — only `/koji/*` needs custom handlers; everything else is forwarded directly.
+**Goal:** Add all missing llama.cpp-compatible API endpoints to the Tama proxy using a wildcard routing approach — only `/tama/*` needs custom handlers; everything else is forwarded directly.
 
 **Architecture:** Replace per-endpoint handlers with two catch-all routes:
 - `POST /*path` — forwards POST requests to the backend (chat completions, embeddings, responses, tokenize, etc.)
 - `GET /*path` — forwards GET requests to the backend (props, slots, models, metrics)
 
-The existing Koji management endpoints (`/koji/v1/models`, `/koji/v1/pulls`, etc.) keep their explicit handlers. This eliminates ~20 individual handler functions and makes adding new llama.cpp API routes a zero-effort change — any new endpoint the backend adds works automatically.
+The existing Tama management endpoints (`/tama/v1/models`, `/tama/v1/pulls`, etc.) keep their explicit handlers. This eliminates ~20 individual handler functions and makes adding new llama.cpp API routes a zero-effort change — any new endpoint the backend adds works automatically.
 
-**Tech Stack:** Rust, Axum (web framework), existing `forward_request()` in `crates/koji-core/src/proxy/forward.rs`
+**Tech Stack:** Rust, Axum (web framework), existing `forward_request()` in `crates/tama-core/src/proxy/forward.rs`
 
 ---
 
@@ -22,31 +22,31 @@ Currently each endpoint has its own handler that extracts the model field, auto-
 The existing `forward_request()` already handles model name rewriting for both streaming and non-streaming responses, so no changes are needed there.
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy/server/router.rs`
-- Modify: `crates/koji-core/src/proxy/handlers.rs` (add 2 new handlers)
+- Modify: `crates/tama-core/src/proxy/server/router.rs`
+- Modify: `crates/tama-core/src/proxy/handlers.rs` (add 2 new handlers)
 
 **What to implement:**
 Add two wildcard handler functions in `handlers.rs`:
 
-1. `handle_forward_post(path: String, state: State<Arc<ProxyState>>, req: Request<Body>)` — handles all POST requests not matching `/koji/*`. Logic:
+1. `handle_forward_post(path: String, state: State<Arc<ProxyState>>, req: Request<Body>)` — handles all POST requests not matching `/tama/*`. Logic:
    - Extract body bytes
    - Try to parse as JSON and extract `.get("model")?.as_str()` for auto-loading
    - If model found, look up or auto-load the target server (same logic as existing `handle_chat_completions`)
    - Call `forward_request()` with the original path (preserving `/v1/chat/completions`, `/embeddings`, etc.)
 
-2. `handle_forward_get(path: String, state: State<Arc<ProxyState>>, req: Request<Body>)` — handles all GET requests not matching `/koji/*`. Logic:
+2. `handle_forward_get(path: String, state: State<Arc<ProxyState>>, req: Request<Body>)` — handles all GET requests not matching `/tama/*`. Logic:
    - No body to parse (GET has no body in axum)
    - No auto-load needed for most GET endpoints (health, props, slots, metrics, models)
    - Call `forward_request()` with the original path
 
-Then update `router.rs` to add these as fallback routes **before** the existing `/koji/*` explicit routes. The route order matters:
-1. Explicit `/koji/v1/*` routes first (specific handlers)
+Then update `router.rs` to add these as fallback routes **before** the existing `/tama/*` explicit routes. The route order matters:
+1. Explicit `/tama/v1/*` routes first (specific handlers)
 2. Wildcard `POST /*path` and `GET /*path` last (catch-all)
 
-**Important:** The wildcard must not match `/koji/*` paths since those have explicit handlers. In axum, more specific routes take precedence over wildcards, so this works naturally — `/koji/v1/models` will hit the explicit handler, while `/v1/embeddings` falls through to the wildcard.
+**Important:** The wildcard must not match `/tama/*` paths since those have explicit handlers. In axum, more specific routes take precedence over wildcards, so this works naturally — `/tama/v1/models` will hit the explicit handler, while `/v1/embeddings` falls through to the wildcard.
 
 **Steps:**
-- [ ] Add `handle_forward_post` function to `crates/koji-core/src/proxy/handlers.rs`:
+- [ ] Add `handle_forward_post` function to `crates/tama-core/src/proxy/handlers.rs`:
   ```rust
   pub async fn handle_forward_post(
       Path(path): Path<String>,
@@ -89,7 +89,7 @@ Then update `router.rs` to add these as fallback routes **before** the existing 
   }
   ```
 
-- [ ] Add `handle_forward_get` function to `crates/koji-core/src/proxy/handlers.rs`:
+- [ ] Add `handle_forward_get` function to `crates/tama-core/src/proxy/handlers.rs`:
   ```rust
   pub async fn handle_forward_get(
       Path(path): Path<String>,
@@ -115,20 +115,20 @@ Then update `router.rs` to add these as fallback routes **before** the existing 
   ```
 
 - [ ] Export new handlers from `handlers.rs`
-- [ ] Update `crates/koji-core/src/proxy/server/router.rs` to add wildcard routes:
+- [ ] Update `crates/tama-core/src/proxy/server/router.rs` to add wildcard routes:
   ```rust
   .route("/*path", post(handle_forward_post))
   .route("/*path", get(handle_forward_get))
   ```
-  Place these **before** `.fallback(handle_fallback)` but **after** all explicit `/koji/*` routes.
+  Place these **before** `.fallback(handle_fallback)` but **after** all explicit `/tama/*` routes.
 
-- [ ] Run `cargo test --package koji-core -- proxy::handlers::tests` to verify existing tests still pass
+- [ ] Run `cargo test --package tama-core -- proxy::handlers::tests` to verify existing tests still pass
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo build --workspace`
-- [ ] Commit with message: "feat(proxy): add wildcard forwarding for all non-koji endpoints"
+- [ ] Commit with message: "feat(proxy): add wildcard forwarding for all non-tama endpoints"
 
 **Acceptance criteria:**
-- [ ] All existing explicit routes (`/koji/v1/*`, `/v1/chat/completions`, `/v1/models`, `/health`, `/metrics`, `/status`) continue to work
+- [ ] All existing explicit routes (`/tama/v1/*`, `/v1/chat/completions`, `/v1/models`, `/health`, `/metrics`, `/status`) continue to work
 - [ ] `POST /v1/embeddings` forwards correctly without a dedicated handler
 - [ ] `POST /v1/responses` forwards correctly
 - [ ] `GET /props` forwards correctly

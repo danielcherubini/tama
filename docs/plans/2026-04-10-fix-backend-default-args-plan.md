@@ -11,16 +11,16 @@
 ## Task 1: Fix `Config::load_from`/`save_to` path bugs in API
 
 **Context:**
-Four call sites in `crates/koji-web/src/api/backends.rs` pass the full file path (`config_path`) to functions that expect a directory path (`config_dir`). This causes `default_args` to never load from disk (silently fails), and saving also fails. The `config_dir` variable is already computed but unused in two of these locations. The other two locations (`update_backend_default_args`) don't compute `config_dir` at all.
+Four call sites in `crates/tama-web/src/api/backends.rs` pass the full file path (`config_path`) to functions that expect a directory path (`config_dir`). This causes `default_args` to never load from disk (silently fails), and saving also fails. The `config_dir` variable is already computed but unused in two of these locations. The other two locations (`update_backend_default_args`) don't compute `config_dir` at all.
 
 **Files:**
-- Modify: `crates/koji-web/src/api/backends.rs`
+- Modify: `crates/tama-web/src/api/backends.rs`
 
 **What to implement:**
 
-1. **Line 444 — `list_backends`**: Change `koji_core::config::Config::load_from(&config_path)` to `koji_core::config::Config::load_from(&config_dir)`. The `config_dir` variable is already computed on line 422-431.
+1. **Line 444 — `list_backends`**: Change `tama_core::config::Config::load_from(&config_path)` to `tama_core::config::Config::load_from(&config_dir)`. The `config_dir` variable is already computed on line 422-431.
 
-2. **Line 1211 — `check_backend_updates`**: Change `koji_core::config::Config::load_from(&config_path)` to `koji_core::config::Config::load_from(&config_dir)`. The `config_dir` variable is already computed on line 1189-1198.
+2. **Line 1211 — `check_backend_updates`**: Change `tama_core::config::Config::load_from(&config_path)` to `tama_core::config::Config::load_from(&config_dir)`. The `config_dir` variable is already computed on line 1189-1198.
 
 3. **Lines 1503 & 1534 — `update_backend_default_args`**: This function does not currently compute `config_dir`. Add it:
    - After extracting `config_path` (line 1491-1500), add:
@@ -40,7 +40,7 @@ Four call sites in `crates/koji-web/src/api/backends.rs` pass the full file path
    - Change line 1534: `config.save_to(&config_path)` → `config.save_to(&config_dir)`
 
 **Steps:**
-- [ ] Make the 4 changes described above in `crates/koji-web/src/api/backends.rs`
+- [ ] Make the 4 changes described above in `crates/tama-web/src/api/backends.rs`
 - [ ] Run `cargo check --workspace`
   - If it fails, fix errors and re-run before continuing.
 - [ ] Run `cargo test --workspace`
@@ -61,12 +61,12 @@ Four call sites in `crates/koji-web/src/api/backends.rs` pass the full file path
 Both the server-side and client-side `BackendCardDto` use `#[serde(default, skip_serializing_if = "Vec::is_empty")]` on `default_args`. When `default_args` is an empty vec (which is the common case due to the bug), the field is omitted from the JSON response entirely. Even after fixing the bug, backends with genuinely empty `default_args` would have the field missing. Removing `skip_serializing_if` ensures the field is always present, matching how the config editor handles fields.
 
 **Files:**
-- Modify: `crates/koji-web/src/api/backends.rs`
-- Modify: `crates/koji-web/src/components/backend_card.rs`
+- Modify: `crates/tama-web/src/api/backends.rs`
+- Modify: `crates/tama-web/src/components/backend_card.rs`
 
 **What to implement:**
 
-1. In `crates/koji-web/src/api/backends.rs`, find the struct `BackendCardDto` (around line 44-48). Change:
+1. In `crates/tama-web/src/api/backends.rs`, find the struct `BackendCardDto` (around line 44-48). Change:
    ```rust
    #[serde(default, skip_serializing_if = "Vec::is_empty")]
    pub default_args: Vec<String>,
@@ -77,7 +77,7 @@ Both the server-side and client-side `BackendCardDto` use `#[serde(default, skip
    pub default_args: Vec<String>,
    ```
 
-2. In `crates/koji-web/src/components/backend_card.rs`, find the struct `BackendCardDto` (around line 83-84). Make the same change:
+2. In `crates/tama-web/src/components/backend_card.rs`, find the struct `BackendCardDto` (around line 83-84). Make the same change:
    ```rust
    #[serde(default, skip_serializing_if = "Vec::is_empty")]
    pub default_args: Vec<String>,
@@ -119,8 +119,8 @@ For the backends page, we need:
 - On save, POST each changed backend's args sequentially, show feedback
 
 **Files:**
-- Modify: `crates/koji-web/src/components/backend_card.rs`
-- Modify: `crates/koji-web/src/pages/backends.rs`
+- Modify: `crates/tama-web/src/components/backend_card.rs`
+- Modify: `crates/tama-web/src/pages/backends.rs`
 
 **What to implement:**
 
@@ -256,7 +256,7 @@ For the backends page, we need:
 **Steps:**
 - [ ] Modify `backend_card.rs`: Add `on_default_args_change` callback prop, remove `on:blur` save and "Save" button, update `on:input` to call callback
 - [ ] Modify `backends.rs`: Add `default_args_edits` and `save_status` signals, add save callback, update page header, pass new prop to BackendCard
-- [ ] Run `cargo check --package koji-web`
+- [ ] Run `cargo check --package tama-web`
   - Fix any compile errors before continuing.
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo clippy --workspace -- -D warnings`

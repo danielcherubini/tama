@@ -1,6 +1,6 @@
 # Web Control Plane UI Redesign
 
-**Goal:** Transform the Koji web control plane from unstyled browser-default HTML into a sleek, modern dark dashboard with live-updating metrics, VRAM breakdowns, and polished visual design.
+**Goal:** Transform the Tama web control plane from unstyled browser-default HTML into a sleek, modern dark dashboard with live-updating metrics, VRAM breakdowns, and polished visual design.
 
 **Status:** ✅ COMPLETED - See git commits `734623d` ("feat: web control plane UI redesign - dark dashboard theme"), `d585ba4` ("feat: restyle web nav bar with dark theme topbar"), `9dc78d3` ("feat: add sparkline chart CSS styles for dashboard"), `502e2f6` ("feat: replace dashboard gauges with time-series sparkline charts")
 
@@ -25,11 +25,11 @@
 **Context:**
 Currently the web UI has zero CSS — not a single stylesheet, no classes (except two unused ones), and all output uses browser defaults. This task creates the foundational CSS file with the design system (colors, typography, spacing, component styles) and wires it into the Trunk build pipeline so it gets embedded in the `dist/` output. This is the foundation everything else builds on.
 
-Trunk automatically processes `<link data-trunk ...>` tags in `index.html` to copy/bundle assets into `dist/`. We add a `<link data-trunk rel="css" href="style.css">` to `index.html` and create the CSS file at `crates/koji-web/style.css`.
+Trunk automatically processes `<link data-trunk ...>` tags in `index.html` to copy/bundle assets into `dist/`. We add a `<link data-trunk rel="css" href="style.css">` to `index.html` and create the CSS file at `crates/tama-web/style.css`.
 
 **Files:**
-- Create: `crates/koji-web/style.css`
-- Modify: `crates/koji-web/index.html`
+- Create: `crates/tama-web/style.css`
+- Modify: `crates/tama-web/index.html`
 
 **What to implement:**
 
@@ -158,7 +158,7 @@ Modify `index.html` to add the CSS link and a viewport meta tag:
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Koji Control Plane</title>
+    <title>Tama Control Plane</title>
     <link data-trunk rel="css" href="style.css" />
   </head>
   <body></body>
@@ -166,9 +166,9 @@ Modify `index.html` to add the CSS link and a viewport meta tag:
 ```
 
 **Steps:**
-- [ ] Create `crates/koji-web/style.css` with all sections described above
-- [ ] Modify `crates/koji-web/index.html` to add viewport meta and CSS link with `data-trunk` attribute
-- [ ] Run `cd crates/koji-web && trunk build` to verify Trunk picks up the CSS and includes it in `dist/`
+- [ ] Create `crates/tama-web/style.css` with all sections described above
+- [ ] Modify `crates/tama-web/index.html` to add viewport meta and CSS link with `data-trunk` attribute
+- [ ] Run `cd crates/tama-web && trunk build` to verify Trunk picks up the CSS and includes it in `dist/`
   - Did the build succeed and does `dist/` contain the CSS (either inlined or as a separate file)?
 - [ ] Run `cargo build --workspace` to verify the SSR build still compiles (the `include_dir!` macro embeds the new `dist/`)
   - Did it succeed? If not, fix and re-run.
@@ -177,7 +177,7 @@ Modify `index.html` to add the CSS link and a viewport meta tag:
 - [ ] Commit with message: "feat: add CSS design system for web control plane dark theme"
 
 **Acceptance criteria:**
-- [ ] `style.css` exists at `crates/koji-web/style.css` with all 16 sections
+- [ ] `style.css` exists at `crates/tama-web/style.css` with all 16 sections
 - [ ] `index.html` includes `<link data-trunk rel="css" href="style.css" />`
 - [ ] `trunk build` succeeds and CSS appears in `dist/` output
 - [ ] `cargo build --workspace` succeeds (SSR embeds the new dist)
@@ -188,10 +188,10 @@ Modify `index.html` to add the CSS link and a viewport meta tag:
 ### Task 2: Restyle Navigation Bar
 
 **Context:**
-The navigation component (`crates/koji-web/src/components/nav.rs`) currently renders pipe-separated plain text links: `Dashboard | Models | Pull Model | Logs | Config`. This task applies the `topbar` CSS classes from the design system (created in Task 1) to transform it into a professional sticky top navigation bar with the Koji branding. This is a visual-only change — no logic changes.
+The navigation component (`crates/tama-web/src/components/nav.rs`) currently renders pipe-separated plain text links: `Dashboard | Models | Pull Model | Logs | Config`. This task applies the `topbar` CSS classes from the design system (created in Task 1) to transform it into a professional sticky top navigation bar with the Tama branding. This is a visual-only change — no logic changes.
 
 **Files:**
-- Modify: `crates/koji-web/src/components/nav.rs`
+- Modify: `crates/tama-web/src/components/nav.rs`
 
 **What to implement:**
 
@@ -200,7 +200,7 @@ Replace the entire `view!` block in the `Nav` component. The new markup should b
 ```rust
 view! {
     <nav class="topbar">
-        <span class="logo">"⚡ Koji"</span>
+        <span class="logo">"⚡ Tama"</span>
         <A href="/" class="nav-link">"Dashboard"</A>
         <A href="/models" class="nav-link">"Models"</A>
         <A href="/pull" class="nav-link">"Pull Model"</A>
@@ -217,9 +217,9 @@ Remove all `" | "` text separators. Add `class="topbar"` to `<nav>`. Add `class=
 Leptos router adds `aria-current="page"` on the active `<A>` link. The CSS rule `nav.topbar a[aria-current="page"] { color: var(--accent-blue); background: var(--bg-tertiary); }` should already be in `style.css` from Task 1 (section 3, Layout) — verify it's there, and add it if not.
 
 **Steps:**
-- [ ] Modify `crates/koji-web/src/components/nav.rs` with the new markup as described above
+- [ ] Modify `crates/tama-web/src/components/nav.rs` with the new markup as described above
 - [ ] If needed, add the `a[aria-current="page"]` CSS rule to `style.css`
-- [ ] Run `cd crates/koji-web && trunk build`
+- [ ] Run `cd crates/tama-web && trunk build`
   - Did it succeed?
 - [ ] Run `cargo build --workspace`
   - Did it succeed?
@@ -238,7 +238,7 @@ Leptos router adds `aria-current="page"` on the active `<A>` link. The CSS rule 
 ### Task 3: Redesign Dashboard with Metric Cards, Gauges, and Auto-Refresh
 
 **Context:**
-The Dashboard page (`crates/koji-web/src/pages/dashboard.rs`) currently shows plain `<p>` tags with system metrics and a plain button. This task is the biggest visual transformation — it redesigns the Dashboard into a card-based layout with:
+The Dashboard page (`crates/tama-web/src/pages/dashboard.rs`) currently shows plain `<p>` tags with system metrics and a plain button. This task is the biggest visual transformation — it redesigns the Dashboard into a card-based layout with:
 - Status header with service state badge
 - Grid of metric cards (CPU, RAM, GPU, VRAM, models loaded)
 - Visual gauge bars for CPU/RAM/GPU/VRAM utilization
@@ -249,7 +249,7 @@ The Dashboard page (`crates/koji-web/src/pages/dashboard.rs`) currently shows pl
 The existing `SystemHealth` struct and API call stay the same. We wrap the data in styled markup using CSS classes from Task 1.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/dashboard.rs`
+- Modify: `crates/tama-web/src/pages/dashboard.rs`
 
 **What to implement:**
 
@@ -338,16 +338,16 @@ The existing `SystemHealth` struct and API call stay the same. We wrap the data 
 8. **Error state**: When health data is `None`, show:
    ```
    <div class="card">
-       <p class="text-error">"Failed to load health data. Is Koji running?"</p>
+       <p class="text-error">"Failed to load health data. Is Tama running?"</p>
        <button class="btn btn-secondary btn-sm" on:click=manual_refresh>"Retry"</button>
    </div>
    ```
 
 **Steps:**
-- [ ] Modify `crates/koji-web/src/pages/dashboard.rs` as described above
+- [ ] Modify `crates/tama-web/src/pages/dashboard.rs` as described above
 - [ ] Add `use gloo_timers::callback::Interval;` import
 - [ ] Add the `color_for_pct` helper function
-- [ ] Run `cd crates/koji-web && trunk build`
+- [ ] Run `cd crates/tama-web && trunk build`
   - Did it succeed?
 - [ ] Run `cargo build --workspace`
   - Did it succeed?
@@ -369,10 +369,10 @@ The existing `SystemHealth` struct and API call stay the same. We wrap the data 
 ### Task 4: Restyle Models List Page
 
 **Context:**
-The Models page (`crates/koji-web/src/pages/models.rs`) currently renders a plain HTML table with default browser styling and unstyled buttons. This task applies the design system's `.data-table`, `.btn`, `.badge`, and `.page-header` classes to make it match the dark dashboard theme.
+The Models page (`crates/tama-web/src/pages/models.rs`) currently renders a plain HTML table with default browser styling and unstyled buttons. This task applies the design system's `.data-table`, `.btn`, `.badge`, and `.page-header` classes to make it match the dark dashboard theme.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/models.rs`
+- Modify: `crates/tama-web/src/pages/models.rs`
 
 **What to implement:**
 
@@ -414,7 +414,7 @@ The Models page (`crates/koji-web/src/pages/models.rs`) currently renders a plai
 7. **Error state** — Replace `<p>"Failed to load models"</p>` with:
    ```
    <div class="card">
-       <p class="text-error">"Failed to load models. Is Koji running?"</p>
+       <p class="text-error">"Failed to load models. Is Tama running?"</p>
    </div>
    ```
 
@@ -427,8 +427,8 @@ The Models page (`crates/koji-web/src/pages/models.rs`) currently renders a plai
    ```
 
 **Steps:**
-- [ ] Modify `crates/koji-web/src/pages/models.rs` with all changes described above
-- [ ] Run `cd crates/koji-web && trunk build`
+- [ ] Modify `crates/tama-web/src/pages/models.rs` with all changes described above
+- [ ] Run `cd crates/tama-web && trunk build`
   - Did it succeed?
 - [ ] Run `cargo build --workspace`
   - Did it succeed?
@@ -448,10 +448,10 @@ The Models page (`crates/koji-web/src/pages/models.rs`) currently renders a plai
 ### Task 5: Restyle Pull Wizard
 
 **Context:**
-The Pull wizard (`crates/koji-web/src/pages/pull.rs`) is a multi-step flow (RepoInput → Loading → SelectQuants → SetContext → Downloading → Done) that currently uses plain HTML with no visual distinction between steps and unstyled form controls. This task adds a step indicator bar at the top, styled cards around each step's content, styled buttons, and custom progress bars to replace the native `<progress>` elements.
+The Pull wizard (`crates/tama-web/src/pages/pull.rs`) is a multi-step flow (RepoInput → Loading → SelectQuants → SetContext → Downloading → Done) that currently uses plain HTML with no visual distinction between steps and unstyled form controls. This task adds a step indicator bar at the top, styled cards around each step's content, styled buttons, and custom progress bars to replace the native `<progress>` elements.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/pull.rs`
+- Modify: `crates/tama-web/src/pages/pull.rs`
 
 **What to implement:**
 
@@ -513,9 +513,9 @@ The Pull wizard (`crates/koji-web/src/pages/pull.rs`) is a multi-step flow (Repo
 9. **Remove all inline `style=` attributes** from the Pull component — everything should use CSS classes, **except** dynamic computed values (e.g., progress bar `style=format!("width:{}%", pct)` which must remain inline).
 
 **Steps:**
-- [ ] Modify `crates/koji-web/src/pages/pull.rs` with all changes described above
+- [ ] Modify `crates/tama-web/src/pages/pull.rs` with all changes described above
 - [ ] Add the `indeterminate` progress bar animation to `style.css` if not already present
-- [ ] Run `cd crates/koji-web && trunk build`
+- [ ] Run `cd crates/tama-web && trunk build`
   - Did it succeed?
 - [ ] Run `cargo build --workspace`
   - Did it succeed?
@@ -536,12 +536,12 @@ The Pull wizard (`crates/koji-web/src/pages/pull.rs`) is a multi-step flow (Repo
 ### Task 6: Restyle Model Editor
 
 **Context:**
-The Model Editor (`crates/koji-web/src/pages/model_editor.rs`, ~690 lines) is the largest and most complex page in the web UI. It has two forms (model config + model card), a dynamic quants sub-table, and heavy use of inline styles. This task converts it from `<table>`-based form layout to CSS Grid and applies the full design system. It's split as its own task due to complexity.
+The Model Editor (`crates/tama-web/src/pages/model_editor.rs`, ~690 lines) is the largest and most complex page in the web UI. It has two forms (model config + model card), a dynamic quants sub-table, and heavy use of inline styles. This task converts it from `<table>`-based form layout to CSS Grid and applies the full design system. It's split as its own task due to complexity.
 
 The model editor has two `<table>`-based forms and a quants sub-table rendered with a `<For>` component. The form tables should be converted to `.form-grid` CSS Grid layout. The quants sub-table should remain a `<table>` but use the `.data-table` class.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/model_editor.rs`
+- Modify: `crates/tama-web/src/pages/model_editor.rs`
 
 **What to implement:**
 
@@ -575,8 +575,8 @@ The model editor has two `<table>`-based forms and a quants sub-table rendered w
 8. Remove ALL inline `style=` attributes — use CSS classes instead. Exception: dynamic computed values that must remain inline.
 
 **Steps:**
-- [ ] Modify `crates/koji-web/src/pages/model_editor.rs` with all changes described
-- [ ] Run `cd crates/koji-web && trunk build`
+- [ ] Modify `crates/tama-web/src/pages/model_editor.rs` with all changes described
+- [ ] Run `cd crates/tama-web && trunk build`
   - Did it succeed?
 - [ ] Run `cargo build --workspace`
   - Did it succeed?
@@ -601,8 +601,8 @@ The model editor has two `<table>`-based forms and a quants sub-table rendered w
 The Logs page (`logs.rs`) and Config Editor page (`config_editor.rs`) are the two simplest pages — Logs is a pre-formatted text viewer with a refresh button, and Config Editor is a textarea with save/reload. Both are quick wins to apply the dark theme styling to.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/logs.rs`
-- Modify: `crates/koji-web/src/pages/config_editor.rs`
+- Modify: `crates/tama-web/src/pages/logs.rs`
+- Modify: `crates/tama-web/src/pages/config_editor.rs`
 
 **What to implement:**
 
@@ -629,9 +629,9 @@ The Logs page (`logs.rs`) and Config Editor page (`config_editor.rs`) are the tw
 5. Remove all inline `style=` attributes.
 
 **Steps:**
-- [ ] Modify `crates/koji-web/src/pages/logs.rs` with all changes described
-- [ ] Modify `crates/koji-web/src/pages/config_editor.rs` with all changes described
-- [ ] Run `cd crates/koji-web && trunk build`
+- [ ] Modify `crates/tama-web/src/pages/logs.rs` with all changes described
+- [ ] Modify `crates/tama-web/src/pages/config_editor.rs` with all changes described
+- [ ] Run `cd crates/tama-web && trunk build`
   - Did it succeed?
 - [ ] Run `cargo build --workspace`
   - Did it succeed?
@@ -655,11 +655,11 @@ The Logs page (`logs.rs`) and Config Editor page (`config_editor.rs`) are the tw
 After all the visual changes, the `dist/` directory (which is committed to the repo and embedded at compile time via `include_dir!`) needs to be rebuilt with the final version of the CSS and WASM. This task runs the full build pipeline, verifies everything works, and ensures the committed `dist/` is up to date.
 
 **Files:**
-- Modify: `crates/koji-web/dist/*` (rebuilt by Trunk)
+- Modify: `crates/tama-web/dist/*` (rebuilt by Trunk)
 
 **What to implement:**
 
-1. Run `trunk build --release` in `crates/koji-web/` to produce optimized WASM + JS + CSS output in `dist/`.
+1. Run `trunk build --release` in `crates/tama-web/` to produce optimized WASM + JS + CSS output in `dist/`.
 
 2. Run the full workspace build: `cargo build --workspace` — this compiles the SSR server which embeds `dist/` via `include_dir!`.
 
@@ -670,7 +670,7 @@ After all the visual changes, the `dist/` directory (which is committed to the r
 5. Run `cargo fmt --all` for formatting.
 
 **Steps:**
-- [ ] Run `cd crates/koji-web && trunk build --release`
+- [ ] Run `cd crates/tama-web && trunk build --release`
   - Did it succeed? Check that `dist/` contains the CSS file (or it's inlined into the HTML).
 - [ ] Run `cargo build --workspace`
   - Did it succeed?

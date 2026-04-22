@@ -4,17 +4,17 @@
 
 **Status:** ✅ COMPLETED - See git commits `3a1b7a0` ("Merge branch 'feat/system-restart'"), `eea20ef` ("fix(proxy): complete system restart implementation per plan"), `ec0fc08` ("feat: implement system restart with process exit"), `0fe3ab5` ("feat: implement system restart handler with process exit")
 **Architecture:** The restart handler will trigger a shutdown sequence in the `ProxyState` to clean up resources (models, jobs) and then terminate the process. The host environment (systemd, Docker, etc.) is expected to handle the process recreation.
-**Tech Stack:** Rust, Axum, Tokio, Koji Core.
+**Tech Stack:** Rust, Axum, Tokio, Tama Core.
 
 ---
 
 ### Task 1: Implement `shutdown` method in `ProxyState`
 
 **Context:**
-Currently, the `handle_koji_system_restart` function is a placeholder. To perform a hard restart, we must first ensure the application cleans up its resources (unloads models, closes channels) before the process exits.
+Currently, the `handle_tama_system_restart` function is a placeholder. To perform a hard restart, we must first ensure the application cleans up its resources (unloads models, closes channels) before the process exits.
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy/mod.rs` (or the file containing `ProxyState` definition)
+- Modify: `crates/tama-core/src/proxy/mod.rs` (or the file containing `ProxyState` definition)
 
 **What to implement:**
 - Add an `async fn shutdown(&self)` method to the `ProxyState` struct.
@@ -25,11 +25,11 @@ Currently, the `handle_koji_system_restart` function is a placeholder. To perfor
 - Ensure the method is thread-safe and handles the `Arc<RwLock<...>>` patterns correctly.
 
 **Steps:**
-- [ ] Write a unit test in `crates/koji-core/src/proxy/mod.rs` that verifies `shutdown` is called and cleans up the `models` map.
-- [ ] Run `cargo test -p koji-core`
+- [ ] Write a unit test in `crates/tama-core/src/proxy/mod.rs` that verifies `shutdown` is called and cleans up the `models` map.
+- [ ] Run `cargo test -p tama-core`
   - Did it fail? If so, fix it.
 - [ ] Implement `shutdown` in `ProxyState`.
-- [ ] Run `cargo test -p koji-core`
+- [ ] Run `cargo test -p tama-core`
   - Did it pass?
 - [ ] Run `cargo fmt`
 - [ ] Run `cargo check`
@@ -45,13 +45,13 @@ Currently, the `handle_koji_system_restart` function is a placeholder. To perfor
 ### Task 2: Update the Restart Handler to trigger exit
 
 **Context:**
-The API endpoint `/koji/v1/system/restart` needs to be wired up to the new `shutdown` logic and actually terminate the process.
+The API endpoint `/tama/v1/system/restart` needs to be wired up to the new `shutdown` logic and actually terminate the process.
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy/koji_handlers.rs`
+- Modify: `crates/tama-core/src/proxy/tama_handlers.rs`
 
 **What to implement:**
-- Update the `handle_koji_system_restart` function.
+- Update the `handle_tama_system_restart` function.
 - The function should:
     1. Call `state.shutdown().await`.
     2. After the shutdown sequence completes, call `std::process::exit(0)`.
@@ -59,15 +59,15 @@ The API endpoint `/koji/v1/system/restart` needs to be wired up to the new `shut
 
 **Steps:**
 - [ ] Write a test case that calls the handler and checks if it initiates the shutdown logic.
-- [ ] Run `cargo test -p koji-core`
-- [ ] Implement the logic in `handle_koji_system_restart`.
-- [ ] Run `cargo test -p koji-core`
+- [ ] Run `cargo test -p tama-core`
+- [ ] Implement the logic in `handle_tama_system_restart`.
+- [ ] Run `cargo test -p tama-core`
 - [ ] Run `cargo fmt`
 - [ ] Run `cargo check`
 - [ ] Commit with message: "feat: implement system restart handler with process exit"
 
 **Acceptance criteria:**
-- [ ] Calling `POST /koji/v1/system/restart` triggers the shutdown sequence.
+- [ ] Calling `POST /tama/v1/system/restart` triggers the shutdown sequence.
 - [ ] The process exits with code 0.
 
 ---
@@ -78,11 +78,11 @@ The API endpoint `/koji/v1/system/restart` needs to be wired up to the new `shut
 We need to verify that a real call to the API results in the process actually exiting.
 
 **Files:**
-- Create: `crates/koji-core/src/proxy/tests/restart_test.rs` (or add to existing proxy tests)
+- Create: `crates/tama-core/src/proxy/tests/restart_test.rs` (or add to existing proxy tests)
 
 **What to implement:**
 - An integration test that:
-    1. Spawns the Koji proxy server in a background task.
+    1. Spawns the Tama proxy server in a background task.
     2. Uses a `reqwest` client to send a `POST` request to the restart endpoint.
     3. Uses a timeout/watcher to detect if the server process has terminated.
 - *Note: We'll use `std::process::Command` to run the binary directly to avoid the test runner exiting with the application.*

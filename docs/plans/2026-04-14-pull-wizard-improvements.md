@@ -12,7 +12,7 @@
 The wizard currently has separate steps for quants and vision. We need to remove the `Vision` step from the state machine and update the visual progress indicator to reflect the new flow: Repo -> Loading -> Select -> Context -> Downloading -> Done.
 
 **Files:**
-- Modify: `crates/koji-web/src/components/pull_quant_wizard.rs`
+- Modify: `crates/tama-web/src/components/pull_quant_wizard.rs`
 
 **What to implement:**
 1. Remove `Vision` variant from `WizardStep` enum.
@@ -43,7 +43,7 @@ The wizard currently has separate steps for quants and vision. We need to remove
 Currently, users must select a quant before they can select a vision projector. We want them on one page so users can select either or both.
 
 **Files:**
-- Modify: `crates/koji-web/src/components/pull_quant_wizard.rs`
+- Modify: `crates/tama-web/src/components/pull_quant_wizard.rs`
 
 **What to implement:**
 1. In the `WizardStep::SelectQuants` view:
@@ -83,7 +83,7 @@ Currently, users must select a quant before they can select a vision projector. 
 Users currently type in the context length. We want a dropdown with linear increments and a "Custom" option.
 
 **Files:**
-- Modify: `crates/koji-web/src/components/pull_quant_wizard.rs`
+- Modify: `crates/tama-web/src/components/pull_quant_wizard.rs`
 
 **What to implement:**
 1. In the `WizardStep::SetContext` view:

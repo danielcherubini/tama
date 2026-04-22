@@ -1,10 +1,10 @@
 # Model Config to Database Plan
 
-**Goal:** Move all model configuration out of `koji.toml` into SQLite so the filesystem and DB are the single source of truth and config files can never become stale.
+**Goal:** Move all model configuration out of `tama.toml` into SQLite so the filesystem and DB are the single source of truth and config files can never become stale.
 
-**Architecture:** A new `model_configs` DB table holds every field currently in `koji.toml`'s `[models]` section. The in-memory `config.models: HashMap<String, ModelConfig>` is kept as the runtime registry (to avoid touching ~20 call sites) but is now populated from the DB on startup and written back to the DB on every mutation. `koji.toml` retains only non-model settings (general, backends, proxy, supervisor). On first startup after migration, any existing `[models]` entries in `koji.toml` are automatically imported to the DB and then stripped from the file.
+**Architecture:** A new `model_configs` DB table holds every field currently in `tama.toml`'s `[models]` section. The in-memory `config.models: HashMap<String, ModelConfig>` is kept as the runtime registry (to avoid touching ~20 call sites) but is now populated from the DB on startup and written back to the DB on every mutation. `tama.toml` retains only non-model settings (general, backends, proxy, supervisor). On first startup after migration, any existing `[models]` entries in `tama.toml` are automatically imported to the DB and then stripped from the file.
 
-**Tech Stack:** Rust, rusqlite, serde_json (for JSON columns), existing migration infrastructure in `crates/koji-core/src/db/migrations.rs`
+**Tech Stack:** Rust, rusqlite, serde_json (for JSON columns), existing migration infrastructure in `crates/tama-core/src/db/migrations.rs`
 
 ---
 
@@ -14,16 +14,16 @@
 All model user-preferences (enabled, selected quant, backend, args, context length, etc.) need a home in SQLite. This task adds the schema. It also adds a `kind` column to the existing `model_files` table so GGUF model files and mmproj vision-projector files can be told apart without inferring from the filename. No application logic changes in this task — schema only.
 
 **Files:**
-- Modify: `crates/koji-core/src/db/migrations.rs`
-- Modify: `crates/koji-core/src/db/queries/types.rs`
-- Modify: `crates/koji-core/src/db/queries/mod.rs`
+- Modify: `crates/tama-core/src/db/migrations.rs`
+- Modify: `crates/tama-core/src/db/queries/types.rs`
+- Modify: `crates/tama-core/src/db/queries/mod.rs`
 
 **What to implement:**
 
 Add migration v7 (increment `LATEST_VERSION` to `7`) with this SQL:
 
 ```sql
--- Per-repo user configuration (replaces [models] in koji.toml)
+-- Per-repo user configuration (replaces [models] in tama.toml)
 CREATE TABLE IF NOT EXISTS model_configs (
     repo_id       TEXT PRIMARY KEY,
     display_name  TEXT,
@@ -92,7 +92,7 @@ pub fn delete_model_config(conn: &Connection, repo_id: &str) -> Result<()>
   - `test_get_all_model_configs` — insert two records, assert both returned
   - `test_delete_model_config` — upsert then delete, assert None on get
   - `test_migration_v7_creates_model_configs_table` in `migrations.rs`
-- [ ] Run `cargo test --package koji-core -- db` — all must pass
+- [ ] Run `cargo test --package tama-core -- db` — all must pass
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo build --workspace`
 - [ ] Commit: `feat(db): migration v7 — model_configs table and model_files.kind column`
@@ -114,9 +114,9 @@ With the schema in place, we need two things: (a) a way to convert between `Mode
 The config key (the HashMap key, e.g. `"unsloth--gemma-4-31b-it-gguf"`) is derived from `repo_id` by lowercasing and replacing `/` with `--`. Reverse is also needed (split on `--`, rejoin with `/`).
 
 **Files:**
-- Create: `crates/koji-core/src/db/queries/model_config_queries.rs` (or extend `model_queries.rs`)
-- Modify: `crates/koji-core/src/db/mod.rs` (re-export new helpers)
-- Modify: `crates/koji-core/src/config/types.rs` (add conversion methods)
+- Create: `crates/tama-core/src/db/queries/model_config_queries.rs` (or extend `model_queries.rs`)
+- Modify: `crates/tama-core/src/db/mod.rs` (re-export new helpers)
+- Modify: `crates/tama-core/src/config/types.rs` (add conversion methods)
 
 **What to implement:**
 
@@ -155,7 +155,7 @@ pub fn save_model_config(conn: &Connection, config_key: &str, mc: &ModelConfig) 
   - `test_model_config_round_trip` — create a `ModelConfig` with all fields populated (args, sampling, modalities, health_check), call `to_db_record` then `from_db_record`, assert equality
   - `test_load_model_configs_empty` — empty DB returns empty HashMap
   - `test_save_and_load_model_config` — save one, load all, assert present
-- [ ] Run `cargo test --package koji-core` — all pass
+- [ ] Run `cargo test --package tama-core` — all pass
 - [ ] Run `cargo fmt --all && cargo build --workspace`
 - [ ] Commit: `feat(db): ModelConfig ↔ DB record conversion and load/save helpers`
 
@@ -166,23 +166,23 @@ pub fn save_model_config(conn: &Connection, config_key: &str, mc: &ModelConfig) 
 
 ---
 
-### Task 3: On-startup migration — import koji.toml models to DB, strip from file
+### Task 3: On-startup migration — import tama.toml models to DB, strip from file
 
 **Context:**
-Existing installations have models in `koji.toml`. We must import them to DB on first startup (when `model_configs` is empty but `config.models` is not), then remove them from the TOML file so they are never read from TOML again. This is a one-time, automatic migration — no user action required. After this, `koji.toml` only contains general/backends/proxy/supervisor config.
+Existing installations have models in `tama.toml`. We must import them to DB on first startup (when `model_configs` is empty but `config.models` is not), then remove them from the TOML file so they are never read from TOML again. This is a one-time, automatic migration — no user action required. After this, `tama.toml` only contains general/backends/proxy/supervisor config.
 
 **Files:**
-- Create: `crates/koji-core/src/config/migrate/model_to_db.rs`
-- Modify: `crates/koji-core/src/config/migrate/mod.rs`
-- Modify: `crates/koji-core/src/proxy/server/mod.rs` (call migration on startup)
-- Modify: `crates/koji-core/src/config/types.rs` (make `models` field `#[serde(skip)]` or default-empty after migration)
+- Create: `crates/tama-core/src/config/migrate/model_to_db.rs`
+- Modify: `crates/tama-core/src/config/migrate/mod.rs`
+- Modify: `crates/tama-core/src/proxy/server/mod.rs` (call migration on startup)
+- Modify: `crates/tama-core/src/config/types.rs` (make `models` field `#[serde(skip)]` or default-empty after migration)
 
 **What to implement:**
 
 ```rust
 /// If the DB has no model_configs rows but Config has non-empty models,
 /// import all Config models into DB, then clear Config.models and save
-/// the config file (removing the [models] section from koji.toml).
+/// the config file (removing the [models] section from tama.toml).
 /// Returns the number of models migrated (0 = nothing to do).
 pub fn migrate_models_to_db(
     conn: &Connection,
@@ -196,11 +196,11 @@ Steps inside the function:
 3. For each `(key, mc)` in `config.models`, call `save_model_config(conn, key, mc)`
 4. Log how many were migrated
 5. `config.models.clear()`
-6. `config.save()` — this writes koji.toml without the `[models]` section
+6. `config.save()` — this writes tama.toml without the `[models]` section
 
 Call `migrate_models_to_db` in `proxy/server/mod.rs` during startup, right after `db::open()` and before the proxy begins serving.
 
-Also add `koji model migrate` CLI subcommand as an explicit trigger for users who want to run it manually or verify it. The subcommand should print each model it migrates.
+Also add `tama model migrate` CLI subcommand as an explicit trigger for users who want to run it manually or verify it. The subcommand should print each model it migrates.
 
 **Steps:**
 - [ ] Implement `migrate_models_to_db` in `config/migrate/model_to_db.rs`
@@ -209,15 +209,15 @@ Also add `koji model migrate` CLI subcommand as an explicit trigger for users wh
   - `test_migrate_models_to_db_skips_if_db_has_rows` — DB already has a row, assert no-op (returns 0)
   - `test_migrate_models_to_db_skips_if_config_empty` — config.models empty, assert 0
 - [ ] Wire call into proxy startup
-- [ ] Add `koji model migrate` CLI subcommand
-- [ ] Run `cargo test --package koji-core -- migrate` — all pass
+- [ ] Add `tama model migrate` CLI subcommand
+- [ ] Run `cargo test --package tama-core -- migrate` — all pass
 - [ ] Run `cargo fmt --all && cargo build --workspace`
-- [ ] Commit: `feat: auto-migrate koji.toml model entries to DB on first startup`
+- [ ] Commit: `feat: auto-migrate tama.toml model entries to DB on first startup`
 
 **Acceptance criteria:**
-- [ ] After one startup with models in koji.toml: DB has rows, koji.toml `[models]` is gone
+- [ ] After one startup with models in tama.toml: DB has rows, tama.toml `[models]` is gone
 - [ ] Second startup: migration is a no-op
-- [ ] `koji model migrate` prints what it migrated (or "nothing to migrate")
+- [ ] `tama model migrate` prints what it migrated (or "nothing to migrate")
 - [ ] All existing tests pass
 
 ---
@@ -228,16 +228,16 @@ Also add `koji model migrate` CLI subcommand as an explicit trigger for users wh
 Now that DB has the data and helpers exist, wire the proxy to use them. On startup, populate `config.models` from DB (after the migration in Task 3 has run). On every write that currently calls `config.save()` for model changes, replace with `save_model_config(conn, key, mc)`. The in-memory HashMap stays — we are not changing the 20+ read call-sites, only the load and write paths.
 
 Write sites to update (grep confirms these call `config.save()` after mutating `config.models`):
-- `crates/koji-core/src/proxy/koji_handlers/pull.rs` — `setup_model_after_pull`
-- `crates/koji-core/src/proxy/koji_handlers/pull.rs` — `_setup_model_after_pull_with_config`
-- `crates/koji-core/src/proxy/handlers.rs` — model enable/disable/update handlers
-- `crates/koji-core/src/proxy/server/mod.rs` — startup and restart paths
+- `crates/tama-core/src/proxy/tama_handlers/pull.rs` — `setup_model_after_pull`
+- `crates/tama-core/src/proxy/tama_handlers/pull.rs` — `_setup_model_after_pull_with_config`
+- `crates/tama-core/src/proxy/handlers.rs` — model enable/disable/update handlers
+- `crates/tama-core/src/proxy/server/mod.rs` — startup and restart paths
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy/server/mod.rs`
-- Modify: `crates/koji-core/src/proxy/koji_handlers/pull.rs`
-- Modify: `crates/koji-core/src/proxy/handlers.rs`
-- Modify: `crates/koji-core/src/proxy/types.rs` (ensure `ProxyState` exposes db connection for handlers)
+- Modify: `crates/tama-core/src/proxy/server/mod.rs`
+- Modify: `crates/tama-core/src/proxy/tama_handlers/pull.rs`
+- Modify: `crates/tama-core/src/proxy/handlers.rs`
+- Modify: `crates/tama-core/src/proxy/types.rs` (ensure `ProxyState` exposes db connection for handlers)
 
 **What to implement:**
 
@@ -261,28 +261,28 @@ In every handler that currently does `config.save()` after touching `config.mode
 - [ ] Add DB load of model_configs to proxy startup in `server/mod.rs`
 - [ ] Update `_setup_model_after_pull_with_config` to write to DB not TOML
 - [ ] Update model mutation handlers in `handlers.rs` to write to DB
-- [ ] Run `cargo test --package koji-core` — all pass
+- [ ] Run `cargo test --package tama-core` — all pass
 - [ ] Manual smoke-test: start proxy, pull a model, restart — model should still be there (loaded from DB)
 - [ ] Run `cargo fmt --all && cargo build --workspace`
-- [ ] Commit: `feat: proxy loads and saves model config via DB instead of koji.toml`
+- [ ] Commit: `feat: proxy loads and saves model config via DB instead of tama.toml`
 
 **Acceptance criteria:**
-- [ ] After `koji model scan` or pull, model appears in DB (`model_configs` table)
-- [ ] After proxy restart, model is loaded from DB — not from koji.toml
-- [ ] No model-related writes touch `koji.toml`
+- [ ] After `tama model scan` or pull, model appears in DB (`model_configs` table)
+- [ ] After proxy restart, model is loaded from DB — not from tama.toml
+- [ ] No model-related writes touch `tama.toml`
 - [ ] All existing proxy tests pass
 
 ---
 
-### Task 5: Update `model scan` and remove models from koji.toml schema
+### Task 5: Update `model scan` and remove models from tama.toml schema
 
 **Context:**
 With the DB as source of truth, `model scan` can be dramatically simplified. It no longer needs to parse model cards or config files — just walk the filesystem and reconcile with the DB. This task rewrites scan to use the DB-first approach, removes the debug verbose output added temporarily, and removes `ModelConfig` / `models` from the `Config` struct (completing the migration).
 
 **Files:**
-- Modify: `crates/koji-cli/src/commands/model.rs` (`cmd_scan`)
-- Modify: `crates/koji-core/src/config/types.rs` (remove/deprecate `models` field)
-- Modify: `crates/koji-core/src/config/mod.rs` (remove model-related config helpers if any)
+- Modify: `crates/tama-cli/src/commands/model.rs` (`cmd_scan`)
+- Modify: `crates/tama-core/src/config/types.rs` (remove/deprecate `models` field)
+- Modify: `crates/tama-core/src/config/mod.rs` (remove model-related config helpers if any)
 - Delete or empty: model card loading code no longer needed for scan
 
 **What to implement:**
@@ -308,10 +308,10 @@ Remove `pub models: HashMap<String, ModelConfig>` from `Config` struct (or mark 
 - [ ] Commit: `feat: rewrite model scan to use DB as source of truth, remove models from Config`
 
 **Acceptance criteria:**
-- [ ] `koji model scan` with a completely empty models dir removes all ghost DB/config entries
-- [ ] `koji model scan` with files on disk but no DB entries adds them
-- [ ] No references to `config.models` outside `crates/koji-core/src/proxy/`
-- [ ] `koji.toml` no longer has a `[models]` section after migration
+- [ ] `tama model scan` with a completely empty models dir removes all ghost DB/config entries
+- [ ] `tama model scan` with files on disk but no DB entries adds them
+- [ ] No references to `config.models` outside `crates/tama-core/src/proxy/`
+- [ ] `tama.toml` no longer has a `[models]` section after migration
 - [ ] All tests pass
 
 ---

@@ -1,0 +1,450 @@
+openapi: 3.1.0
+
+info:
+  title: Tama Web API
+  description: |
+    Endpoints served natively by the `tama-web` process (port 11435).
+    These endpoints are NOT forwarded to the Tama proxy — they access the
+    local filesystem directly for log tailing and config editing.
+
+    All endpoints are prefixed with `/api/`.
+  version: 1.8.4
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:11435
+    description: Local Tama web UI (default port)
+
+tags:
+  - name: web-api
+    description: Web UI — log viewing and config editing
+  - name: models-api
+    description: Web UI — model config CRUD (reads/writes config.toml directly)
+
+paths:
+
+  /api/logs:
+    get:
+      operationId: getLogs
+      summary: Get recent log lines
+      description: |
+        Returns the last N lines of the `tama.log` file from the configured
+        `logs_dir`. Returns 404 if `logs_dir` was not passed to the web server
+        at startup.
+      tags: [web-api]
+      parameters:
+        - name: lines
+          in: query
+          required: false
+          description: Number of log lines to return (default 200)
+          schema:
+            type: integer
+            default: 200
+            minimum: 1
+            maximum: 10000
+      responses:
+        "200":
+          description: Log lines
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [lines]
+                properties:
+                  lines:
+                    type: array
+                    items:
+                      type: string
+              example:
+                lines:
+                  - "2026-04-03T12:00:00Z INFO tama: starting proxy on 0.0.0.0:11434"
+                  - "2026-04-03T12:00:01Z INFO tama: loaded model llama3"
+        "404":
+          description: logs_dir not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "logs_dir not configured"
+
+  /api/config:
+    get:
+      operationId: getConfig
+      summary: Get current config file contents
+      description: |
+        Returns the raw TOML content of the Tama config file. Returns 404 if
+        `config_path` was not passed to the web server at startup.
+      tags: [web-api]
+      responses:
+        "200":
+          description: Config file contents
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [content]
+                properties:
+                  content:
+                    type: string
+                    description: Raw TOML content of the config file
+              example:
+                content: "[general]\nlog_level = \"info\"\n"
+        "404":
+          description: config_path not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      operationId: saveConfig
+      summary: Save config file contents
+      description: |
+        Validates and saves the provided TOML as the Tama config file.
+
+        The content is validated by parsing it as a `Config` struct before
+        writing. A restart of the Tama proxy is required for changes to take
+        effect (use `POST /tama/v1/system/restart`).
+
+        **Note:** Only fully valid config files (all required top-level tables
+        present) are accepted. Partial TOML edits will be rejected with 422.
+      tags: [web-api]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  description: New raw TOML content to write
+            example:
+              content: "[general]\nlog_level = \"info\"\n"
+      responses:
+        "200":
+          description: Config saved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        "404":
+          description: config_path not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: TOML validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Invalid TOML: missing field `general` at line 1"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/models:
+    get:
+      operationId: listModels
+      summary: List all model configs
+      description: |
+        Returns all model entries from `config.toml` plus the list of configured
+        backend names (for populating dropdowns in the editor UI).
+      tags: [models-api]
+      responses:
+        "200":
+          description: Model list and available backends
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [models, backends]
+                properties:
+                  models:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ModelConfig"
+                  backends:
+                    type: array
+                    items:
+                      type: string
+                    description: Names of configured backends
+              example:
+                backends: ["llama_cpp", "ik_llama"]
+                models:
+                  - id: "gemma4"
+                    backend: "llama_cpp"
+                    model: "unsloth/gemma-4-E4B-it-GGUF"
+                    quant: "Q6_K"
+                    args: ["-ctk", "q4_0"]
+                    profile: "coding"
+                    enabled: true
+                    context_length: null
+                    port: null
+        "404":
+          description: config_path not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      operationId: createModel
+      summary: Create a new model config entry
+      description: |
+        Adds a new `[models.<id>]` entry to `config.toml`. Returns 409 if a
+        model with that ID already exists. A proxy restart is required for
+        changes to take effect.
+      tags: [models-api]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModelBody"
+            example:
+              id: "my-model"
+              backend: "llama_cpp"
+              model: "unsloth/gemma-4-E4B-it-GGUF"
+              quant: "Q4_K_M"
+              args: ["-ctk", "q4_0", "-ctv", "q4_0"]
+              profile: "coding"
+              enabled: true
+      responses:
+        "201":
+          description: Model created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "404":
+          description: config_path not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Model ID already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "Model 'my-model' already exists"
+        "422":
+          description: Validation error (e.g. empty id)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/models/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Model config ID (key in `[models]` table)
+        schema:
+          type: string
+
+    get:
+      operationId: getModel
+      summary: Get a single model config
+      description: |
+        Returns the config for one model entry plus the list of configured
+        backend names (for populating the editor dropdown).
+      tags: [models-api]
+      responses:
+        "200":
+          description: Model config
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ModelConfig"
+                  - type: object
+                    properties:
+                      backends:
+                        type: array
+                        items:
+                          type: string
+        "404":
+          description: Model not found or config_path not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    put:
+      operationId: updateModel
+      summary: Update an existing model config
+      description: |
+        Replaces the `[models.<id>]` entry in `config.toml`. The `id` field in
+        the request body is ignored — the path parameter is used. A proxy
+        restart is required for changes to take effect.
+      tags: [models-api]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModelBody"
+      responses:
+        "200":
+          description: Model updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "404":
+          description: Model not found or config_path not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      operationId: deleteModel
+      summary: Delete a model config entry
+      description: |
+        Removes the `[models.<id>]` entry from `config.toml`. A proxy restart
+        is required for changes to take effect.
+      tags: [models-api]
+      responses:
+        "200":
+          description: Model deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "404":
+          description: Model not found or config_path not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  schemas:
+    ModelConfig:
+      type: object
+      required: [id, backend, args, enabled]
+      properties:
+        id:
+          type: string
+          description: Model config key (e.g. "gemma4")
+        backend:
+          type: string
+          description: Backend name (must exist in [backends])
+        model:
+          type: string
+          nullable: true
+          description: HuggingFace repo ID (e.g. "unsloth/gemma-4-E4B-it-GGUF")
+        quant:
+          type: string
+          nullable: true
+          description: Quantisation name (e.g. "Q4_K_M")
+        args:
+          type: array
+          items:
+            type: string
+          description: Extra CLI args passed to the backend
+        profile:
+          type: string
+          nullable: true
+          enum: [coding, chat, analysis, creative]
+          description: Sampling profile preset
+        enabled:
+          type: boolean
+        context_length:
+          type: integer
+          nullable: true
+        port:
+          type: integer
+          nullable: true
+
+    ModelBody:
+      type: object
+      required: [id, backend]
+      properties:
+        id:
+          type: string
+          description: Model config ID (used for create; ignored on PUT)
+        backend:
+          type: string
+        model:
+          type: string
+          nullable: true
+        quant:
+          type: string
+          nullable: true
+        args:
+          type: array
+          items:
+            type: string
+          default: []
+        profile:
+          type: string
+          nullable: true
+          enum: [coding, chat, analysis, creative]
+        enabled:
+          type: boolean
+          default: true
+        context_length:
+          type: integer
+          nullable: true
+        port:
+          type: integer
+          nullable: true
+
+    OkResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          example: true
+        id:
+          type: string
+          description: ID of the affected model (present on create/update)
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+          example: "logs_dir not configured"
+
+  responses:
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "Permission denied: /etc/tama/tama.toml"

@@ -48,7 +48,7 @@ jobs:
           version: latest
 
       - name: Build Leptos WASM frontend
-        working-directory: crates/koji-web
+        working-directory: crates/tama-web
         run: trunk build
 
       - name: Run tests (workspace)
@@ -57,8 +57,8 @@ jobs:
       - name: Clippy (workspace)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Clippy (koji-web SSR)
-        run: cargo clippy --package koji-web --features ssr --all-targets -- -D warnings
+      - name: Clippy (tama-web SSR)
+        run: cargo clippy --package tama-web --features ssr --all-targets -- -D warnings
 
       - name: Format check
         run: cargo fmt --all --check
@@ -93,7 +93,7 @@ jobs:
           version: latest
 
       - name: Build Leptos WASM frontend
-        working-directory: crates/koji-web
+        working-directory: crates/tama-web
         run: trunk build
 
       - name: Run tests (workspace)

@@ -4,7 +4,7 @@
 
 **Architecture:** Five coordinated tasks: (1) wire JobLogPanel into Updates Center for backend updates, (2) add LRU cache for remote GGUF listings to reduce HuggingFace API calls, (3) rewrite update checker to compare per-quant LFS hashes instead of repo-level commit SHA, (4) rewrite the model update endpoint to enqueue quant downloads through DownloadQueueService, (5) add frontend per-quant UI with expandable list, checkboxes, and toast notifications. No new DB tables — use existing `details_json` column in `update_checks`.
 
-**Tech Stack:** Rust (koji-core, koji-web), Leptos (WASM frontend), SQLite (rusqlite), SSE for real-time updates, DownloadQueueService for download lifecycle. Dependencies to add: `lru` crate for LRU cache.
+**Tech Stack:** Rust (tama-core, tama-web), Leptos (WASM frontend), SQLite (rusqlite), SSE for real-time updates, DownloadQueueService for download lifecycle. Dependencies to add: `lru` crate for LRU cache.
 
 ---
 
@@ -14,7 +14,7 @@
 The Backends page already shows live build progress via `<JobLogPanel>` when a backend update is running. The Updates Center has the same "Update" button but does not capture or display the `job_id` returned by `/api/backends/:name/update`. This task wires up the existing infrastructure so backend updates show progress inline in the Updates Center, using the same JobLogPanel component pattern from `backends.rs`.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/updates.rs`
+- Modify: `crates/tama-web/src/pages/updates.rs`
 
 **What to implement:**
 
@@ -98,7 +98,7 @@ use crate::components::job_log_panel::JobLogPanel;
 ```
 
 **Steps:**
-- [ ] Read `crates/koji-web/src/components/job_log_panel.rs` to confirm component API (props: `job_id: String`, optional `on_close: Option<Callback<()>>`)
+- [ ] Read `crates/tama-web/src/components/job_log_panel.rs` to confirm component API (props: `job_id: String`, optional `on_close: Option<Callback<()>>`)
 - [ ] Add `use crate::components::job_log_panel::JobLogPanel;` import
 - [ ] Add `let active_backend_job_id = RwSignal::new(Option::<String>::None);` and `let backend_update_busy = RwSignal::new(false);` signals to the `Updates` component
 - [ ] Rewrite `on_update_backend` callback to capture `job_id` from response JSON (`serde_json::Value`, extract `["job_id"]`)
@@ -111,7 +111,7 @@ use crate::components::job_log_panel::JobLogPanel;
 - [ ] Clicking "Update" on a backend in the Updates Center shows a JobLogPanel with live build logs via SSE
 - [ ] Closing the panel clears the job_id and refreshes the updates list
 - [ ] No Leptos/Rust compilation errors
-- [ ] Follows the exact same pattern as `crates/koji-web/src/pages/backends.rs` (lines 108-125 for JobLogPanel rendering)
+- [ ] Follows the exact same pattern as `crates/tama-web/src/pages/backends.rs` (lines 108-125 for JobLogPanel rendering)
 
 ---
 
@@ -121,12 +121,12 @@ use crate::components::job_log_panel::JobLogPanel;
 When "Check Now" is clicked, the update checker iterates over all models and fetches remote GGUF listings from HuggingFace. With N models × 2 API calls each (list_gguf_files + fetch_blob_metadata), this generates many HTTP requests. An in-memory LRU cache reduces redundant network calls. The cache must include a timestamp so stale entries can be detected and evicted.
 
 **Files:**
-- Modify: `crates/koji-core/Cargo.toml`
-- Modify: `crates/koji-core/src/updates/checker.rs`
+- Modify: `crates/tama-core/Cargo.toml`
+- Modify: `crates/tama-core/src/updates/checker.rs`
 
 **What to implement:**
 
-Add the `lru` crate dependency to `crates/koji-core/Cargo.toml`. Check if it's already present; if not, add it under `[dependencies]`:
+Add the `lru` crate dependency to `crates/tama-core/Cargo.toml`. Check if it's already present; if not, add it under `[dependencies]`:
 ```toml
 lru = "0.12"
 ```
@@ -222,7 +222,7 @@ if self.gguf_listing_cache.get(repo_id).await.is_none() {
 ```
 
 **Steps:**
-- [ ] Check if `lru` crate is already in `crates/koji-core/Cargo.toml`; if not, add `lru = "0.12"` under `[dependencies]`
+- [ ] Check if `lru` crate is already in `crates/tama-core/Cargo.toml`; if not, add `lru = "0.12"` under `[dependencies]`
 - [ ] Create `GgufListingCache` struct with `tokio::sync::Mutex<lru::LruCache<String, (String, Vec<GgufFile>, i64)>>` — the tuple stores commit_sha, files, and insertion epoch
 - [ ] Implement `new()`, `get()` (with TTL check using `chrono::Utc::now().timestamp()`), and `insert()` methods
 - [ ] Add `gguf_listing_cache: GgufListingCache` field to `UpdateChecker` struct
@@ -247,8 +247,8 @@ if self.gguf_listing_cache.get(repo_id).await.is_none() {
 The current `check_model()` compares repo-level commit SHAs, which misses quant-specific updates (new quants added to a repo, or existing quants getting new hashes). This task rewrites the checker to iterate each model's file records and compare individual LFS hashes against the remote GGUF listing. Results are stored in the existing `details_json` column of `update_checks` as a JSON object with per-quant breakdown.
 
 **Files:**
-- Modify: `crates/koji-core/src/updates/checker.rs`
-- Modify: `crates/koji-web/src/api/updates.rs`
+- Modify: `crates/tama-core/src/updates/checker.rs`
+- Modify: `crates/tama-web/src/api/updates.rs`
 
 **What to implement in `checker.rs`:**
 
@@ -328,7 +328,7 @@ let quants: Vec<QuantDetailJson> = details
 Do NOT add a `quants` field to the serialized `UpdateCheckDto`. Keep the DTO shape as-is (just `details_json`). The frontend will parse `details_json` at runtime. This avoids API breaking changes and keeps the backend DTO simple.
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/db/queries/model_queries.rs` to confirm `get_model_files(conn, model_id)` returns `Vec<ModelFileRecord>` with fields: `filename`, `quant`, `lfs_oid`
+- [ ] Read `crates/tama-core/src/db/queries/model_queries.rs` to confirm `get_model_files(conn, model_id)` returns `Vec<ModelFileRecord>` with fields: `filename`, `quant`, `lfs_oid`
 - [ ] In `checker.rs`, rewrite `check_model()` to:
   - Get local file records via `db::queries::get_model_files(&open.conn, model_record.id)?`
   - Fetch remote GGUF listing using cache from Task 2 (`self.gguf_listing_cache.get(repo_id).await`)
@@ -358,8 +358,8 @@ Do NOT add a `quants` field to the serialized `UpdateCheckDto`. Keep the DTO sha
 The current `apply_model_update` endpoint downloads directly via `download_gguf_with_progress()`, bypassing the download queue entirely. This means no progress tracking, no toast notifications, and no centralized view. This task rewrites the endpoint to enqueue each selected quant through `DownloadQueueService::enqueue()` and return immediately with job IDs.
 
 **Files:**
-- Modify: `crates/koji-web/src/api/updates.rs`
-- Modify: `crates/koji-core/src/db/queries/download_queue_queries.rs` (add duplicate-check query)
+- Modify: `crates/tama-web/src/api/updates.rs`
+- Modify: `crates/tama-core/src/db/queries/download_queue_queries.rs` (add duplicate-check query)
 
 **What to implement in `download_queue_queries.rs`:**
 
@@ -387,7 +387,7 @@ pub fn get_active_item_by_repo_filename(
 }
 ```
 
-Export this function in `crates/koji-core/src/db/queries/mod.rs`.
+Export this function in `crates/tama-core/src/db/queries/mod.rs`.
 
 **What to implement in `api/updates.rs`:**
 
@@ -479,7 +479,7 @@ pub async fn apply_model_update(
         // uses INSERT which will fail on UNIQUE constraint violation if there's a race.
         // The pre-check just avoids the error response for the common case.
         // NOTE: `open_conn()` creates an independent SQLite connection. WAL mode should
-        // already be enabled in koji-core's db::open() — verify this before implementing.
+        // already be enabled in tama-core's db::open() — verify this before implementing.
         match queries::get_active_item_by_repo_filename(&svc.open_conn()?, repo_id, filename) {
             Ok(Some(existing)) => {
                 return (
@@ -523,9 +523,9 @@ pub async fn apply_model_update(
 **Important API change note:** The endpoint now requires a JSON body `{ "quants": [...] }`. Old callers that send an empty body will get 400 Bad Request. This is acceptable since the frontend is being rewritten to use the new format.
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/db/queries/download_queue_queries.rs` to confirm the existing function signatures and patterns
+- [ ] Read `crates/tama-core/src/db/queries/download_queue_queries.rs` to confirm the existing function signatures and patterns
 - [ ] Add `get_active_item_by_repo_filename(conn, repo_id, filename)` query that returns `Option<DownloadQueueItem>` for items with status IN ('queued', 'running', 'verifying')
-- [ ] Export in `crates/koji-core/src/db/queries/mod.rs`
+- [ ] Export in `crates/tama-core/src/db/queries/mod.rs`
 - [ ] In `api/updates.rs`, add `ModelUpdateRequest` and `ModelUpdateResponse` structs
 - [ ] Rewrite `apply_model_update` handler: resolve model files → validate quant keys (return 422 for invalid) → pre-check duplicates (return 409 if found) → enqueue each valid quant via `svc.enqueue()` → return `{ "job_ids": [...], "total": N }`
 - [ ] Run `cargo fmt --all`
@@ -549,7 +549,7 @@ pub async fn apply_model_update(
 The Updates Center needs to display per-quant update information and allow users to select which quants to download. This task adds an expandable quant list with checkboxes, a "Update Selected" button, and integrates with toast notifications for download progress feedback. The frontend parses `details_json` from the API response (matching the existing pattern in `get_updates()`).
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/updates.rs`
+- Modify: `crates/tama-web/src/pages/updates.rs`
 - Note: The route for the new endpoint is already registered in `server.rs` as `.route("/api/updates/apply/model/:id", post(apply_model_update))`. Task 4 updates the handler; this task just uses it from the frontend.
 
 **What to implement:**

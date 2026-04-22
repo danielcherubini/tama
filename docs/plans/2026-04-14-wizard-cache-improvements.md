@@ -14,7 +14,7 @@
 The user reported that the "dropdown" is actually just a number input. This indicates a failure in the conditional rendering logic in the Leptos component.
 
 **Files:**
-- Modify: `crates/koji-web/src/components/pull_quant_wizard.rs`
+- Modify: `crates/tama-web/src/components/pull_quant_wizard.rs`
 
 **What to implement:**
 1.  **Introduce State:** Add `let is_custom_context = RwSignal::new(false);` to the `PullQuantWizard` component.
@@ -51,11 +51,11 @@ The user reported that the "dropdown" is actually just a number input. This indi
 The current inference logic is too simple for modern quant types like APEX or UD. We need to extract meaningful names from complex filenames.
 
 **Files:**
-- Modify: `crates/koji-core/src/models/pull.rs` (inference logic)
-- Modify: `crates/koji-web/src/components/pull_quant_wizard.rs` (display logic)
+- Modify: `crates/tama-core/src/models/pull.rs` (inference logic)
+- Modify: `crates/tama-web/src/components/pull_quant_wizard.rs` (display logic)
 
 **What to implement:**
-1.  **Refactor `infer_quant_from_filename` in `koji-core`:**
+1.  **Refactor `infer_quant_from_filename` in `tama-core`:**
     - Implement a tokenization-based approach. Split the filename (minus `.gguf`) by `-` or `_`.
     - Look for "Semantic Keywords": `Balanced`, `Quality`, `Compact`, `Mini`, `I-Balanced`, `I-Quality`, `I-Compact`, `I-Mini`.
     - Look for "Prefixes": `APEX`, `UD`.
@@ -65,10 +65,10 @@ The current inference logic is too simple for modern quant types like APEX or UD
     - Example: `gemma-4-26B-A4B-APEX-I-Balanced.gguf` $\rightarrow$ `"APEX I-Balanced"`.
 
 **Steps:**
-- [ ] Implement tokenization and keyword matching in `koji-core`.
-- [ ] Add unit tests in `koji-core` for various filename patterns (Standard, APEX, UD).
+- [ ] Implement tokenization and keyword matching in `tama-core`.
+- [ ] Add unit tests in `tama-core` for various filename patterns (Standard, APEX, UD).
 - [ ] Update the web component to display the new clean labels.
-- [ ] Run `cargo test --package koji-core`
+- [ ] Run `cargo test --package tama-core`
 - [ ] Run `cargo build`
 - [ ] Run `cargo fmt --all`
 - [ ] **Manual Verification:** Search for an APEX model and verify the table shows "APEX I-Balanced" instead of the full filename.
@@ -83,16 +83,16 @@ The current inference logic is too simple for modern quant types like APEX or UD
 ### Task 3: HF Cache Cleanup
 
 **Context:**
-Downloads currently leave duplicates in the HF cache. We need to clean these up after a successful move to the Koji destination.
+Downloads currently leave duplicates in the HF cache. We need to clean these up after a successful move to the Tama destination.
 
-**Important:** When Koji runs as a Linux service (e.g., via `systemd`), it typically runs as a dedicated user (like `koji`). If the user set `HF_HOME` in their own shell profile (`~/.bashrc`), the service won't see it. Therefore, we cannot rely on `HF_HOME` to find the cache. Instead, we use `api.cache.dir()` which returns the **actual** cache directory being used by `hf-hub`, regardless of how it was configured.
+**Important:** When Tama runs as a Linux service (e.g., via `systemd`), it typically runs as a dedicated user (like `tama`). If the user set `HF_HOME` in their own shell profile (`~/.bashrc`), the service won't see it. Therefore, we cannot rely on `HF_HOME` to find the cache. Instead, we use `api.cache.dir()` which returns the **actual** cache directory being used by `hf-hub`, regardless of how it was configured.
 
 **Files:**
-- Modify: `crates/koji-core/src/models/pull.rs` (post-download logic)
+- Modify: `crates/tama-core/src/models/pull.rs` (post-download logic)
 
 **What to implement:**
 1.  **Implement `cleanup_hf_cache` function:**
-    - This function should take the `source_path` (the HF cache path) and `dest_path` (the final Koji path).
+    - This function should take the `source_path` (the HF cache path) and `dest_path` (the final Tama path).
     - **Safety Check:** Verify `dest_path` exists and its size/hash matches the source.
     - **Action:** If safe, attempt to `std::fs::remove_file(source_path)`.
 2.  **Integrate into Download Lifecycle:**
@@ -105,7 +105,7 @@ Downloads currently leave duplicates in the HF cache. We need to clean these up 
 - [ ] Implement the `cleanup_hf_cache` function with strict safety checks.
 - [ ] Integrate the cleanup into the `PullJob` completion flow.
 - [ ] Add a unit test that mocks a successful move and verifies the cache file is deleted.
-- [ ] Run `cargo test --package koji-core`
+- [ ] Run `cargo test --package tama-core`
 - [ ] Run `cargo build`
 - [ ] Run `cargo fmt --all`
 - [ ] **Manual Verification:** Download a model, verify it's in the destination, and check that the `.cache/huggingface` entry for that file is gone.

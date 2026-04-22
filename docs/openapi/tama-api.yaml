@@ -1,0 +1,825 @@
+openapi: 3.1.0
+
+info:
+  title: Tama Management API
+  description: |
+    Tama-native management plane for controlling model backends, pulling models
+    from HuggingFace, and operating the proxy process.
+
+    This API is intentionally separate from the OpenAI-compatible `/v1/` surface.
+    All endpoints are prefixed with `/tama/v1/`.
+  version: 1.8.4
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:11434
+    description: Local Tama instance (default port)
+
+tags:
+  - name: models
+    description: Model backend lifecycle — load, unload, and inspect configured models
+  - name: pulls
+    description: Async model downloads from HuggingFace
+  - name: system
+    description: Proxy health and control
+
+paths:
+
+  # ---------------------------------------------------------------------------
+  # Model Management
+  # ---------------------------------------------------------------------------
+
+  /tama/v1/models:
+    get:
+      operationId: listTamaModels
+      summary: List all configured models
+      description: |
+        Returns all models defined in the Tama configuration, enriched with
+        their current runtime state (loaded, PID, idle time, etc.).
+
+        Unlike `GET /v1/models` (OpenAI-spec), this endpoint includes Tama-specific
+        operational fields such as `backend_pid`, `idle_timeout_remaining_secs`,
+        and `consecutive_failures`.
+      tags: [models]
+      responses:
+        "200":
+          description: Model list with runtime state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TamaModelList"
+              example:
+                models:
+                  - id: llama3
+                    backend: llama-cpp
+                    model: meta-llama/Meta-Llama-3-8B-Instruct
+                    quant: Q4_K_M
+                    enabled: true
+                    loaded: true
+                    backend_pid: 12345
+                    load_time_secs: 1712000000
+                    last_accessed_secs_ago: 42
+                    idle_timeout_remaining_secs: 258
+                    consecutive_failures: 0
+                  - id: mistral
+                    backend: llama-cpp
+                    model: mistralai/Mistral-7B-v0.1
+                    quant: Q5_K_M
+                    enabled: true
+                    loaded: false
+                    backend_pid: null
+                    load_time_secs: null
+                    last_accessed_secs_ago: null
+                    idle_timeout_remaining_secs: null
+                    consecutive_failures: null
+
+  /tama/v1/models/{id}:
+    get:
+      operationId: getTamaModel
+      summary: Get a single model's runtime state
+      description: |
+        Returns the configuration and runtime state for a single configured model.
+        The `id` is the model's config key (e.g. `llama3`), not the underlying
+        model repo path.
+      tags: [models]
+      parameters:
+        - $ref: "#/components/parameters/ModelId"
+      responses:
+        "200":
+          description: Model configuration and runtime state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TamaModel"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /tama/v1/models/{id}/load:
+    post:
+      operationId: loadModel
+      summary: Load a model backend
+      description: |
+        Starts the backend process for the specified model and waits until the
+        backend's health check passes (or the startup timeout is reached).
+
+        This call is **idempotent** — if the model is already loaded or starting,
+        it returns 200 immediately without re-launching the backend.
+
+        The response is synchronous: it blocks until the backend is ready. The
+        duration is bounded by `proxy.startup_timeout_secs` in the Tama config.
+
+        The `id` must match a key in the Tama config `[models]` table. If the
+        model is not configured, a `404` is returned.
+      tags: [models]
+      parameters:
+        - $ref: "#/components/parameters/ModelId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Empty body (reserved for future options)
+      responses:
+        "200":
+          description: Model loaded successfully (or was already loaded)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoadUnloadResult"
+              example:
+                id: llama3
+                loaded: true
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /tama/v1/models/{id}/unload:
+    post:
+      operationId: unloadModel
+      summary: Unload a model backend
+      description: |
+        Gracefully stops the backend process for the specified model.
+
+        Sends SIGTERM to the backend and waits up to 5 seconds for it to exit
+        gracefully before sending SIGKILL.
+      tags: [models]
+      parameters:
+        - $ref: "#/components/parameters/ModelId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Empty body (reserved for future options such as `force`)
+      responses:
+        "200":
+          description: Model unloaded successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoadUnloadResult"
+              example:
+                id: llama3
+                loaded: false
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ---------------------------------------------------------------------------
+  # Pull / Download
+  # ---------------------------------------------------------------------------
+
+  /tama/v1/pulls:
+    post:
+      operationId: pullModel
+      summary: Start an async model download
+      description: |
+        Starts an asynchronous download of a GGUF model file from HuggingFace.
+
+        Returns immediately with a `job_id` that can be used to poll for status.
+        The download runs in the background; poll `GET /tama/v1/pulls/{job_id}`
+        to track progress.
+
+        **`quant` is required.** If omitted, the request is rejected with a `422`
+        that includes an `available_quants` array listing all GGUF files in the
+        repo (fetched live from HuggingFace). The same `422` is returned if the
+        specified quant does not exist in the repo.
+
+        **Progress note:** `bytes_downloaded` and `total_bytes` are only
+        populated on completion due to the current download implementation.
+        Poll for `status` transitions (`pending` → `running` → `completed` /
+        `failed`) rather than byte counts.
+
+        Completed and failed jobs are retained for 1 hour, then evicted.
+      tags: [pulls]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PullRequest"
+            examples:
+              with_quant:
+                summary: Download a specific quant
+                value:
+                  repo_id: bartowski/Llama-3.2-1B-Instruct-GGUF
+                  quant: Q4_K_M
+              missing_quant:
+                summary: Omit quant to discover available options (returns 422)
+                value:
+                  repo_id: bartowski/Llama-3.2-1B-Instruct-GGUF
+      responses:
+        "202":
+          description: Pull job created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PullJob"
+              example:
+                job_id: pull-a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                status: pending
+                repo_id: bartowski/Llama-3.2-1B-Instruct-GGUF
+                filename: Llama-3.2-1B-Instruct-Q4_K_M.gguf
+                bytes_downloaded: 0
+                total_bytes: null
+                error: null
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /tama/v1/pulls/{job_id}:
+    get:
+      operationId: getPullJob
+      summary: Poll a pull job's status
+      description: |
+        Returns the current status of an async pull job.
+
+        Poll this endpoint after calling `POST /tama/v1/pulls` to check whether
+        the download has completed or failed.
+
+        Jobs are evicted from memory 1 hour after completion or failure.
+      tags: [pulls]
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          description: Job ID returned by `POST /tama/v1/pulls`
+          schema:
+            type: string
+            example: pull-a1b2c3d4-e5f6-7890-abcd-ef1234567890
+      responses:
+        "200":
+          description: Pull job status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PullJob"
+              examples:
+                running:
+                  summary: Job in progress
+                  value:
+                    job_id: pull-a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                    status: running
+                    repo_id: bartowski/Llama-3.2-1B-Instruct-GGUF
+                    filename: Llama-3.2-1B-Instruct-Q4_K_M.gguf
+                    bytes_downloaded: 0
+                    total_bytes: null
+                    error: null
+                completed:
+                  summary: Job completed
+                  value:
+                    job_id: pull-a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                    status: completed
+                    repo_id: bartowski/Llama-3.2-1B-Instruct-GGUF
+                    filename: Llama-3.2-1B-Instruct-Q4_K_M.gguf
+                    bytes_downloaded: 1234567890
+                    total_bytes: 1234567890
+                    error: null
+                failed:
+                  summary: Job failed
+                  value:
+                    job_id: pull-a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                    status: failed
+                    repo_id: bartowski/Llama-3.2-1B-Instruct-GGUF
+                    filename: Llama-3.2-1B-Instruct-Q4_K_M.gguf
+                    bytes_downloaded: 0
+                    total_bytes: null
+                    error: "Failed to download: 403 Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ---------------------------------------------------------------------------
+  # System
+  # ---------------------------------------------------------------------------
+
+  /tama/v1/system/health:
+    get:
+      operationId: getSystemHealth
+      summary: Rich system health
+      description: |
+        Returns a detailed health snapshot including VRAM usage and the number
+        of currently loaded models.
+
+        This is distinct from `GET /health` (the lightweight liveness probe used
+        by process supervisors and load balancers). Use this endpoint for
+        dashboards and monitoring where richer context is needed.
+      tags: [system]
+      responses:
+        "200":
+          description: System health snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemHealth"
+              examples:
+                with_gpu:
+                  summary: System with GPU
+                  value:
+                    status: ok
+                    service: tama
+                    models_loaded: 2
+                    vram:
+                      used_mib: 8192
+                      total_mib: 16384
+                no_gpu:
+                  summary: CPU-only system
+                  value:
+                    status: ok
+                    service: tama
+                    models_loaded: 1
+                    vram: null
+
+  /tama/v1/system/metrics/stream:
+    get:
+      operationId: streamSystemMetrics
+      summary: Live system metrics stream (SSE)
+      description: |
+        Streams live `MetricSample` events as Server-Sent Events. A new sample
+        is emitted every ~2 seconds by the proxy's background metrics task.
+
+        Samples are persisted to a SQLite history table (pruned to the
+        configured retention window via `proxy.metrics_retention_secs`), but
+        this endpoint only emits live samples — there is no historical
+        backfill on connect.
+
+        Event types:
+          - `sample` — JSON-serialized `MetricSample`.
+          - `lagged` — emitted when the subscriber falls behind; payload
+            `{"missed": N}`. The stream continues after this event.
+      tags: [system]
+      responses:
+        "200":
+          description: SSE stream of metric samples
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  SSE-framed stream. Each `sample` event's `data` field is a
+                  JSON object matching the `MetricSample` schema.
+
+  /tama/v1/system/restart:
+    post:
+      operationId: restartTama
+      summary: Gracefully restart Tama
+      description: |
+        Triggers a graceful restart of the Tama proxy process.
+
+        The response is sent before the process exits. Tama sends SIGTERM to
+        itself, allowing in-flight requests to drain and models to be unloaded
+        before the process exits. A process supervisor (systemd, launchd, etc.)
+        is expected to restart the process automatically.
+
+        Pass `?force=true` to skip graceful model unloading and exit immediately.
+
+        **Note:** If Tama is not running under a process supervisor, it will
+        simply exit and not restart.
+      tags: [system]
+      parameters:
+        - name: force
+          in: query
+          required: false
+          description: Skip graceful model unloading and exit immediately
+          schema:
+            type: boolean
+            default: false
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Empty body
+      responses:
+        "200":
+          description: Restart initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message]
+                properties:
+                  message:
+                    type: string
+                    example: "Restarting tama..."
+
+# ---------------------------------------------------------------------------
+# Legacy root endpoints (documented here for completeness; not under /tama/v1/)
+# ---------------------------------------------------------------------------
+# These are defined in the openai-compat.yaml file alongside the /v1/ routes.
+# See docs/openapi/openai-compat.yaml for /health, /status, and /metrics.
+
+# ===========================================================================
+# Components
+# ===========================================================================
+
+components:
+
+  parameters:
+    ModelId:
+      name: id
+      in: path
+      required: true
+      description: Model config key (e.g. `llama3`). This is the key used in the Tama config file, not the underlying HuggingFace repo path.
+      schema:
+        type: string
+        example: llama3
+
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              message: "Model 'foo' not found"
+              type: NotFoundError
+
+    ValidationError:
+      description: |
+        Validation error — a required field is missing or invalid.
+
+        When `quant` is missing or not found in the repo, the response includes
+        an `available_quants` array listing all GGUF files available in the
+        HuggingFace repo.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ValidationErrorResponse"
+          examples:
+            missing_quant:
+              summary: quant field omitted
+              value:
+                error:
+                  message: "quant is required"
+                  type: ValidationError
+                  available_quants:
+                    - filename: Llama-3.2-1B-Instruct-Q4_K_M.gguf
+                      quant: Q4_K_M
+                    - filename: Llama-3.2-1B-Instruct-Q8_0.gguf
+                      quant: Q8_0
+                    - filename: Llama-3.2-1B-Instruct-F16.gguf
+                      quant: F16
+            bad_quant:
+              summary: quant not found in repo
+              value:
+                error:
+                  message: "Quant 'Q99_Z' not found in repo 'bartowski/Llama-3.2-1B-Instruct-GGUF'"
+                  type: ValidationError
+                  available_quants:
+                    - filename: Llama-3.2-1B-Instruct-Q4_K_M.gguf
+                      quant: Q4_K_M
+                    - filename: Llama-3.2-1B-Instruct-Q8_0.gguf
+                      quant: Q8_0
+
+    BadRequest:
+      description: Invalid request body or parameters
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              message: "Missing required field: repo_id"
+              type: BadRequestError
+
+    BadGateway:
+      description: Failed to reach HuggingFace
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              message: "Failed to fetch file list from HuggingFace: connection refused"
+              type: UpstreamError
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              message: "Backend 'llama-cpp' failed to start for server 'llama3' (timeout after 60s)"
+              type: InternalError
+
+  schemas:
+
+    # -------------------------------------------------------------------------
+    # Model schemas
+    # -------------------------------------------------------------------------
+
+    TamaModel:
+      type: object
+      description: A configured Tama model with its current runtime state
+      required:
+        - id
+        - backend
+        - enabled
+        - loaded
+      properties:
+        id:
+          type: string
+          description: Model config key
+          example: llama3
+        backend:
+          type: string
+          description: Backend name (e.g. `llama-cpp`)
+          example: llama-cpp
+        model:
+          type: string
+          nullable: true
+          description: Underlying model identifier (HuggingFace repo path or local path)
+          example: meta-llama/Meta-Llama-3-8B-Instruct
+        quant:
+          type: string
+          nullable: true
+          description: Quantisation type (e.g. `Q4_K_M`)
+          example: Q4_K_M
+        enabled:
+          type: boolean
+          description: Whether this model is enabled in the config
+          example: true
+        loaded:
+          type: boolean
+          description: Whether the backend process is currently running and healthy
+          example: true
+        backend_pid:
+          type: integer
+          format: int32
+          nullable: true
+          description: OS process ID of the backend. `null` when not loaded.
+          example: 12345
+        load_time_secs:
+          type: integer
+          format: int64
+          nullable: true
+          description: Unix timestamp (seconds) when the backend was last loaded. `null` when not loaded.
+          example: 1712000000
+        last_accessed_secs_ago:
+          type: integer
+          format: int64
+          nullable: true
+          description: Seconds since the model last handled a request. `null` when not loaded.
+          example: 42
+        idle_timeout_remaining_secs:
+          type: integer
+          format: int64
+          nullable: true
+          description: |
+            Seconds until the backend is auto-unloaded due to inactivity.
+            `0` means the idle timeout has already elapsed.
+            `null` when not loaded.
+          example: 258
+        consecutive_failures:
+          type: integer
+          format: int32
+          nullable: true
+          description: |
+            Number of consecutive request failures (circuit breaker counter).
+            `null` when not loaded.
+          example: 0
+
+    TamaModelList:
+      type: object
+      required: [models]
+      properties:
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/TamaModel"
+
+    LoadUnloadResult:
+      type: object
+      required: [id, loaded]
+      properties:
+        id:
+          type: string
+          description: Model config key
+          example: llama3
+        loaded:
+          type: boolean
+          description: Whether the model is loaded after the operation
+          example: true
+
+    # -------------------------------------------------------------------------
+    # Pull job schemas
+    # -------------------------------------------------------------------------
+
+    PullRequest:
+      type: object
+      required: [repo_id, quant]
+      properties:
+        repo_id:
+          type: string
+          description: HuggingFace repository ID (e.g. `bartowski/Llama-3.2-1B-Instruct-GGUF`)
+          example: bartowski/Llama-3.2-1B-Instruct-GGUF
+        quant:
+          type: string
+          description: |
+            Quantisation type to download (e.g. `Q4_K_M`). **Required.**
+
+            If omitted or not found in the repo, the request is rejected with a
+            `422` response containing an `available_quants` array listing all
+            GGUF files available in the repo.
+          example: Q4_K_M
+
+    QuantOption:
+      type: object
+      description: An available GGUF file in a HuggingFace repo
+      required: [filename]
+      properties:
+        filename:
+          type: string
+          description: GGUF filename
+          example: Llama-3.2-1B-Instruct-Q4_K_M.gguf
+        quant:
+          type: string
+          nullable: true
+          description: Inferred quantisation type. `null` if it could not be determined from the filename.
+          example: Q4_K_M
+
+    PullJob:
+      type: object
+      required:
+        - job_id
+        - status
+        - repo_id
+        - filename
+        - bytes_downloaded
+      properties:
+        job_id:
+          type: string
+          description: Unique job identifier
+          example: pull-a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+          description: |
+            Current job status:
+            - `pending` — job created, not yet started
+            - `running` — download in progress
+            - `completed` — download finished successfully
+            - `failed` — download failed (see `error`)
+          example: running
+        repo_id:
+          type: string
+          description: HuggingFace repository ID
+          example: bartowski/Llama-3.2-1B-Instruct-GGUF
+        filename:
+          type: string
+          description: Resolved GGUF filename being downloaded
+          example: Llama-3.2-1B-Instruct-Q4_K_M.gguf
+        bytes_downloaded:
+          type: integer
+          format: int64
+          description: |
+            Bytes downloaded so far. Due to implementation constraints this is
+            `0` while running and populated only on completion.
+          example: 0
+        total_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          description: Total file size in bytes. `null` if unknown.
+          example: 1234567890
+        error:
+          type: string
+          nullable: true
+          description: Error message if `status` is `failed`. `null` otherwise.
+          example: null
+
+    # -------------------------------------------------------------------------
+    # System schemas
+    # -------------------------------------------------------------------------
+
+    VramInfo:
+      type: object
+      required: [used_mib, total_mib]
+      properties:
+        used_mib:
+          type: integer
+          format: int64
+          description: VRAM currently in use (MiB)
+          example: 8192
+        total_mib:
+          type: integer
+          format: int64
+          description: Total VRAM available (MiB)
+          example: 16384
+
+    SystemHealth:
+      type: object
+      required: [status, service, models_loaded]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+          description: Overall health status
+          example: ok
+        service:
+          type: string
+          description: Service identifier
+          example: tama
+        models_loaded:
+          type: integer
+          format: int32
+          description: Number of model backends currently running
+          example: 2
+        vram:
+          $ref: "#/components/schemas/VramInfo"
+          nullable: true
+          description: GPU VRAM usage. `null` on CPU-only systems or when GPU info is unavailable.
+
+    MetricSample:
+      type: object
+      required:
+        - ts_unix_ms
+        - cpu_usage_pct
+        - ram_used_mib
+        - ram_total_mib
+        - models_loaded
+      properties:
+        ts_unix_ms:
+          type: integer
+          format: int64
+          description: Sample timestamp (unix milliseconds).
+        cpu_usage_pct:
+          type: number
+          format: float
+        ram_used_mib:
+          type: integer
+          format: int64
+        ram_total_mib:
+          type: integer
+          format: int64
+        gpu_utilization_pct:
+          type: integer
+          minimum: 0
+          maximum: 100
+          nullable: true
+        vram:
+          $ref: "#/components/schemas/VramInfo"
+          nullable: true
+        models_loaded:
+          type: integer
+          format: int64
+
+    # -------------------------------------------------------------------------
+    # Shared error schemas
+    # -------------------------------------------------------------------------
+
+    ErrorDetail:
+      type: object
+      required: [message, type]
+      properties:
+        message:
+          type: string
+          description: Human-readable error description
+          example: "Model 'llama3' not found"
+        type:
+          type: string
+          description: Machine-readable error type
+          example: NotFoundError
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+
+    ValidationErrorDetail:
+      type: object
+      required: [message, type]
+      properties:
+        message:
+          type: string
+          description: Human-readable error description
+          example: "quant is required"
+        type:
+          type: string
+          description: Machine-readable error type
+          example: ValidationError
+        available_quants:
+          type: array
+          description: Available GGUF files in the repo. Present when quant validation fails.
+          items:
+            $ref: "#/components/schemas/QuantOption"
+
+    ValidationErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ValidationErrorDetail"

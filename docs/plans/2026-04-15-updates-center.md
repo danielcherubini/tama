@@ -11,14 +11,14 @@
 ### Task 1: Database Migration & Query Functions
 
 **Context:**
-All update check results need persistent storage so they survive restarts and are instantly available to the frontend without re-checking. This task creates the `update_checks` table (migration v6) and all CRUD query functions. The existing migration system uses `PRAGMA user_version` and sequential version numbers — currently at v5. All query functions follow the sync `&Connection` pattern used throughout `crates/koji-core/src/db/queries/`.
+All update check results need persistent storage so they survive restarts and are instantly available to the frontend without re-checking. This task creates the `update_checks` table (migration v6) and all CRUD query functions. The existing migration system uses `PRAGMA user_version` and sequential version numbers — currently at v5. All query functions follow the sync `&Connection` pattern used throughout `crates/tama-core/src/db/queries/`.
 
 **Files:**
-- Modify: `crates/koji-core/src/db/migrations.rs`
-- Create: `crates/koji-core/src/db/queries/update_check_queries.rs`
-- Modify: `crates/koji-core/src/db/queries/types.rs`
-- Modify: `crates/koji-core/src/db/queries/mod.rs`
-- Modify: `crates/koji-core/src/db/mod.rs` (add test for migration v6)
+- Modify: `crates/tama-core/src/db/migrations.rs`
+- Create: `crates/tama-core/src/db/queries/update_check_queries.rs`
+- Modify: `crates/tama-core/src/db/queries/types.rs`
+- Modify: `crates/tama-core/src/db/queries/mod.rs`
+- Modify: `crates/tama-core/src/db/mod.rs` (add test for migration v6)
 
 **What to implement:**
 
@@ -69,11 +69,11 @@ All update check results need persistent storage so they survive restarts and ar
 4. In `queries/mod.rs`: Add `mod update_check_queries;` and `pub use update_check_queries::*;`.
 
 **Steps:**
-- [ ] Add `UpdateCheckRecord` to `crates/koji-core/src/db/queries/types.rs`
-- [ ] Create `crates/koji-core/src/db/queries/update_check_queries.rs` with all 7 functions
-- [ ] Add `mod update_check_queries;` and `pub use update_check_queries::*;` to `crates/koji-core/src/db/queries/mod.rs`
-- [ ] Add migration v6 to `crates/koji-core/src/db/migrations.rs` and update `LATEST_VERSION` to `6`
-- [ ] Write tests in `crates/koji-core/src/db/queries/update_check_queries.rs` (in a `#[cfg(test)] mod tests` block):
+- [ ] Add `UpdateCheckRecord` to `crates/tama-core/src/db/queries/types.rs`
+- [ ] Create `crates/tama-core/src/db/queries/update_check_queries.rs` with all 7 functions
+- [ ] Add `mod update_check_queries;` and `pub use update_check_queries::*;` to `crates/tama-core/src/db/queries/mod.rs`
+- [ ] Add migration v6 to `crates/tama-core/src/db/migrations.rs` and update `LATEST_VERSION` to `6`
+- [ ] Write tests in `crates/tama-core/src/db/queries/update_check_queries.rs` (in a `#[cfg(test)] mod tests` block):
   - `test_upsert_and_get_update_check` — upsert a record, get it back, verify fields
   - `test_upsert_overwrites` — upsert twice with different values, verify second wins
   - `test_get_all_update_checks` — insert 3 records (2 backends, 1 model), verify all returned
@@ -83,7 +83,7 @@ All update check results need persistent storage so they survive restarts and ar
   - `test_get_last_full_check_time` — insert records with different checked_at, verify MIN returned
   - `test_migration_v6_creates_table` — use `open_in_memory()`, verify table exists in sqlite_master
   Each test uses `crate::db::open_in_memory()` to get a connection.
-- [ ] Run `cargo test --package koji-core -- db::queries::update_check_queries::tests`
+- [ ] Run `cargo test --package tama-core -- db::queries::update_check_queries::tests`
   - Did all tests pass? If not, fix and re-run.
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo clippy --workspace -- -D warnings`
@@ -105,13 +105,13 @@ All update check results need persistent storage so they survive restarts and ar
 The background update checker needs a configurable interval. This goes in the `[general]` section of `config.toml`. Default is 12 hours. Setting to 0 disables automatic checks. There are THREE places where the `General` struct is defined that all need updating: the core config type, the web mirror type (used for JSON serialization), and the config editor page type (used for the config editor UI). Plus the `From` impls that convert between core and web types.
 
 **Files:**
-- Modify: `crates/koji-core/src/config/types.rs`
-- Modify: `crates/koji-web/src/types/config.rs`
-- Modify: `crates/koji-web/src/pages/config_editor.rs`
+- Modify: `crates/tama-core/src/config/types.rs`
+- Modify: `crates/tama-web/src/types/config.rs`
+- Modify: `crates/tama-web/src/pages/config_editor.rs`
 
 **What to implement:**
 
-1. In `crates/koji-core/src/config/types.rs`, add to the `General` struct:
+1. In `crates/tama-core/src/config/types.rs`, add to the `General` struct:
    ```rust
    /// How often to check for updates, in hours. 0 = disabled. Default: 12.
    #[serde(default = "default_update_check_interval")]
@@ -122,7 +122,7 @@ The background update checker needs a configurable interval. This goes in the `[
    fn default_update_check_interval() -> u32 { 12 }
    ```
 
-2. In `crates/koji-web/src/types/config.rs`, add to the web mirror `General` struct:
+2. In `crates/tama-web/src/types/config.rs`, add to the web mirror `General` struct:
    ```rust
    /// How often to check for updates, in hours. 0 = disabled. Default: 12.
    #[serde(default = "default_update_check_interval")]
@@ -136,7 +136,7 @@ The background update checker needs a configurable interval. This goes in the `[
    - `From<CoreGeneral> for General`: add `update_check_interval: g.update_check_interval,`
    - `From<General> for CoreGeneral`: add `update_check_interval: g.update_check_interval,`
 
-3. In `crates/koji-web/src/pages/config_editor.rs`, add to the page-local `General` struct:
+3. In `crates/tama-web/src/pages/config_editor.rs`, add to the page-local `General` struct:
    ```rust
    #[serde(default = "default_update_check_interval")]
    pub update_check_interval: u32,
@@ -147,9 +147,9 @@ The background update checker needs a configurable interval. This goes in the `[
    ```
 
 **Steps:**
-- [ ] Add the field and default function to `crates/koji-core/src/config/types.rs`
-- [ ] Add the field, default function, and update both `From` impls in `crates/koji-web/src/types/config.rs`
-- [ ] Add the field and default function to `crates/koji-web/src/pages/config_editor.rs`
+- [ ] Add the field and default function to `crates/tama-core/src/config/types.rs`
+- [ ] Add the field, default function, and update both `From` impls in `crates/tama-web/src/types/config.rs`
+- [ ] Add the field and default function to `crates/tama-web/src/pages/config_editor.rs`
 - [ ] Run `cargo build --workspace`
   - Did it succeed? If not, fix compile errors and re-run.
 - [ ] Run `cargo test --workspace`
@@ -169,25 +169,25 @@ The background update checker needs a configurable interval. This goes in the `[
 ### Task 3: Update Checker Core Logic
 
 **Context:**
-This task creates the core orchestration logic that checks all backends and models for updates and writes results to the `update_checks` DB table. It reuses the existing `koji_core::backends::updater::check_latest_version()` for backends and `koji_core::models::update::check_for_updates()` for models. The key constraint is that `rusqlite::Connection` is `!Send`, so all DB access must happen outside `.await` points — use the pattern: read config synchronously → do async network calls → write to DB synchronously via `tokio::task::spawn_blocking`.
+This task creates the core orchestration logic that checks all backends and models for updates and writes results to the `update_checks` DB table. It reuses the existing `tama_core::backends::updater::check_latest_version()` for backends and `tama_core::models::update::check_for_updates()` for models. The key constraint is that `rusqlite::Connection` is `!Send`, so all DB access must happen outside `.await` points — use the pattern: read config synchronously → do async network calls → write to DB synchronously via `tokio::task::spawn_blocking`.
 
 The checker stores config model IDs (e.g. "my-model") as `item_id` in the DB, NOT repo_ids. The repo_id is stored inside `details_json`. This is because the frontend works with config model IDs.
 
 **Files:**
-- Create: `crates/koji-core/src/updates/mod.rs`
-- Create: `crates/koji-core/src/updates/checker.rs`
-- Modify: `crates/koji-core/src/lib.rs`
+- Create: `crates/tama-core/src/updates/mod.rs`
+- Create: `crates/tama-core/src/updates/checker.rs`
+- Modify: `crates/tama-core/src/lib.rs`
 
 **What to implement:**
 
-1. `crates/koji-core/src/updates/mod.rs`:
+1. `crates/tama-core/src/updates/mod.rs`:
    ```rust
    pub mod checker;
    ```
 
-2. `crates/koji-core/src/lib.rs`: Add `pub mod updates;` to the module list.
+2. `crates/tama-core/src/lib.rs`: Add `pub mod updates;` to the module list.
 
-3. `crates/koji-core/src/updates/checker.rs`:
+3. `crates/tama-core/src/updates/checker.rs`:
 
    Import types from `crate::backends::updater`, `crate::models::update`, `crate::config::Config`, `crate::db`.
 
@@ -254,9 +254,9 @@ The checker stores config model IDs (e.g. "my-model") as `item_id` in the DB, NO
    ```
 
 **Steps:**
-- [ ] Create `crates/koji-core/src/updates/mod.rs` with `pub mod checker;`
-- [ ] Add `pub mod updates;` to `crates/koji-core/src/lib.rs`
-- [ ] Create `crates/koji-core/src/updates/checker.rs` with `check_all_updates` and `check_single_update`
+- [ ] Create `crates/tama-core/src/updates/mod.rs` with `pub mod checker;`
+- [ ] Add `pub mod updates;` to `crates/tama-core/src/lib.rs`
+- [ ] Create `crates/tama-core/src/updates/checker.rs` with `check_all_updates` and `check_single_update`
 - [ ] Add unit tests in `checker.rs` for:
   - `test_unix_now_returns_reasonable_value` — just verify it's > 1700000000
   - Note: full integration tests for check_all_updates would require mocking network calls, so keep tests focused on the pure logic parts. The main testing will happen via the API integration in later tasks.
@@ -283,15 +283,15 @@ The checker stores config model IDs (e.g. "my-model") as `item_id` in the DB, NO
 The web UI needs API endpoints to read cached update results, trigger manual checks, and apply updates. This task creates the `/api/updates` routes. The GET endpoint goes on the main router (no CSRF needed). All POST endpoints go on the `backend_routes` sub-router (CSRF-protected via same-origin enforcement middleware). The `AppState` needs two new fields: `update_check_lock` (prevents concurrent checks) and a way to access `config_dir` (for DB access).
 
 **Files:**
-- Create: `crates/koji-web/src/api/updates.rs`
-- Modify: `crates/koji-web/src/api.rs`
-- Modify: `crates/koji-web/src/server.rs`
+- Create: `crates/tama-web/src/api/updates.rs`
+- Modify: `crates/tama-web/src/api.rs`
+- Modify: `crates/tama-web/src/server.rs`
 
 **What to implement:**
 
-1. In `crates/koji-web/src/api.rs`: Add `pub mod updates;`.
+1. In `crates/tama-web/src/api.rs`: Add `pub mod updates;`.
 
-2. In `crates/koji-web/src/server.rs`:
+2. In `crates/tama-web/src/server.rs`:
    - Add to `AppState`:
      ```rust
      pub update_check_lock: Arc<tokio::sync::Mutex<()>>,
@@ -312,7 +312,7 @@ The web UI needs API endpoints to read cached update results, trigger manual che
    - Update the `run_with_opts` function signature — it already accepts `config_path`, so derive `config_dir` from it.
    - Update both `AppState` constructors (in `run_with_opts` and `run`) to include the new fields.
 
-3. In `crates/koji-web/src/api/updates.rs`:
+3. In `crates/tama-web/src/api/updates.rs`:
 
    **`list_updates`** (GET /api/updates):
    - Open DB via `spawn_blocking` using `state.config_dir`
@@ -351,10 +351,10 @@ The web UI needs API endpoints to read cached update results, trigger manual che
    - TODO comment explaining this needs the pull infrastructure wired through JobManager.
 
 **Steps:**
-- [ ] Add `config_dir` and `update_check_lock` fields to `AppState` in `crates/koji-web/src/server.rs`
+- [ ] Add `config_dir` and `update_check_lock` fields to `AppState` in `crates/tama-web/src/server.rs`
 - [ ] Update both `AppState` constructors in `run_with_opts` and `run`
-- [ ] Add `pub mod updates;` to `crates/koji-web/src/api.rs`
-- [ ] Create `crates/koji-web/src/api/updates.rs` with all 5 handler functions
+- [ ] Add `pub mod updates;` to `crates/tama-web/src/api.rs`
+- [ ] Create `crates/tama-web/src/api/updates.rs` with all 5 handler functions
 - [ ] Add routes to `build_router` in `server.rs` — GET on main router, POSTs on backend_routes
 - [ ] Run `cargo build --workspace`
   - Did it succeed? If not, fix compile errors and re-run.
@@ -381,7 +381,7 @@ The web UI needs API endpoints to read cached update results, trigger manual che
 This task spawns the periodic background checker as a Tokio task when the web server starts. It reads the `update_check_interval` from config (hot-reloadable), runs an immediate check if stale on startup, then loops with the configured interval. It uses the `update_check_lock` from `AppState` to avoid colliding with manual "Check Now" requests from the API.
 
 **Files:**
-- Modify: `crates/koji-web/src/server.rs`
+- Modify: `crates/tama-web/src/server.rs`
 
 **What to implement:**
 
@@ -408,7 +408,7 @@ Call `spawn_update_checker(state.clone())` in `run_with_opts` after building the
 Error handling: Catch all errors inside the loop and log them with `tracing::warn!`. Never let the background task panic or exit.
 
 **Steps:**
-- [ ] Add `spawn_update_checker` function to `crates/koji-web/src/server.rs`
+- [ ] Add `spawn_update_checker` function to `crates/tama-web/src/server.rs`
 - [ ] Call it from `run_with_opts` (gated on `config_path.is_some()`)
 - [ ] Run `cargo build --workspace`
   - Did it succeed? If not, fix and re-run.
@@ -438,14 +438,14 @@ The sidebar currently has nav items for: Dashboard, Models, Backends, Logs (in t
 For the sidebar badge, fetch `GET /api/updates` on mount and count items where `update_available` is true. Show as "(N)" next to "Updates" text when N > 0.
 
 **Files:**
-- Create: `crates/koji-web/src/pages/updates.rs`
-- Modify: `crates/koji-web/src/pages/mod.rs`
-- Modify: `crates/koji-web/src/lib.rs`
-- Modify: `crates/koji-web/src/components/sidebar.rs`
+- Create: `crates/tama-web/src/pages/updates.rs`
+- Modify: `crates/tama-web/src/pages/mod.rs`
+- Modify: `crates/tama-web/src/lib.rs`
+- Modify: `crates/tama-web/src/components/sidebar.rs`
 
 **What to implement:**
 
-1. `crates/koji-web/src/pages/updates.rs` — main page component:
+1. `crates/tama-web/src/pages/updates.rs` — main page component:
 
    ```rust
    #[component]
@@ -511,15 +511,15 @@ For the sidebar badge, fetch `GET /api/updates` on mount and count items where `
 
    **Time formatting helper:** Add a function `fn time_ago(unix_ts: i64) -> String` that returns relative time like "2 hours ago", "5 minutes ago", "just now". Use `js_sys::Date::now()` to get current time in the WASM context (divide by 1000 for unix seconds).
 
-2. `crates/koji-web/src/pages/mod.rs`: Add `pub mod updates;`.
+2. `crates/tama-web/src/pages/mod.rs`: Add `pub mod updates;`.
 
-3. `crates/koji-web/src/lib.rs`: Add route:
+3. `crates/tama-web/src/lib.rs`: Add route:
    ```rust
    <Route path=path!("/updates") view=pages::updates::Updates />
    ```
    Place it after the `/backends` route.
 
-4. `crates/koji-web/src/components/sidebar.rs`:
+4. `crates/tama-web/src/components/sidebar.rs`:
    - Add a signal for update count: `let update_count = RwSignal::new(0u32);`
    - On mount (in the existing `spawn_local` block or a new one), fetch `GET /api/updates` and count items where `update_available` is true. Set `update_count`.
    - Add the Updates nav item between the Backends and Logs items:
@@ -540,10 +540,10 @@ For the sidebar badge, fetch `GET /api/updates` on mount and count items where `
      ```
 
 **Steps:**
-- [ ] Create `crates/koji-web/src/pages/updates.rs` with the `Updates` component
-- [ ] Add `pub mod updates;` to `crates/koji-web/src/pages/mod.rs`
-- [ ] Add the `/updates` route to `crates/koji-web/src/lib.rs`
-- [ ] Add the Updates nav item and badge to `crates/koji-web/src/components/sidebar.rs`
+- [ ] Create `crates/tama-web/src/pages/updates.rs` with the `Updates` component
+- [ ] Add `pub mod updates;` to `crates/tama-web/src/pages/mod.rs`
+- [ ] Add the `/updates` route to `crates/tama-web/src/lib.rs`
+- [ ] Add the Updates nav item and badge to `crates/tama-web/src/components/sidebar.rs`
 - [ ] Run `cargo build --workspace`
   - Did it succeed? If not, fix compile errors and re-run.
 - [ ] Run `cargo test --workspace`

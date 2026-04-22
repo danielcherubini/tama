@@ -1,19 +1,19 @@
 # Quant File Deletion & Cleanup Plan
 
 **Goal:** Delete GGUF files from disk when users remove quants from the model editor or delete entire models, and add a CLI `prune` command for cleaning up orphaned files.
-**Architecture:** Three deletion paths — (1) a new `DELETE /api/models/:id/quants/:quant_key` endpoint for individual quant removal, (2) extend `DELETE /api/models/:id` to also clean up files/DB, and (3) a new `koji model prune` CLI command for bulk orphan cleanup. All share common logic: resolve file path from config, delete file, clean up DB record.
+**Architecture:** Three deletion paths — (1) a new `DELETE /api/models/:id/quants/:quant_key` endpoint for individual quant removal, (2) extend `DELETE /api/models/:id` to also clean up files/DB, and (3) a new `tama model prune` CLI command for bulk orphan cleanup. All share common logic: resolve file path from config, delete file, clean up DB record.
 **Tech Stack:** Rust, Axum (web API), Leptos (frontend), rusqlite (DB), inquire (CLI prompts)
 
 ---
 
-## Task 1: Add `delete_model_file` DB query to koji-core
+## Task 1: Add `delete_model_file` DB query to tama-core
 
 **Context:**
 The existing `delete_model_records` function deletes ALL DB records for a repo (both `model_pulls` and `model_files`). We need a finer-grained function that deletes a single file's DB record — for when just one quant is removed, not the whole model. This function will be used by the new quant deletion endpoint and by the prune command.
 
 **Files:**
-- Modify: `crates/koji-core/src/db/queries/model_queries.rs`
-- Test: `crates/koji-core/src/db/queries/model_queries.rs` (inline `#[cfg(test)]`)
+- Modify: `crates/tama-core/src/db/queries/model_queries.rs`
+- Test: `crates/tama-core/src/db/queries/model_queries.rs` (inline `#[cfg(test)]`)
 
 **What to implement:**
 Add a new public function:
@@ -33,14 +33,14 @@ pub fn delete_model_file(conn: &Connection, repo_id: &str, filename: &str) -> Re
 This only deletes from `model_files`, not `model_pulls` — the repo-level pull record should remain because other quants for the same repo may still exist.
 
 Add a unit test that:
-1. Opens an in-memory SQLite DB, creates the schema via `koji_core::db::migrate()`
+1. Opens an in-memory SQLite DB, creates the schema via `tama_core::db::migrate()`
 2. Inserts a model file record via `upsert_model_file`
 3. Calls `delete_model_file` 
 4. Verifies the record is gone with `get_model_files`
 
 **Steps:**
-- [ ] Write failing test for `delete_model_file` in `crates/koji-core/src/db/queries/model_queries.rs`
-- [ ] Run `cargo test --package koji-core -- db::queries::model_queries` and verify test fails
+- [ ] Write failing test for `delete_model_file` in `crates/tama-core/src/db/queries/model_queries.rs`
+- [ ] Run `cargo test --package tama-core -- db::queries::model_queries` and verify test fails
 - [ ] Implement `delete_model_file` function
 - [ ] Run tests again — verify all pass
 - [ ] Run `cargo fmt --all`
@@ -60,8 +60,8 @@ Add a unit test that:
 When a user clicks the ✕ button on a quant row in the model editor, the frontend currently just removes the entry from the local form state and saves the config — the GGUF file stays on disk forever. This task adds a backend endpoint that actually deletes the file and cleans up.
 
 **Files:**
-- Modify: `crates/koji-web/src/api.rs` — add the `delete_quant` handler
-- Modify: `crates/koji-web/src/server.rs` — add the new route
+- Modify: `crates/tama-web/src/api.rs` — add the `delete_quant` handler
+- Modify: `crates/tama-web/src/server.rs` — add the new route
 
 **What to implement:**
 
@@ -84,7 +84,7 @@ The handler should:
 5. Clone/save `quant_entry.file` before mutating so we still have the filename after removal
 6. Resolve file path: `cfg.models_dir()?.join(&repo_id).join(&quant_entry.file)` where `repo_id` = `model.model` (the HF repo ID, e.g., `"bartowski/OmniCoder-8B-GGUF"`)
 7. Delete the file from disk: `if let Err(e) = std::fs::remove_file(&file_path) { tracing::warn!(...) }` — best-effort, don't fail the request
-8. Clean up DB: open DB via `koji_core::db::open(&config_dir)`, call `delete_model_file(&conn, &repo_id, &quant_entry.file)` — best-effort, log on error. Note: `config_dir` is the directory containing the config file (from `load_config_from_state`), which is also where `koji.db` lives.
+8. Clean up DB: open DB via `tama_core::db::open(&config_dir)`, call `delete_model_file(&conn, &repo_id, &quant_entry.file)` — best-effort, log on error. Note: `config_dir` is the directory containing the config file (from `load_config_from_state`), which is also where `tama.db` lives.
 9. If `model.quant == Some(quant_key)`, set `model.quant = None`
 10. If `model.mmproj == Some(quant_key)`, set `model.mmproj = None`
 11. Remove the quant entry: `model.quants.remove(&quant_key)`
@@ -99,8 +99,8 @@ The handler should:
 Place it near the other model routes (after the `/api/models/:id` route block).
 
 **Steps:**
-- [ ] Add the route in `crates/koji-web/src/server.rs`
-- [ ] Implement `delete_quant` in `crates/koji-web/src/api.rs`
+- [ ] Add the route in `crates/tama-web/src/server.rs`
+- [ ] Implement `delete_quant` in `crates/tama-web/src/api.rs`
 - [ ] Run `cargo build --workspace` — verify compilation
 - [ ] Run `cargo clippy --workspace -- -D warnings`
 - [ ] Run `cargo test --workspace`
@@ -124,7 +124,7 @@ Place it near the other model routes (after the `/api/models/:id` route block).
 Replace the current bare `quants.update(|rows| rows.remove(pos))` handler on the ✕ button with a confirmation dialog followed by an API call to `DELETE /api/models/:id/quants/:quant_key`. This ensures files are actually deleted from disk.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/model_editor.rs`
+- Modify: `crates/tama-web/src/pages/model_editor.rs`
 
 **What to implement:**
 
@@ -252,7 +252,7 @@ Note: We need to compute `size_display` outside of the closure since `q` is a si
 The current `delete_model` handler only removes the config entry. GGUF files, model cards, and DB records are orphaned. This task extends it to clean up everything, mirroring what the CLI `model rm` command does.
 
 **Files:**
-- Modify: `crates/koji-web/src/api.rs` — modify `delete_model` handler
+- Modify: `crates/tama-web/src/api.rs` — modify `delete_model` handler
 
 **What to implement:**
 
@@ -295,11 +295,11 @@ if !repo_id.is_empty() {
         }
     }
     // 3. Delete DB records (best-effort)
-    // IMPORTANT: `config_dir` is the directory containing config.toml (and koji.db),
+    // IMPORTANT: `config_dir` is the directory containing config.toml (and tama.db),
     // passed directly — do NOT call .parent() on it. See existing DB calls in this
     // file (lines 321, 861, 937) which all use `config_dir` directly.
-    if let Ok(open) = koji_core::db::open(&config_dir) {
-        let _ = koji_core::db::queries::delete_model_records(&open.conn, repo_id);
+    if let Ok(open) = tama_core::db::open(&config_dir) {
+        let _ = tama_core::db::queries::delete_model_records(&open.conn, repo_id);
     }
 }
 ```
@@ -307,7 +307,7 @@ if !repo_id.is_empty() {
 **Important:** All file/DB cleanup happens BEFORE `cfg.save_to()` but the model was already removed from `cfg.models` in memory. This is fine — even if cleanup fails, we still save the config (best-effort).
 
 **Steps:**
-- [ ] Modify `delete_model` handler in `crates/koji-web/src/api.rs`
+- [ ] Modify `delete_model` handler in `crates/tama-web/src/api.rs`
 - [ ] Add `use tracing;` if not already imported
 - [ ] Run `cargo build --workspace`
 - [ ] Run `cargo clippy --workspace -- -D warnings`
@@ -324,14 +324,14 @@ if !repo_id.is_empty() {
 
 ---
 
-## Task 5: Add `koji model prune` CLI command
+## Task 5: Add `tama model prune` CLI command
 
 **Context:**
-There's no way to find and remove orphaned GGUF files — files on disk that aren't referenced by any server config's `quants` map. The existing `koji model scan` does the opposite: it finds untracked files and adds them to model cards. This task adds `koji model prune` which finds orphaned files and removes them.
+There's no way to find and remove orphaned GGUF files — files on disk that aren't referenced by any server config's `quants` map. The existing `tama model scan` does the opposite: it finds untracked files and adds them to model cards. This task adds `tama model prune` which finds orphaned files and removes them.
 
 **Files:**
-- Modify: `crates/koji-cli/src/cli.rs` — add `Prune` variant to `ModelCommands`
-- Modify: `crates/koji-cli/src/commands/model.rs` — add `cmd_prune` handler
+- Modify: `crates/tama-cli/src/cli.rs` — add `Prune` variant to `ModelCommands`
+- Modify: `crates/tama-cli/src/commands/model.rs` — add `cmd_prune` handler
 
 **What to implement:**
 
@@ -388,12 +388,12 @@ ModelCommands::Prune { dry_run, yes } => cmd_prune(config, dry_run, yes),
 - [ ] Run `cargo build --workspace`
 - [ ] Run `cargo clippy --workspace -- -D warnings`
 - [ ] Run `cargo test --workspace`
-- [ ] Commit with message: `feat: add koji model prune command to remove orphaned GGUF files`
+- [ ] Commit with message: `feat: add tama model prune command to remove orphaned GGUF files`
 
 **Acceptance criteria:**
-- [ ] `koji model prune --dry-run` lists orphaned files without deleting them
-- [ ] `koji model prune --yes` deletes all orphaned files without prompting
-- [ ] `koji model prune` (no flags) prompts for confirmation before deleting
+- [ ] `tama model prune --dry-run` lists orphaned files without deleting them
+- [ ] `tama model prune --yes` deletes all orphaned files without prompting
+- [ ] `tama model prune` (no flags) prompts for confirmation before deleting
 - [ ] Files referenced by any server config's `quants` map are NOT deleted
 - [ ] Empty parent directories are cleaned up after file deletion
 - [ ] DB `model_files` records for deleted files are also removed
@@ -406,7 +406,7 @@ ModelCommands::Prune { dry_run, yes } => cmd_prune(config, dry_run, yes),
 Currently the model delete button uses `window.confirm()` and then dispatches `delete_action`, which calls `DELETE /api/models/:id`. After Task 4, that endpoint will now also clean up files. No change needed to the backend call itself, but we should verify the delete confirmation message is clear about file deletion.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/model_editor.rs`
+- Modify: `crates/tama-web/src/pages/model_editor.rs`
 
 **What to implement:**
 

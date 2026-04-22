@@ -8,14 +8,14 @@
 
 ---
 
-### Task 1: Add history API endpoint (`GET /koji/v1/system/metrics/history`)
+### Task 1: Add history API endpoint (`GET /tama/v1/system/metrics/history`)
 
 **Context:** The frontend currently only receives metrics via SSE, which starts empty. Metrics are already persisted in `system_metrics_history` (SQLite) by the background metrics task. Two query functions exist (`get_recent_system_metrics`, `get_system_metrics_since`) but are not wired to any HTTP route. This task creates the endpoint so the dashboard can load historical data on page mount.
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy/koji_handlers/system.rs`
-- Modify: `crates/koji-core/src/proxy/koji_handlers/mod.rs`
-- Modify: `crates/koji-core/src/proxy/server/router.rs`
+- Modify: `crates/tama-core/src/proxy/tama_handlers/system.rs`
+- Modify: `crates/tama-core/src/proxy/tama_handlers/mod.rs`
+- Modify: `crates/tama-core/src/proxy/server/router.rs`
 
 **What to implement:**
 
@@ -41,14 +41,14 @@
    - Map each `SystemMetricsRow` → `MetricsHistoryEntry`
    - Return `Json(Vec<MetricsHistoryEntry>)`
 
-3. In `koji_handlers/mod.rs`, add export:
+3. In `tama_handlers/mod.rs`, add export:
    ```rust
    pub use system::{handle_system_metrics_history, /* existing exports */};
    ```
 
 4. In `server/router.rs`, add route:
    ```rust
-   .route("/koji/v1/system/metrics/history", get(handle_system_metrics_history))
+   .route("/tama/v1/system/metrics/history", get(handle_system_metrics_history))
    ```
    Import `handle_system_metrics_history` in the use statement.
 
@@ -64,16 +64,16 @@
    Clamp `limit` to 1..=1000 range in the handler.
 
 **Steps:**
-- [ ] Run `cargo test --package koji-core` — all existing tests pass
+- [ ] Run `cargo test --package tama-core` — all existing tests pass
 - [ ] Add `MetricsHistoryEntry`, `HistoryQueryParams`, and `handle_system_metrics_history` to `system.rs`
 - [ ] Add import for `crate::db::queries::metrics_queries` and `axum::extract::Query` in `system.rs`
 - [ ] Add `handle_system_metrics_history` to `mod.rs` exports
 - [ ] Add route and import in `router.rs`
-- [ ] Run `cargo test --package koji-core`
+- [ ] Run `cargo test --package tama-core`
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo clippy --workspace -- -D warnings`
 - [ ] Run `cargo build --workspace`
-- [ ] Commit with message: "feat: add GET /koji/v1/system/metrics/history endpoint"
+- [ ] Commit with message: "feat: add GET /tama/v1/system/metrics/history endpoint"
 
 **Acceptance criteria:**
 - [ ] Endpoint returns JSON array of `MetricsHistoryEntry` objects
@@ -90,7 +90,7 @@
 **Context:** The sparkline is currently a pure SVG with no interactivity. When hovering over the chart, users should see: a vertical indicator line, a highlighted dot on the data line, and a tooltip with the exact value and relative timestamp. On mouse leave, overlays disappear. The chart also needs boundary reference lines (0% and 100% for percentages, max capacity for memory) and time axis labels ("now" at right, "-Xm" at left).
 
 **Files:**
-- Modify: `crates/koji-web/src/components/sparkline.rs`
+- Modify: `crates/tama-web/src/components/sparkline.rs`
 
 **What to implement:**
 
@@ -144,7 +144,7 @@
 - The `view!` macro requires `class:name={expr}` syntax for dynamic classes and `style:name={expr}` for dynamic styles.
 
 **Steps:**
-- [ ] Run `cargo test --package koji-web` — existing tests pass
+- [ ] Run `cargo test --package tama-web` — existing tests pass
 - [ ] Add `HoverState` struct and new props to `SparklineChart`
 - [ ] Add hover signal, `on:mousemove`/`on:mouseleave` handlers
 - [ ] Add Y-axis reference line rendering
@@ -153,7 +153,7 @@
 - [ ] Add time axis labels ("now" and "-Xm")
 - [ ] Add `format_relative_time` helper
 - [ ] Handle edge cases: empty data, single point, timestamps len ≠ data len
-- [ ] Run `cargo test --package koji-web`
+- [ ] Run `cargo test --package tama-web`
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo clippy --workspace -- -D warnings`
 - [ ] Run `cargo build --workspace`
@@ -177,7 +177,7 @@
 **Context:** The current `.card` and `.grid-stats` CSS doesn't enforce fixed height or flex alignment. Cards with long values ("8460 / 65183 MiB") are taller than cards with short values ("12.5%"), causing visual misalignment. The sparklines sit at different vertical positions. The redesign uses fixed-height cards with flex column layout so sparklines always bottom-align.
 
 **Files:**
-- Modify: `crates/koji-web/style.css`
+- Modify: `crates/tama-web/style.css`
 
 **What to implement:**
 
@@ -332,10 +332,10 @@
 
 ### Task 4: Refactor dashboard card layout and add history fetch
 
-**Context:** The dashboard renders stat cards with variable-height values and no historical data loading. This task updates the `Dashboard` component to: (1) use the new `.stat-card` layout with flex column, (2) split memory/VRAM values into primary + secondary lines, (3) load historical data on mount from the new `/koji/v1/system/metrics/history` endpoint, (4) pass timestamps and unit labels to SparklineChart, and (5) handle the empty state ("—" for values).
+**Context:** The dashboard renders stat cards with variable-height values and no historical data loading. This task updates the `Dashboard` component to: (1) use the new `.stat-card` layout with flex column, (2) split memory/VRAM values into primary + secondary lines, (3) load historical data on mount from the new `/tama/v1/system/metrics/history` endpoint, (4) pass timestamps and unit labels to SparklineChart, and (5) handle the empty state ("—" for values).
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/dashboard.rs`
+- Modify: `crates/tama-web/src/pages/dashboard.rs`
 
 **What to implement:**
 
@@ -382,7 +382,7 @@
    // Fetch historical metrics before connecting to SSE
    let history_signal = history; // clone the signal for the async block
    let _ = spawn_local(async move {
-       if let Ok(resp) = gloo_net::http::Request::get("/koji/v1/system/metrics/history?limit=100")
+       if let Ok(resp) = gloo_net::http::Request::get("/tama/v1/system/metrics/history?limit=100")
            .send()
            .await
        {
@@ -509,7 +509,7 @@
 - [ ] Add empty state with "—" for all cards when no data
 - [ ] Pass `timestamps`, `unit_label`, and `y_refs` props to SparklineChart
 - [ ] Update empty/error state rendering logic
-- [ ] Run `cargo test --package koji-web`
+- [ ] Run `cargo test --package tama-web`
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo clippy --workspace -- -D warnings`
 - [ ] Run `cargo build --workspace`
@@ -520,7 +520,7 @@
 - [ ] Memory/VRAM cards show primary value ("2,048") and secondary line ("of 16,384 MiB")
 - [ ] CPU/GPU cards show primary value and secondary line ("of 100%")
 - [ ] Empty state shows "—" for card values when no data available
-- [ ] Historical data is fetched from `/koji/v1/system/metrics/history` on page load
+- [ ] Historical data is fetched from `/tama/v1/system/metrics/history` on page load
 - [ ] SSE stream appends new data to the pre-populated buffer
 - [ ] GPU/VRAM cards are conditionally rendered as before
 - [ ] Model cards section is unchanged
@@ -537,16 +537,16 @@
 
 **What to verify:**
 
-1. **Backend**: `cargo test --package koji-core` passes, including any existing metrics handler tests.
+1. **Backend**: `cargo test --package tama-core` passes, including any existing metrics handler tests.
 
-2. **Frontend**: `cargo test --package koji-web` passes.
+2. **Frontend**: `cargo test --package tama-web` passes.
 
 3. **Full build**: `cargo build --workspace` succeeds with no errors.
 
 4. **Clippy**: `cargo clippy --workspace -- -D warnings` passes.
 
 5. **Manual verification checklist** (run `trunk serve` or equivalent and check):
-   - Dashboard loads and fetches history from `/koji/v1/system/metrics/history`
+   - Dashboard loads and fetches history from `/tama/v1/system/metrics/history`
    - If DB is empty, cards show "—" values and empty sparklines with Y-axis refs
    - If DB has data, sparklines pre-populate with up to 100 historical points
    - SSE stream continues to append new data

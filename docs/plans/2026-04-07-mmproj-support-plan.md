@@ -4,7 +4,7 @@
 
 **Architecture:** Backend adds `is_mmproj` field to QuantEntry and `mmproj` field to ModelCard. Frontend adds Vision step to pull wizard and Vision toggle to model config page.
 
-**Tech Stack:** Rust + Leptos 0.7 (CSR/WASM), existing koji backend endpoints.
+**Tech Stack:** Rust + Leptos 0.7 (CSR/WASM), existing tama backend endpoints.
 
 ---
 
@@ -14,14 +14,14 @@
 Before the wizard can detect and download mmproj files, the backend needs to track them. This task adds the `is_mmproj` field to QuantEntry (to distinguish mmproj files from model quants) and the `mmproj` field to ModelCard (to store the selected mmproj filename). These are the foundational data model changes that all other tasks depend on.
 
 **Files:**
-- Modify: `crates/koji-core/src/models/pull.rs`
-- Modify: `crates/koji-core/src/models/card.rs`
-- Modify: `crates/koji-web/src/components/pull_quant_wizard.rs`
-- Test: `crates/koji-core/tests/mmproj_detection_test.rs` (new)
+- Modify: `crates/tama-core/src/models/pull.rs`
+- Modify: `crates/tama-core/src/models/card.rs`
+- Modify: `crates/tama-web/src/components/pull_quant_wizard.rs`
+- Test: `crates/tama-core/tests/mmproj_detection_test.rs` (new)
 
 **What to implement:**
 
-1. **`crates/koji-core/src/models/pull.rs`** — Add helper function:
+1. **`crates/tama-core/src/models/pull.rs`** — Add helper function:
 
 ```rust
 /// Check if a filename matches the mmproj pattern.
@@ -32,7 +32,7 @@ pub fn is_mmproj_filename(filename: &str) -> bool {
 }
 ```
 
-2. **`crates/koji-core/src/models/card.rs`** — Add `mmproj` field to `ModelMeta`:
+2. **`crates/tama-core/src/models/card.rs`** — Add `mmproj` field to `ModelMeta`:
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,7 +42,7 @@ pub struct ModelMeta {
 }
 ```
 
-3. **`crates/koji-web/src/components/pull_quant_wizard.rs`** — Add `is_mmproj` field to `QuantEntry`:
+3. **`crates/tama-web/src/components/pull_quant_wizard.rs`** — Add `is_mmproj` field to `QuantEntry`:
 
 ```rust
 #[derive(Deserialize, Clone, Debug)]
@@ -54,7 +54,7 @@ struct QuantEntry {
 }
 ```
 
-4. **`crates/koji-core/tests/mmproj_detection_test.rs`** — Write tests:
+4. **`crates/tama-core/tests/mmproj_detection_test.rs`** — Write tests:
 
 ```rust
 #[cfg(test)]
@@ -79,14 +79,14 @@ mod tests {
 ```
 
 **Steps:**
-- [ ] Create `crates/koji-core/tests/mmproj_detection_test.rs` with test cases above
-- [ ] Run `cargo test --package koji-core mmproj_detection_test`
+- [ ] Create `crates/tama-core/tests/mmproj_detection_test.rs` with test cases above
+- [ ] Run `cargo test --package tama-core mmproj_detection_test`
   - Did it fail with "function or associated item `is_mmproj_filename` not found"? If not, stop and investigate.
-- [ ] Add `is_mmproj_filename` function to `crates/koji-core/src/models/pull.rs`
-- [ ] Run `cargo test --package koji-core mmproj_detection_test`
+- [ ] Add `is_mmproj_filename` function to `crates/tama-core/src/models/pull.rs`
+- [ ] Run `cargo test --package tama-core mmproj_detection_test`
   - Did all tests pass? If not, fix the failures and re-run before continuing.
-- [ ] Add `mmproj: Option<String>` field to `ModelMeta` struct in `crates/koji-core/src/models/card.rs`
-- [ ] Add `is_mmproj: bool` field to `QuantEntry` struct in `crates/koji-web/src/components/pull_quant_wizard.rs`
+- [ ] Add `mmproj: Option<String>` field to `ModelMeta` struct in `crates/tama-core/src/models/card.rs`
+- [ ] Add `is_mmproj: bool` field to `QuantEntry` struct in `crates/tama-web/src/components/pull_quant_wizard.rs`
 - [ ] Run `cargo build --workspace`
   - Did it succeed? If not, fix and re-run before continuing.
 - [ ] Run `cargo clippy --workspace -- -D warnings`
@@ -111,12 +111,12 @@ mod tests {
 Now that QuantEntry has an `is_mmproj` field, the backend needs to populate it when listing HF repo files. This task updates `handle_hf_list_quants` to call `is_mmproj_filename` for each blob and set the field accordingly. This enables the frontend to distinguish mmproj files from model quants.
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy/koji_handlers.rs`
-- Test: `crates/koji-core/tests/hf_list_quants_test.rs` (new)
+- Modify: `crates/tama-core/src/proxy/tama_handlers.rs`
+- Test: `crates/tama-core/tests/hf_list_quants_test.rs` (new)
 
 **What to implement:**
 
-1. **`crates/koji-core/src/proxy/koji_handlers.rs`** — Update `handle_hf_list_quants`:
+1. **`crates/tama-core/src/proxy/tama_handlers.rs`** — Update `handle_hf_list_quants`:
 
 Find the existing code that creates QuantEntry:
 ```rust
@@ -143,7 +143,7 @@ let mut quants: Vec<QuantEntry> = blobs
     .collect();
 ```
 
-2. **`crates/koji-core/tests/hf_list_quants_test.rs`** — Write integration test:
+2. **`crates/tama-core/tests/hf_list_quants_test.rs`** — Write integration test:
 
 ```rust
 #[cfg(test)]
@@ -171,25 +171,25 @@ mod tests {
 ```
 
 **Steps:**
-- [ ] Create `crates/koji-core/tests/hf_list_quants_test.rs` with test cases above
-- [ ] Run `cargo test --package koji-core hf_list_quants_test`
+- [ ] Create `crates/tama-core/tests/hf_list_quants_test.rs` with test cases above
+- [ ] Run `cargo test --package tama-core hf_list_quants_test`
   - Did it fail with "function or associated item `handle_hf_list_quants` not found"? If not, stop and investigate.
-- [ ] Update `handle_hf_list_quants` in `crates/koji-core/src/proxy/koji_handlers.rs` to set `is_mmproj` field
-- [ ] Run `cargo test --package koji-core hf_list_quants_test`
+- [ ] Update `handle_hf_list_quants` in `crates/tama-core/src/proxy/tama_handlers.rs` to set `is_mmproj` field
+- [ ] Run `cargo test --package tama-core hf_list_quants_test`
   - Did all tests pass? If not, fix the failures and re-run before continuing.
-- [ ] Run `cargo build --package koji-core`
+- [ ] Run `cargo build --package tama-core`
   - Did it succeed? If not, fix and re-run before continuing.
-- [ ] Run `cargo clippy --package koji-core -- -D warnings`
+- [ ] Run `cargo clippy --package tama-core -- -D warnings`
   - Did it pass? If not, fix and re-run before continuing.
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo test --package koji-core`
+- [ ] Run `cargo test --package tama-core`
   - Did all existing tests still pass? If not, stop and investigate.
 - [ ] Commit with message: `feat(core): set is_mmproj field when listing HF quants`
 
 **Acceptance criteria:**
 - [ ] `handle_hf_list_quants` sets `is_mmproj` field for each QuantEntry
 - [ ] All existing tests still pass
-- [ ] `cargo build --package koji-core` and `cargo clippy --package koji-core -- -D warnings` pass
+- [ ] `cargo build --package tama-core` and `cargo clippy --package tama-core -- -D warnings` pass
 
 ---
 
@@ -199,8 +199,8 @@ mod tests {
 Now that the backend can distinguish mmproj files, the wizard needs a new "Vision" step where users can select which mmproj files to download. This step appears between "Select Quants" and "Set Context". The user can select multiple mmprojs (e.g., both F16 and Q4 versions) to download. The step is only shown if mmprojs are detected.
 
 **Files:**
-- Modify: `crates/koji-web/src/components/pull_quant_wizard.rs`
-- Test: `crates/koji-web/tests/wizard_vision_step_test.rs` (new)
+- Modify: `crates/tama-web/src/components/pull_quant_wizard.rs`
+- Test: `crates/tama-web/tests/wizard_vision_step_test.rs` (new)
 
 **What to implement:**
 
@@ -344,7 +344,7 @@ let selected_mmprojs: Vec<QuantRequest> = selected_mmproj_filenames
 quants.extend(selected_mmprojs);
 ```
 
-6. **Write tests** in `crates/koji-web/tests/wizard_vision_step_test.rs`:
+6. **Write tests** in `crates/tama-web/tests/wizard_vision_step_test.rs`:
 
 ```rust
 #[cfg(test)]
@@ -356,8 +356,8 @@ mod tests {
 ```
 
 **Steps:**
-- [ ] Create `crates/koji-web/tests/wizard_vision_step_test.rs` with test cases
-- [ ] Run `cargo test --package koji-web --features ssr wizard_vision_step_test`
+- [ ] Create `crates/tama-web/tests/wizard_vision_step_test.rs` with test cases
+- [ ] Run `cargo test --package tama-web --features ssr wizard_vision_step_test`
   - Did it fail with "module or item `wizard_vision_step_test` not found"? If not, stop and investigate.
 - [ ] Add `Vision` variant to `WizardStep` enum
 - [ ] Add `available_mmprojs` and `selected_mmproj_filenames` signals
@@ -389,8 +389,8 @@ mod tests {
 Users need to be able to enable/disable vision support and select which mmproj file to use when editing an existing model. This task adds a Vision toggle checkbox and mmproj dropdown to the model config page. When enabled, the model config saves the selected mmproj filename, which is then used to generate the `--mmproj` flag when starting the server.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/model_editor.rs`
-- Test: `crates/koji-web/tests/model_editor_vision_test.rs` (new)
+- Modify: `crates/tama-web/src/pages/model_editor.rs`
+- Test: `crates/tama-web/tests/model_editor_vision_test.rs` (new)
 
 **What to implement:**
 
@@ -501,7 +501,7 @@ if form_vision_enabled.get() && !selected_mmproj_for_config.get().is_empty() {
 }
 ```
 
-5. **Write tests** in `crates/koji-web/tests/model_editor_vision_test.rs`:
+5. **Write tests** in `crates/tama-web/tests/model_editor_vision_test.rs`:
 
 ```rust
 #[cfg(test)]
@@ -513,8 +513,8 @@ mod tests {
 ```
 
 **Steps:**
-- [ ] Create `crates/koji-web/tests/model_editor_vision_test.rs` with test cases
-- [ ] Run `cargo test --package koji-web --features ssr model_editor_vision_test`
+- [ ] Create `crates/tama-web/tests/model_editor_vision_test.rs` with test cases
+- [ ] Run `cargo test --package tama-web --features ssr model_editor_vision_test`
   - Did it fail with "module or item `model_editor_vision_test` not found"? If not, stop and investigate.
 - [ ] Add `form_vision_enabled`, `available_mmprojs_for_select`, `selected_mmproj_for_config` signals
 - [ ] Add Vision section to form layout with toggle and dropdown
@@ -559,16 +559,16 @@ Verify the PR by:
 ## Files Summary
 
 **Backend:**
-- `crates/koji-core/src/models/pull.rs` - Add `is_mmproj_filename()` function
-- `crates/koji-core/src/models/card.rs` - Add `mmproj` field to `ModelMeta`
-- `crates/koji-core/src/proxy/koji_handlers.rs` - Set `is_mmproj` in `handle_hf_list_quants`
+- `crates/tama-core/src/models/pull.rs` - Add `is_mmproj_filename()` function
+- `crates/tama-core/src/models/card.rs` - Add `mmproj` field to `ModelMeta`
+- `crates/tama-core/src/proxy/tama_handlers.rs` - Set `is_mmproj` in `handle_hf_list_quants`
 
 **Frontend:**
-- `crates/koji-web/src/components/pull_quant_wizard.rs` - Add Vision step
-- `crates/koji-web/src/pages/model_editor.rs` - Add Vision toggle and dropdown
+- `crates/tama-web/src/components/pull_quant_wizard.rs` - Add Vision step
+- `crates/tama-web/src/pages/model_editor.rs` - Add Vision toggle and dropdown
 
 **Tests:**
-- `crates/koji-core/tests/mmproj_detection_test.rs` - Backend detection tests
-- `crates/koji-core/tests/hf_list_quants_test.rs` - Backend listing tests
-- `crates/koji-web/tests/wizard_vision_step_test.rs` - Wizard UI tests
-- `crates/koji-web/tests/model_editor_vision_test.rs` - Config page tests
+- `crates/tama-core/tests/mmproj_detection_test.rs` - Backend detection tests
+- `crates/tama-core/tests/hf_list_quants_test.rs` - Backend listing tests
+- `crates/tama-web/tests/wizard_vision_step_test.rs` - Wizard UI tests
+- `crates/tama-web/tests/model_editor_vision_test.rs` - Config page tests

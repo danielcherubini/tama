@@ -4,7 +4,7 @@
 
 **Architecture:** Centralized update checking with database-backed state. A background checker runs on configurable intervals and on-demand. All update state is stored in a new `update_checks` table. The frontend shows a unified view of backends and models with their current/latest versions.
 
-**Tech Stack:** Rust (koji-core + koji-web), SQLite, Leptos frontend, Axum API
+**Tech Stack:** Rust (tama-core + tama-web), SQLite, Leptos frontend, Axum API
 
 ---
 
@@ -14,7 +14,7 @@
 We need a new table to persist update check results for both backends and models. This allows the frontend to display cached results without waiting for network requests on every page load. The table tracks version info, update availability status, and any error details.
 
 **Files:**
-- Modify: `crates/koji-core/src/db/migrations.rs`
+- Modify: `crates/tama-core/src/db/migrations.rs`
 
 **What to implement:**
 Add migration v6 that creates the `update_checks` table and updates `LATEST_VERSION` to 6.
@@ -46,9 +46,9 @@ Then update the `LATEST_VERSION` constant to 6.
 **Steps:**
 - [ ] Add migration v6 to `migrations.rs` with the SQL above
 - [ ] Update `LATEST_VERSION` from 5 to 6
-- [ ] Run migration test: `cargo test --package koji-core -- migrations`
+- [ ] Run migration test: `cargo test --package tama-core -- migrations`
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo build --package koji-core`
+- [ ] Run `cargo build --package tama-core`
 - [ ] Commit with message: `feat(db): add migration v6 for update_checks table`
 
 **Acceptance criteria:**
@@ -65,9 +65,9 @@ Then update the `LATEST_VERSION` constant to 6.
 We need CRUD operations for the `update_checks` table. These functions are synchronous (blocking SQLite calls) and will be called from the background checker. We follow the existing patterns in `backend_queries.rs` and `model_queries.rs`.
 
 **Files:**
-- Create: `crates/koji-core/src/db/queries/update_check_queries.rs`
-- Modify: `crates/koji-core/src/db/queries/types.rs` (add `UpdateCheckRecord`)
-- Modify: `crates/koji-core/src/db/queries/mod.rs` (re-export new types)
+- Create: `crates/tama-core/src/db/queries/update_check_queries.rs`
+- Modify: `crates/tama-core/src/db/queries/types.rs` (add `UpdateCheckRecord`)
+- Modify: `crates/tama-core/src/db/queries/mod.rs` (re-export new types)
 
 **What to implement:**
 
@@ -207,10 +207,10 @@ pub fn get_oldest_check_time(conn: &Connection) -> Result<Option<i64>> {
 - [ ] Add `UpdateCheckRecord` to `types.rs`
 - [ ] Create `update_check_queries.rs` with all functions
 - [ ] Add re-export in `mod.rs`
-- [ ] Add tests in `crates/koji-core/src/db/queries/tests.rs`
-- [ ] Run `cargo test --package koji-core -- queries`
+- [ ] Add tests in `crates/tama-core/src/db/queries/tests.rs`
+- [ ] Run `cargo test --package tama-core -- queries`
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo build --package koji-core`
+- [ ] Run `cargo build --package tama-core`
 - [ ] Commit with message: `feat(db): add update_check_queries for CRUD operations`
 
 **Acceptance criteria:**
@@ -225,16 +225,16 @@ pub fn get_oldest_check_time(conn: &Connection) -> Result<Option<i64>> {
 ## Task 3: Configuration — Add `update_check_interval` to General
 
 **Context:**
-We need a configurable interval for background update checks. Users should be able to set how often (in hours) koji automatically checks for updates. The default is 12 hours.
+We need a configurable interval for background update checks. Users should be able to set how often (in hours) tama automatically checks for updates. The default is 12 hours.
 
 **Files:**
-- Modify: `crates/koji-core/src/config/types.rs` (add field to `General`)
-- Modify: `crates/koji-core/src/config/defaults.rs` (add default)
-- Modify: `crates/koji-web/src/types/config.rs` (mirror type)
+- Modify: `crates/tama-core/src/config/types.rs` (add field to `General`)
+- Modify: `crates/tama-core/src/config/defaults.rs` (add default)
+- Modify: `crates/tama-web/src/types/config.rs` (mirror type)
 
 **What to implement:**
 
-### In `crates/koji-core/src/config/types.rs`, add to `General`:
+### In `crates/tama-core/src/config/types.rs`, add to `General`:
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct General {
@@ -251,7 +251,7 @@ pub struct General {
 }
 ```
 
-### In `crates/koji-core/src/config/defaults.rs`, add:
+### In `crates/tama-core/src/config/defaults.rs`, add:
 ```rust
 pub fn default_update_check_interval() -> u32 {
     12
@@ -273,7 +273,7 @@ impl Default for General {
 }
 ```
 
-### In `crates/koji-web/src/types/config.rs`, add to `General`:
+### In `crates/tama-web/src/types/config.rs`, add to `General`:
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct General {
@@ -293,20 +293,20 @@ pub struct General {
 Also add a `default_update_check_interval()` function in that file and update the conversion between core and mirror types.
 
 **Steps:**
-- [ ] Add `update_check_interval` field to `General` in koji-core
+- [ ] Add `update_check_interval` field to `General` in tama-core
 - [ ] Add `default_update_check_interval()` function in defaults.rs
 - [ ] Update `General::default()` implementation
-- [ ] Add field to mirror `General` in koji-web
+- [ ] Add field to mirror `General` in tama-web
 - [ ] Add conversion between core and mirror types
 - [ ] Add test for deserialization
-- [ ] Run `cargo test --package koji-core -- config`
+- [ ] Run `cargo test --package tama-core -- config`
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo build --workspace`
 - [ ] Commit with message: `feat(config): add update_check_interval to General config`
 
 **Acceptance criteria:**
 - [ ] Field exists with default value of 12
-- [ ] Mirror type in koji-web has the same field
+- [ ] Mirror type in tama-web has the same field
 - [ ] Config round-trip serialization works
 - [ ] Default value applied when field is missing from config file
 
@@ -318,15 +318,15 @@ Also add a `default_update_check_interval()` function in that file and update th
 We need a background task that checks for updates for all backends and models. The checker runs on a configurable interval and also on-demand. It uses a phased approach to remain `Send`-safe: sync DB reads → async network calls → sync DB writes.
 
 **Files:**
-- Create: `crates/koji-core/src/updates/mod.rs` (module entry)
-- Create: `crates/koji-core/src/updates/checker.rs` (main checker logic)
-- Modify: `crates/koji-core/src/lib.rs` (export new module)
+- Create: `crates/tama-core/src/updates/mod.rs` (module entry)
+- Create: `crates/tama-core/src/updates/checker.rs` (main checker logic)
+- Modify: `crates/tama-core/src/lib.rs` (export new module)
 
 **What to implement:**
 
 ### Module structure:
 ```rust
-// crates/koji-core/src/updates/mod.rs
+// crates/tama-core/src/updates/mod.rs
 pub mod checker;
 
 pub use checker::UpdateChecker;
@@ -661,14 +661,14 @@ impl Default for UpdateChecker {
 Also update `upsert_update_check` in Task 2 to accept `checked_at: i64` as a parameter instead of hardcoding it.
 
 **Steps:**
-- [ ] Create `crates/koji-core/src/updates/mod.rs`
-- [ ] Create `crates/koji-core/src/updates/checker.rs` with full implementation
-- [ ] Export from `crates/koji-core/src/lib.rs`
+- [ ] Create `crates/tama-core/src/updates/mod.rs`
+- [ ] Create `crates/tama-core/src/updates/checker.rs` with full implementation
+- [ ] Export from `crates/tama-core/src/lib.rs`
 - [ ] Update `upsert_update_check` to accept `checked_at` parameter
-- [ ] Add tests in `crates/koji-core/src/updates/tests.rs`
-- [ ] Run `cargo test --package koji-core -- updates`
+- [ ] Add tests in `crates/tama-core/src/updates/tests.rs`
+- [ ] Run `cargo test --package tama-core -- updates`
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo build --package koji-core`
+- [ ] Run `cargo build --package tama-core`
 - [ ] Commit with message: `feat(updates): add background update checker module`
 
 **Acceptance criteria:**
@@ -687,12 +687,12 @@ We need REST API endpoints to:
 4. Trigger backend update
 5. Trigger model re-pull (resolve model ID to repo_id, then trigger re-pull)
 
-These endpoints follow the same patterns as existing API handlers in `koji-web/src/api.rs`.
+These endpoints follow the same patterns as existing API handlers in `tama-web/src/api.rs`.
 
 **Files:**
-- Create: `crates/koji-web/src/api/updates.rs` (new endpoints)
-- Modify: `crates/koji-web/src/server.rs` (add routes)
-- Modify: `crates/koji-web/src/lib.rs` (export)
+- Create: `crates/tama-web/src/api/updates.rs` (new endpoints)
+- Modify: `crates/tama-web/src/server.rs` (add routes)
+- Modify: `crates/tama-web/src/lib.rs` (export)
 
 **What to implement:**
 
@@ -741,7 +741,7 @@ pub async fn get_updates(State(state): State<Arc<AppState>>) -> impl IntoRespons
         None => return (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "config_path not configured" }))).into_response(),
     };
 
-    let checker = koji_core::updates::UpdateChecker::new();
+    let checker = tama_core::updates::UpdateChecker::new();
     match checker.get_results(&config_dir).await {
         Ok(records) => {
             let mut backends = Vec::new();
@@ -779,7 +779,7 @@ pub async fn trigger_check(State(state): State<Arc<AppState>>) -> impl IntoRespo
         None => return (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "config_path not configured" }))).into_response(),
     };
 
-    let checker = koji_core::updates::UpdateChecker::new();
+    let checker = tama_core::updates::UpdateChecker::new();
     // Run in background, return immediately
     tokio::spawn(async move {
         if let Err(e) = checker.run_check(&config_dir).await {
@@ -802,7 +802,7 @@ pub async fn check_single(
         None => return (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "config_path not configured" }))).into_response(),
     };
 
-    let checker = koji_core::updates::UpdateChecker::new();
+    let checker = tama_core::updates::UpdateChecker::new();
     let result = match item_type.as_str() {
         "backend" => checker.check_backend(&config_dir, &item_id).await,
         "model" => checker.check_model(&config_dir, &item_id).await,
@@ -875,7 +875,7 @@ pub async fn apply_backend_update(
     let job_clone = job.clone();
     let name_clone = name.clone();
     tokio::spawn(async move {
-        let config_dir = koji_core::config::Config::base_dir().unwrap();
+        let config_dir = tama_core::config::Config::base_dir().unwrap();
         let mut registry = BackendRegistry::open(&config_dir).unwrap();
         let backend_info = registry.get(&name_clone).unwrap().unwrap();
         
@@ -925,7 +925,7 @@ pub async fn apply_model_update(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() }))))??;
 
-    match koji_core::models::pull::list_gguf_files(&repo_id).await {
+    match tama_core::models::pull::list_gguf_files(&repo_id).await {
         Ok(listing) => {
             tokio::task::spawn_blocking({
                 let config_dir = config_dir.clone();
@@ -962,7 +962,7 @@ pub async fn apply_model_update(
 ```
 
 **Steps:**
-- [ ] Create `crates/koji-web/src/api/updates.rs` with all endpoints
+- [ ] Create `crates/tama-web/src/api/updates.rs` with all endpoints
 - [ ] Add DTOs for request/response
 - [ ] Implement `get_updates` (GET /api/updates)
 - [ ] Implement `trigger_check` (POST /api/updates/check)
@@ -970,7 +970,7 @@ pub async fn apply_model_update(
 - [ ] Implement `apply_backend_update` (POST /api/updates/apply/backend/:name)
 - [ ] Implement `apply_model_update` (POST /api/updates/apply/model/:id)
 - [ ] Add routes to `build_router()` in server.rs
-- [ ] Run `cargo build --package koji-web`
+- [ ] Run `cargo build --package tama-web`
 - [ ] Run `cargo fmt --all`
 - [ ] Commit with message: `feat(api): add updates endpoints for check and apply`
 
@@ -995,9 +995,9 @@ The frontend needs a new `/updates` page showing:
 The page follows the same patterns as other pages like `backends.rs`.
 
 **Files:**
-- Create: `crates/koji-web/src/pages/updates.rs`
-- Modify: `crates/koji-web/src/pages/mod.rs` (export new page)
-- Modify: `crates/koji-web/src/components/sidebar.rs` (add Updates link with badge)
+- Create: `crates/tama-web/src/pages/updates.rs`
+- Modify: `crates/tama-web/src/pages/mod.rs` (export new page)
+- Modify: `crates/tama-web/src/components/sidebar.rs` (add Updates link with badge)
 
 **What to implement:**
 
@@ -1256,18 +1256,18 @@ Effect::new(move |_| {
 
 Add the Updates page to the Leptos router:
 ```rust
-// In crates/koji-web/src/lib.rs, add to Routes:
+// In crates/tama-web/src/lib.rs, add to Routes:
 <Route path=path!("/updates") view=pages::updates::Updates />
 ```
 
 **Steps:**
-- [ ] Create `crates/koji-web/src/pages/updates.rs` with the Updates page component
+- [ ] Create `crates/tama-web/src/pages/updates.rs` with the Updates page component
 - [ ] Export from `pages/mod.rs`
 - [ ] Add Updates link to sidebar in `sidebar.rs`
 - [ ] Add badge logic to show when updates are available
 - [ ] Add `<Route path=path!("/updates") .../>` to `lib.rs` router
 - [ ] Add CSS for updates page styles
-- [ ] Run `cargo build --package koji-web`
+- [ ] Run `cargo build --package tama-web`
 - [ ] Run `cargo fmt --all`
 - [ ] Commit with message: `feat(frontend): add Updates Center page`
 
@@ -1288,8 +1288,8 @@ Add the Updates page to the Leptos router:
 When a backend is removed or a model is deleted/renamed, we must clean up any corresponding `update_checks` records. This prevents stale entries from appearing in the Updates Center.
 
 **Files:**
-- Modify: `crates/koji-web/src/api/backends.rs` (add cleanup to `remove_backend`)
-- Modify: `crates/koji-web/src/api.rs` (add cleanup to `delete_model` and `rename_model`)
+- Modify: `crates/tama-web/src/api/backends.rs` (add cleanup to `remove_backend`)
+- Modify: `crates/tama-web/src/api.rs` (add cleanup to `delete_model` and `rename_model`)
 
 **What to implement:**
 
@@ -1298,8 +1298,8 @@ When a backend is removed or a model is deleted/renamed, we must clean up any co
 After removing from registry:
 ```rust
 // Clean up update_check record
-if let Ok(open) = koji_core::db::open(&config_dir) {
-    let _ = koji_core::db::queries::delete_update_check(
+if let Ok(open) = tama_core::db::open(&config_dir) {
+    let _ = tama_core::db::queries::delete_update_check(
         &open.conn,
         "backend",
         &name,
@@ -1312,8 +1312,8 @@ if let Ok(open) = koji_core::db::open(&config_dir) {
 After removing from config:
 ```rust
 // Clean up update_check record
-if let Ok(open) = koji_core::db::open(&config_dir) {
-    let _ = koji_core::db::queries::delete_update_check(
+if let Ok(open) = tama_core::db::open(&config_dir) {
+    let _ = tama_core::db::queries::delete_update_check(
         &open.conn,
         "model",
         &id,
@@ -1326,8 +1326,8 @@ if let Ok(open) = koji_core::db::open(&config_dir) {
 After renaming:
 ```rust
 // Clean up update_check record for old ID
-if let Ok(open) = koji_core::db::open(&config_dir) {
-    let _ = koji_core::db::queries::delete_update_check(
+if let Ok(open) = tama_core::db::open(&config_dir) {
+    let _ = tama_core::db::queries::delete_update_check(
         &open.conn,
         "model",
         &id,
@@ -1339,7 +1339,7 @@ if let Ok(open) = koji_core::db::open(&config_dir) {
 - [ ] Add `delete_update_check` call to `remove_backend` in backends.rs
 - [ ] Add `delete_update_check` call to `delete_model` in api.rs
 - [ ] Add `delete_update_check` call to `rename_model` in api.rs
-- [ ] Run `cargo build --package koji-web`
+- [ ] Run `cargo build --package tama-web`
 - [ ] Run `cargo fmt --all`
 - [ ] Commit with message: `fix(cleanup): delete update_check records on model/backend removal`
 
@@ -1356,12 +1356,12 @@ if let Ok(open) = koji_core::db::open(&config_dir) {
 After implementing all the pieces, we need to verify everything works together correctly. This includes testing the full flow, running all tests, and checking for any regressions.
 
 **Files:**
-- Add: `crates/koji-core/src/updates/tests.rs`
-- Add: `crates/koji-web/tests/updates_api.rs`
+- Add: `crates/tama-core/src/updates/tests.rs`
+- Add: `crates/tama-web/tests/updates_api.rs`
 
 **What to implement:**
 
-### Integration test in koji-core:
+### Integration test in tama-core:
 
 ```rust
 #[cfg(test)]
@@ -1395,7 +1395,7 @@ mod integration_tests {
 
 ### API smoke test:
 
-Reference the existing test patterns in `crates/koji-web/tests/` (e.g., `backends_api.rs`) for constructing test `AppState`. The key fields needed:
+Reference the existing test patterns in `crates/tama-web/tests/` (e.g., `backends_api.rs`) for constructing test `AppState`. The key fields needed:
 
 ```rust
 // Helper to create minimal test AppState
@@ -1442,7 +1442,7 @@ async fn test_get_updates_returns_json() {
 }
 ```
 
-**Note:** For full integration tests with actual update checking, you may need to set up a temporary directory with config.toml and koji.db.
+**Note:** For full integration tests with actual update checking, you may need to set up a temporary directory with config.toml and tama.db.
 
 ### Verification steps:
 
@@ -1467,8 +1467,8 @@ async fn test_get_updates_returns_json() {
    ```
 
 **Steps:**
-- [ ] Add integration test for UpdateChecker in `crates/koji-core/src/updates/tests.rs`
-- [ ] Add API smoke test in `crates/koji-web/tests/updates_api.rs`
+- [ ] Add integration test for UpdateChecker in `crates/tama-core/src/updates/tests.rs`
+- [ ] Add API smoke test in `crates/tama-web/tests/updates_api.rs`
 - [ ] Run `cargo test --workspace`
 - [ ] Fix any failing tests
 - [ ] Run `cargo clippy --workspace -- -D warnings`
@@ -1488,13 +1488,13 @@ async fn test_get_updates_returns_json() {
 
 | Task | Description | Package |
 |------|-------------|--------|
-| 1 | Database migration v6 | koji-core |
-| 2 | DB query functions | koji-core |
-| 3 | Configuration field | koji-core, koji-web |
-| 4 | Background checker module | koji-core |
-| 5 | API endpoints | koji-web |
-| 6 | Frontend page | koji-web |
-| 7 | Cleanup hooks | koji-web |
+| 1 | Database migration v6 | tama-core |
+| 2 | DB query functions | tama-core |
+| 3 | Configuration field | tama-core, tama-web |
+| 4 | Background checker module | tama-core |
+| 5 | API endpoints | tama-web |
+| 6 | Frontend page | tama-web |
+| 7 | Cleanup hooks | tama-web |
 | 8 | Integration & testing | both |
 
 **Estimated total tasks:** 8 independent, committable tasks

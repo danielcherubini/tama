@@ -14,7 +14,7 @@
 This task introduces the new configuration option that controls the maximum number of simultaneously loaded models. It's a standalone change to the config types and does not depend on any other feature work. The default is 1 (single-model mode), with 0 meaning unlimited/disabled.
 
 **Files:**
-- Modify: `crates/koji-core/src/config/types.rs`
+- Modify: `crates/tama-core/src/config/types.rs`
 
 **What to implement:**
 - Add a private default function `default_max_loaded_models()` returning `u32` value `1`
@@ -34,7 +34,7 @@ This task introduces the new configuration option that controls the maximum numb
   ```
 - [ ] Add `max_loaded_models: default_max_loaded_models(),` to the `impl Default for ProxyConfig` block's `Self { ... }` initializer
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo check --package koji-core`
+- [ ] Run `cargo check --package tama-core`
   - Did it compile without errors? If not, fix any type mismatches or missing imports.
 - [ ] Commit with message: `feat(config): add max_loaded_models field to ProxyConfig`
 
@@ -42,7 +42,7 @@ This task introduces the new configuration option that controls the maximum numb
 - [ ] `ProxyConfig` has a `max_loaded_models: u32` field with default value 1
 - [ ] Setting `max_loaded_models = 0` in config.toml deserializes to 0 (unlimited)
 - [ ] Omitting the field uses the default of 1
-- [ ] `cargo check --package koji-core` passes cleanly
+- [ ] `cargo check --package tama-core` passes cleanly
 
 ---
 
@@ -52,8 +52,8 @@ This task introduces the new configuration option that controls the maximum numb
 The new `Unloading` state is essential for preventing two problems: (1) holding a write lock on the models map while waiting up to 5 seconds for SIGTERM, which would block all proxy traffic, and (2) race conditions where concurrent eviction attempts try to unload the same model. This task adds the variant and updates every method that pattern-matches on `ModelState`. It's a prerequisite for Task 3 (eviction logic).
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy/types.rs`
-- Test: `crates/koji-core/src/proxy/lifecycle.rs` (existing test module)
+- Modify: `crates/tama-core/src/proxy/types.rs`
+- Test: `crates/tama-core/src/proxy/lifecycle.rs` (existing test module)
 
 **What to implement:**
 - Add `Unloading` variant to the `ModelState` enum with these fields (same as `Ready` minus `load_time`):
@@ -81,7 +81,7 @@ The new `Unloading` state is essential for preventing two problems: (1) holding 
   - `can_reload(cooldown_seconds)` → return `false` for Unloading
 
 **Steps:**
-- [ ] Add the `Unloading` variant to the `ModelState` enum in `crates/koji-core/src/proxy/types.rs`, placing it after `Failed` and before the closing brace of the enum
+- [ ] Add the `Unloading` variant to the `ModelState` enum in `crates/tama-core/src/proxy/types.rs`, placing it after `Failed` and before the closing brace of the enum
 - [ ] Update `model_name()` match: add arm `ModelState::Unloading { model_name, .. } => model_name`
 - [ ] Update `backend()` match: add arm `ModelState::Unloading { backend, .. } => backend`
 - [ ] Update `is_ready()`: change to return `matches!(self, ModelState::Ready { .. })` (this automatically excludes Unloading)
@@ -91,7 +91,7 @@ The new `Unloading` state is essential for preventing two problems: (1) holding 
 - [ ] Update `load_time()`: add arm `ModelState::Unloading { .. } => None`
 - [ ] Update `last_accessed()`: add arm `ModelState::Unloading { last_accessed, .. } => Some(*last_accessed)`
 - [ ] Update `can_reload(cooldown_seconds)`: add arm for Unloading returning `false`
-- [ ] Run `cargo check --package koji-core`
+- [ ] Run `cargo check --package tama-core`
   - Did it compile? If there are other match expressions on ModelState that the compiler flagged (e.g., in lifecycle.rs, status.rs), note them but DO NOT fix them yet — they will be addressed in Task 3. The goal is to get the types module compiling.
 - [ ] Commit with message: `feat(proxy): add Unloading state variant to ModelState`
 
@@ -110,8 +110,8 @@ The new `Unloading` state is essential for preventing two problems: (1) holding 
 This is the core logic of the feature. The method checks if the proxy is at capacity, finds the least-recently-used Ready model, atomically transitions it to Unloading (holding the write lock for only microseconds), then releases the lock before calling `unload_model()` (which can take up to 5 seconds). This design prevents both lock contention and race conditions.
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy/lifecycle.rs`
-- Test: `crates/koji-core/src/proxy/lifecycle.rs` (existing test module at bottom of file)
+- Modify: `crates/tama-core/src/proxy/lifecycle.rs`
+- Test: `crates/tama-core/src/proxy/lifecycle.rs` (existing test module at bottom of file)
 
 **What to implement:**
 - Add new public async method `evict_lru_if_needed(&self) -> Result<Option<String>>` on `ProxyState`
@@ -133,7 +133,7 @@ This is the core logic of the feature. The method checks if the proxy is at capa
   - Add a filter in the iteration: skip models where `matches!(state, ModelState::Unloading { .. })`.
 
 **Steps:**
-- [ ] In `crates/koji-core/src/proxy/lifecycle.rs`, add the new method `evict_lru_if_needed`:
+- [ ] In `crates/tama-core/src/proxy/lifecycle.rs`, add the new method `evict_lru_if_needed`:
   ```rust
   pub async fn evict_lru_if_needed(&self) -> Result<Option<String>> {
       let config = self.config.read().await;
@@ -204,10 +204,10 @@ This is the core logic of the feature. The method checks if the proxy is at capa
   - `test_evict_lru_if_needed_skips_starting_models`: Create state with max_loaded_models=1, add 1 Starting model (not Ready). Call evict_lru_if_needed, assert returns `Ok(None)` and Starting model remains.
   - `test_evict_lru_if_needed_skips_failed_models`: Create state with max_loaded_models=1, add 1 Failed model. Call evict_lru_if_needed, assert returns `Ok(None)`.
   - `test_evict_lru_if_needed_concurrent_no_double_eviction`: Add 2 Ready models with different last_accessed times. Set max_loaded_models=1. Use `tokio::spawn` to run two `evict_lru_if_needed()` calls concurrently. First call should evict the LRU and return `Ok(Some(name))`, second should find no Ready models (the first is now Unloading) and return `Ok(None)`.
-- [ ] Run `cargo test --package koji-core -- lifecycle`
+- [ ] Run `cargo test --package tama-core -- lifecycle`
   - Did all tests pass? If not, fix failures and re-run.
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo check --package koji-core`
+- [ ] Run `cargo check --package tama-core`
   - Did it compile cleanly? If there are other match expressions on ModelState that the compiler flagged (e.g., in status.rs), note them for a follow-up but DO NOT fix them — they're pre-existing and not part of this feature.
 - [ ] Commit with message: `feat(proxy): add LRU eviction when max_loaded_models is reached`
 
@@ -228,8 +228,8 @@ This is the core logic of the feature. The method checks if the proxy is at capa
 This final task connects the eviction logic into all four auto-load paths. Every place where the proxy checks if a model is loaded and falls back to `load_model()` now calls `evict_lru_if_needed()` first. This ensures consistent behavior regardless of which API endpoint triggered the load.
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy/handlers.rs` (3 locations)
-- Modify: `crates/koji-core/src/proxy/koji_handlers/models.rs` (1 location)
+- Modify: `crates/tama-core/src/proxy/handlers.rs` (3 locations)
+- Modify: `crates/tama-core/src/proxy/tama_handlers/models.rs` (1 location)
 
 **What to implement:**
 Insert `let _ = state.evict_lru_if_needed().await;` immediately before the `load_model()` call in each of the four handlers. The eviction result is ignored (`let _`) since:
@@ -237,15 +237,15 @@ Insert `let _ = state.evict_lru_if_needed().await;` immediately before the `load
 - If eviction fails (e.g., all models are Starting), load_model proceeds and will fail if no capacity is available — which is correct behavior
 
 **Steps:**
-- [ ] In `crates/koji-core/src/proxy/handlers.rs`, in `handle_chat_completions`:
+- [ ] In `crates/tama-core/src/proxy/handlers.rs`, in `handle_chat_completions`:
   Find the `None => {` arm inside the `match state.get_available_server_for_model(model_name).await { ... }` block. Insert `let _ = state.evict_lru_if_needed().await;` as the first line of that arm, before `let model_card = ...`.
-- [ ] In `crates/koji-core/src/proxy/handlers.rs`, in `handle_stream_chat_completions`:
+- [ ] In `crates/tama-core/src/proxy/handlers.rs`, in `handle_stream_chat_completions`:
   Same change — insert `let _ = state.evict_lru_if_needed().await;` as the first line of the `None => {` arm.
-- [ ] In `crates/koji-core/src/proxy/handlers.rs`, in `handle_forward_post`:
+- [ ] In `crates/tama-core/src/proxy/handlers.rs`, in `handle_forward_post`:
   Find the `None => {` arm inside the inner `match state.get_available_server_for_model(model).await { ... }`. Insert `let _ = state.evict_lru_if_needed().await;` as the first line.
-- [ ] In `crates/koji-core/src/proxy/koji_handlers/models.rs`, in `handle_koji_load_model`:
+- [ ] In `crates/tama-core/src/proxy/tama_handlers/models.rs`, in `handle_tama_load_model`:
   Insert `let _ = state.evict_lru_if_needed().await;` as the first line of the function body, after resolving the model_id but before calling `load_model`.
-- [ ] Run `cargo test --package koji-core`
+- [ ] Run `cargo test --package tama-core`
   - Did all tests pass? If not, fix failures and re-run.
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo check --workspace`
@@ -256,7 +256,7 @@ Insert `let _ = state.evict_lru_if_needed().await;` immediately before the `load
 - [ ] `handle_chat_completions` calls `evict_lru_if_needed()` before `load_model()`
 - [ ] `handle_stream_chat_completions` calls `evict_lru_if_needed()` before `load_model()`
 - [ ] `handle_forward_post` calls `evict_lru_if_needed()` before `load_model()`
-- [ ] `handle_koji_load_model` calls `evict_lru_if_needed()` before `load_model()`
+- [ ] `handle_tama_load_model` calls `evict_lru_if_needed()` before `load_model()`
 - [ ] All existing tests still pass (no regressions)
 - [ ] `cargo check --workspace` passes cleanly
 
@@ -276,7 +276,7 @@ Each task is independently commitable and buildable.
 After all tasks are complete:
 
 1. Set `max_loaded_models = 1` in config.toml
-2. Start the proxy, load Model A via `/koji/v1/models/:id/load`
+2. Start the proxy, load Model A via `/tama/v1/models/:id/load`
 3. Request a different model via `/v1/chat/completions` with `"model": "different-model"`
 4. Verify: Model A is unloaded, different-model is loaded (check `/status` or logs)
 5. Set `max_loaded_models = 2`, repeat — both models should remain loaded

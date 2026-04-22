@@ -1,6 +1,6 @@
 # Review Bug Fix Plan
 
-**Goal:** Fix all critical and major bugs identified across the 10-module code review of koji-cli, koji-core, and koji-web.
+**Goal:** Fix all critical and major bugs identified across the 10-module code review of tama-cli, tama-core, and tama-web.
 
 **Architecture:** Group related fixes into 6 independent tasks ordered by severity and dependency. Each task is independently committable with its own tests. No task depends on uncommitted work from a previous task.
 
@@ -8,17 +8,17 @@
 
 ---
 
-### Task 1: Fix Critical Security Vulnerabilities in koji-web API
+### Task 1: Fix Critical Security Vulnerabilities in tama-web API
 
 **Context:**
 The API layer has multiple critical security gaps: path traversal in `update_backend`, no input validation on model CRUD and backend install endpoints, bypassable same-origin CSRF check, missing body size limits, and the proxy handler forwards all HTTP methods without filtering. These are independent fixes that should be grouped because they all touch the API middleware and route handlers, making it efficient to review together.
 
 **Files:**
-- Modify: `crates/koji-web/src/api/backends/manage.rs` — add path traversal validation to `update_backend`
-- Modify: `crates/koji-web/src/api/backends/install.rs` — add input validation on InstallRequest fields (backend_type, version, gpu_type max lengths)
-- Modify: `crates/koji-web/src/api/models/crud.rs` — add input validation on ModelBody fields; wrap delete_model in SQLite transaction
-- Modify: `crates/koji-web/src/api/middleware.rs` — replace Origin-only check with proper CSRF double-submit cookie pattern; add per-route body size limits
-- Modify: `crates/koji-web/src/server.rs` — add method whitelisting to proxy_koji handler (only allow GET/POST/PATCH); fix CORS layer ordering (CorsLayer before enforce_same_origin)
+- Modify: `crates/tama-web/src/api/backends/manage.rs` — add path traversal validation to `update_backend`
+- Modify: `crates/tama-web/src/api/backends/install.rs` — add input validation on InstallRequest fields (backend_type, version, gpu_type max lengths)
+- Modify: `crates/tama-web/src/api/models/crud.rs` — add input validation on ModelBody fields; wrap delete_model in SQLite transaction
+- Modify: `crates/tama-web/src/api/middleware.rs` — replace Origin-only check with proper CSRF double-submit cookie pattern; add per-route body size limits
+- Modify: `crates/tama-web/src/server.rs` — add method whitelisting to proxy_tama handler (only allow GET/POST/PATCH); fix CORS layer ordering (CorsLayer before enforce_same_origin)
 
 **What to implement:**
 **Frontend CSRF Note:** The Leptos frontend must read the CSRF token from cookies on every page load and inject it as `X-CSRF-Token` header on all API requests. Add a small JS snippet in the HTML head or a Leptos effect that runs on mount to handle this.
@@ -27,11 +27,11 @@ The API layer has multiple critical security gaps: path traversal in `update_bac
 2. In `install.rs`, add validation: `backend_type.len() <= 64`, `version.len() <= 128`, `gpu_type.len() <= 32`. Reject empty strings. Use newtype wrappers or explicit checks.
 3. In `crud.rs`, add validation on all ModelBody fields. Use regex for repo_id: `^[a-zA-Z0-9._/-]+$` with max length 256. Replace `delete_model` to use `conn.transaction()?` wrapping directory deletion, card deletion, and DB record deletion.
 4. In `middleware.rs`, implement CSRF double-submit: on GET requests, set a random CSRF token in a SameSite=Lax cookie AND return it as an `X-CSRF-Token` response header. On POST/PUT/PATCH, verify the cookie value matches the header value. If they don't match, return 403. Add per-route body size limits: 16MB for install/update endpoints, 1MB for JSON API bodies.
-5. In `server.rs`, add method check in proxy_koji: only permit GET, POST, PATCH; return 405 for others. Move CorsLayer before enforce_same_origin middleware layer.
+5. In `server.rs`, add method check in proxy_tama: only permit GET, POST, PATCH; return 405 for others. Move CorsLayer before enforce_same_origin middleware layer.
 
 **Steps:**
 - [ ] Write failing test for path traversal rejection in `update_backend` — try name containing `../` and verify 400 response
-- [ ] Run `cargo test --package koji-web --test backends_api` (or add test to the file)
+- [ ] Run `cargo test --package tama-web --test backends_api` (or add test to the file)
   - Did it fail? If passed, fix the test. If compilation error, proceed — this is expected before the fix.
 - [ ] Implement path traversal validation in `manage.rs`
 - [ ] Write failing test for missing input validation on InstallRequest — send request with backend_type = "a".repeat(100) and verify 400 response
@@ -41,14 +41,14 @@ The API layer has multiple critical security gaps: path traversal in `update_bac
 - [ ] Write failing test for CSRF bypass — send POST without matching cookie/header pair and verify 403 response
 - [ ] Implement CSRF double-submit pattern in `middleware.rs`
 - [ ] Add body size limit layer to router in `server.rs`
-- [ ] Write failing test for proxy method filtering — send DELETE to /koji/v1/models/ and verify 405 response
-- [ ] Implement method whitelisting in `proxy_koji` handler
+- [ ] Write failing test for proxy method filtering — send DELETE to /tama/v1/models/ and verify 405 response
+- [ ] Implement method whitelisting in `proxy_tama` handler
 - [ ] Fix CORS layer ordering in `build_router()`
 - [ ] Run `cargo fmt --all`
   - Did it succeed? If not, fix and re-run.
-- [ ] Run `cargo clippy --package koji-web -- -D warnings`
+- [ ] Run `cargo clippy --package tama-web -- -D warnings`
   - Did it succeed? If not, fix and re-run.
-- [ ] Run `cargo test --package koji-web`
+- [ ] Run `cargo test --package tama-web`
   - Did all tests pass? If not, fix failures before continuing.
 - [ ] Commit with message: "fix(api): add input validation, CSRF protection, path traversal fix, method filtering, and body size limits"
 
@@ -66,16 +66,16 @@ The API layer has multiple critical security gaps: path traversal in `update_bac
 
 ---
 
-### Task 2: Fix Critical Data Integrity Issues in koji-core
+### Task 2: Fix Critical Data Integrity Issues in tama-core
 
 **Context:**
 Multiple critical data integrity bugs exist across the database, backup, and config modules. The FK toggle not restored on migration error can permanently disable foreign key enforcement. Backup lacks schema version validation and has memory-inefficient file handling. Config migration silently skips malformed entries with no recovery path. These are grouped because they all affect data correctness and should be reviewed together.
 
 **Files:**
-- Modify: `crates/koji-core/src/db/migrations.rs` — add RAII guard for FK toggle on error paths
-- Modify: `crates/koji-core/src/backup/archive.rs` — replace in-memory file reading with streaming approach; add schema version validation in extract_backup
-- Modify: `crates/koji-core/src/config/migrate/model_to_db.rs` — collect all deserialization errors and return Err if any models failed to migrate
-- Modify: `crates/koji-core/src/backup/manifest.rs` — add custom Deserialize impl or post-deserialization version check
+- Modify: `crates/tama-core/src/db/migrations.rs` — add RAII guard for FK toggle on error paths
+- Modify: `crates/tama-core/src/backup/archive.rs` — replace in-memory file reading with streaming approach; add schema version validation in extract_backup
+- Modify: `crates/tama-core/src/config/migrate/model_to_db.rs` — collect all deserialization errors and return Err if any models failed to migrate
+- Modify: `crates/tama-core/src/backup/manifest.rs` — add custom Deserialize impl or post-deserialization version check
 
 **What to implement:**
 1. In `migrations.rs`, create a simple RAII guard struct with a `Drop` impl that runs `PRAGMA foreign_keys=ON`. This handles both normal return and error paths automatically — no need for catch_unwind. The key insight: after `PRAGMA foreign_keys=OFF`, ensure `PRAGMA foreign_keys=ON` runs via Drop regardless of how the function exits.
@@ -85,27 +85,27 @@ Multiple critical data integrity bugs exist across the database, backup, and con
 
 **Steps:**
 - [ ] Write failing test for FK toggle not restored on error — trigger a migration failure between OFF and ON, then verify foreign_keys pragma is still ON
-- [ ] Run `cargo test --package koji-core -- db::migrations`
+- [ ] Run `cargo test --package tama-core -- db::migrations`
   - Did it fail? If passed, fix the test to correctly reproduce the issue.
 - [ ] Implement RAII FK guard in `migrations.rs`
 - [ ] Write failing test for backup version validation — create a manifest with version=99 and verify extract_backup returns an error
-- [ ] Run `cargo test --package koji-core -- backup`
+- [ ] Run `cargo test --package tama-core -- backup`
   - Did it fail? If passed, fix the test.
 - [ ] Implement version validation in `manifest.rs` and call in `archive.rs`
 - [ ] Write failing test for config migration partial failure — create a TOML with one valid and one invalid model entry, verify the function returns an error listing both failures
-- [ ] Run `cargo test --package koji-core -- config::migrate`
+- [ ] Run `cargo test --package tama-core -- config::migrate`
   - Did it fail? If passed, fix the test.
 - [ ] Implement error collection in `model_to_db.rs`
 - [ ] Refactor archive.rs to use streaming file I/O instead of loading entire files into memory
   - Create a streaming hasher wrapper: implement `Write` for a struct that wraps a `sha2::Sha256` hasher
   - Replace `fs::read()` with `BufReader::new(File::open(path)?)` piped through the hasher and tar builder
-- [ ] Run `cargo test --package koji-core -- backup`
+- [ ] Run `cargo test --package tama-core -- backup`
   - Did all tests pass? If not, fix before continuing.
 - [ ] Run `cargo fmt --all`
   - Did it succeed? If not, fix and re-run.
-- [ ] Run `cargo clippy --package koji-core -- -D warnings`
+- [ ] Run `cargo clippy --package tama-core -- -D warnings`
   - Did it succeed? If not, fix and re-run.
-- [ ] Run `cargo test --package koji-core`
+- [ ] Run `cargo test --package tama-core`
   - Did all tests pass? If not, fix failures before continuing.
 - [ ] Commit with message: "fix(core): FK toggle RAII guard, backup version validation, streaming archive, migration error collection"
 
@@ -118,16 +118,16 @@ Multiple critical data integrity bugs exist across the database, backup, and con
 
 ---
 
-### Task 3: Fix Critical Concurrency and Reliability Issues in koji-core
+### Task 3: Fix Critical Concurrency and Reliability Issues in tama-core
 
 **Context:**
 The proxy module has a global CONFIG_WRITE_LOCK that serializes all concurrent pulls, defeating parallel download purposes. The backends download module has no retry logic or connection pooling. The updates checker treats pre-release versions as stable. These are grouped because they all affect system reliability under load and share the pattern of missing robustness features.
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy/koji_handlers/types.rs` — replace global static CONFIG_WRITE_LOCK with per-state Arc<tokio::sync::Semaphore>
-- Modify: `crates/koji-core/src/backends/installer/download.rs` — add retry logic with exponential backoff; create shared reqwest Client
-- Modify: `crates/koji-core/src/updates/checker.rs` — filter out pre-release releases; fix dead code path after cache fetch
-- Modify: `crates/koji-core/src/proxy/server/mod.rs` — use tokio::process::Command instead of std::process::Command for cleanup_stale_processes
+- Modify: `crates/tama-core/src/proxy/tama_handlers/types.rs` — replace global static CONFIG_WRITE_LOCK with per-state Arc<tokio::sync::Semaphore>
+- Modify: `crates/tama-core/src/backends/installer/download.rs` — add retry logic with exponential backoff; create shared reqwest Client
+- Modify: `crates/tama-core/src/updates/checker.rs` — filter out pre-release releases; fix dead code path after cache fetch
+- Modify: `crates/tama-core/src/proxy/server/mod.rs` — use tokio::process::Command instead of std::process::Command for cleanup_stale_processes
 
 **What to implement:**
 1. In `types.rs`, remove the global static `CONFIG_WRITE_LOCK`. Instead, add a `config_write_semaphore: Arc<tokio::sync::Semaphore>` field to ProxyState (initialized with capacity=4 in the constructor). Replace all `.lock().await` calls on CONFIG_WRITE_LOCK with `state.config_write_semaphore.acquire().await.map(|_| ())` pattern.
@@ -137,24 +137,24 @@ The proxy module has a global CONFIG_WRITE_LOCK that serializes all concurrent p
 
 **Steps:**
 - [ ] Write failing test for CONFIG_WRITE_LOCK contention — simulate two concurrent pulls writing config, verify they don't block each other unnecessarily
-- [ ] Run `cargo test --package koji-core -- proxy`
+- [ ] Run `cargo test --package tama-core -- proxy`
   - Did it fail? If passed, fix the test.
 - [ ] Implement per-state semaphore in ProxyState and update all CONFIG_WRITE_LOCK usages
 - [ ] Write failing test for download retry — mock a server that returns 503 twice then 200, verify download succeeds after retries
-- [ ] Run `cargo test --package koji-core -- backends::installer`
+- [ ] Run `cargo test --package tama-core -- backends::installer`
   - Did it fail? If passed, fix the test.
 - [ ] Implement shared Client and retry logic in `download.rs`
 - [ ] Write failing test for pre-release filtering — mock GitHub API returning a prerelease as latest, verify it's excluded from update check
-- [ ] Run `cargo test --package koji-core -- updates`
+- [ ] Run `cargo test --package tama-core -- updates`
   - Did it fail? If passed, fix the test.
 - [ ] Implement pre-release filtering in `checker.rs`
 - [ ] Remove dead code path in `checker.rs` (redundant cache.get() check after insert)
 - [ ] Replace std::process::Command with tokio::process::Command in cleanup_stale_processes
-- [ ] Run `cargo test --package koji-core`
+- [ ] Run `cargo test --package tama-core`
   - Did all tests pass? If not, fix failures before continuing.
 - [ ] Run `cargo fmt --all`
   - Did it succeed? If not, fix and re-run.
-- [ ] Run `cargo clippy --package koji-core -- -D warnings`
+- [ ] Run `cargo clippy --package tama-core -- -D warnings`
   - Did it succeed? If not, fix and re-run.
 - [ ] Commit with message: "fix(core): proxy semaphore for concurrent pulls, download retries, pre-release filtering, async cleanup"
 
@@ -170,18 +170,18 @@ The proxy module has a global CONFIG_WRITE_LOCK that serializes all concurrent p
 
 ---
 
-### Task 4: Fix Critical Reactivity Bugs in koji-web Components
+### Task 4: Fix Critical Reactivity Bugs in tama-web Components
 
 **Context:**
 Multiple components use static `value=` bindings instead of reactive `prop:value=`, making forms completely non-functional. The general_section and supervisor_section are display-only shells with no edit capability. Several `.unwrap()` calls can panic in WASM. SSE streams lack reconnection logic. Modal keydown listener is never removed on unmount. These are grouped because they all affect the UI layer's correctness and user experience.
 
 **Files:**
-- Modify: `crates/koji-web/src/components/general_section.rs` — convert static value= to reactive prop:value with on_change callbacks
-- Modify: `crates/koji-web/src/components/supervisor_section.rs` — same conversion as general_section
-- Modify: `crates/koji-web/src/components/backup_section.rs` — replace .unwrap() calls with proper error handling
-- Modify: `crates/koji-web/src/components/modal.rs` — store keydown Closure in StoredValue and drop it on cleanup
-- Modify: `crates/koji-web/src/components/job_log_panel.rs` — add SSE reconnection logic with exponential backoff
-- Modify: `crates/koji-web/src/components/pull_quant_wizard.rs` — fix side effect in render (on_done called inside view closure); implement SSE reconnection per job
+- Modify: `crates/tama-web/src/components/general_section.rs` — convert static value= to reactive prop:value with on_change callbacks
+- Modify: `crates/tama-web/src/components/supervisor_section.rs` — same conversion as general_section
+- Modify: `crates/tama-web/src/components/backup_section.rs` — replace .unwrap() calls with proper error handling
+- Modify: `crates/tama-web/src/components/modal.rs` — store keydown Closure in StoredValue and drop it on cleanup
+- Modify: `crates/tama-web/src/components/job_log_panel.rs` — add SSE reconnection logic with exponential backoff
+- Modify: `crates/tama-web/src/components/pull_quant_wizard.rs` — fix side effect in render (on_done called inside view closure); implement SSE reconnection per job
 
 **What to implement:**
 1. In `general_section.rs`, convert all inputs from static `value={...}` to controlled components: use `prop:value=move || config.get().log_level` + `on:change=move |e| on_change.set(config.update(|c| c.log_level = e.target().value()))`. Add an `on_submit: Callback<General>` prop. Do the same for all other input fields (model_dir, max_concurrent_servers, etc.).
@@ -194,7 +194,7 @@ Multiple components use static `value=` bindings instead of reactive `prop:value
 **Steps:**
 - [ ] Write failing test for general_section — render the component, fill in a field, verify the on_change callback receives the updated value
   - Note: In Leptos WASM, this tests reactive binding by checking signal updates
-- [ ] Run `cargo test --package koji-web` (may need wasm-pack or leptos-specific test setup)
+- [ ] Run `cargo test --package tama-web` (may need wasm-pack or leptos-specific test setup)
   - Did it fail? If passed, fix the test.
 - [ ] Implement reactive bindings in `general_section.rs`
 - [ ] Apply same pattern to `supervisor_section.rs`
@@ -210,9 +210,9 @@ Multiple components use static `value=` bindings instead of reactive `prop:value
 - [ ] Implement per-job SSE reconnection in `pull_quant_wizard.rs`: each job gets its own signal for connection state and a tokio::spawn'd reconnection loop that checks the signal for cancellation on cleanup
 - [ ] Run `cargo fmt --all`
   - Did it succeed? If not, fix and re-run.
-- [ ] Run `cargo clippy --package koji-web -- -D warnings`
+- [ ] Run `cargo clippy --package tama-web -- -D warnings`
   - Did it succeed? If not, fix and re-run.
-- [ ] Run `cargo check --package koji-web` and `wasm-pack test --headless --chrome` if configured
+- [ ] Run `cargo check --package tama-web` and `wasm-pack test --headless --chrome` if configured
   - Did compilation succeed? Verify in browser that all component fixes work correctly.
 - [ ] Commit with message: "fix(web): reactive form bindings in sections, SSE reconnection, modal cleanup, backup error handling"
 
@@ -233,10 +233,10 @@ Multiple components use static `value=` bindings instead of reactive `prop:value
 The CLI has two critical bugs: cmd_verify calls std::process::exit(1) directly instead of returning errors, and cmd_server_rm deletes the wrong DB records. The config module has dead test files and unused functions. These are grouped because they're all in the CLI/config layer and relatively small scoped changes.
 
 **Files:**
-- Modify: `crates/koji-cli/src/commands/model/verify.rs` — replace std::process::exit(1) with Err(anyhow::anyhow!(...)) return
-- Modify: `crates/koji-cli/src/handlers/server/rm.rs` — fix model config deletion to use config name matching instead of repo_id comparison
-- Delete: `crates/koji-core/src/config/migrate/tests.rs` — dead code that references non-existent Config field
-- Modify: `crates/koji-core/src/config/migrate/mod.rs` — remove #[allow(dead_code)] from unused functions or wire them up; clean up stale_mmproj_args while loop
+- Modify: `crates/tama-cli/src/commands/model/verify.rs` — replace std::process::exit(1) with Err(anyhow::anyhow!(...)) return
+- Modify: `crates/tama-cli/src/handlers/server/rm.rs` — fix model config deletion to use config name matching instead of repo_id comparison
+- Delete: `crates/tama-core/src/config/migrate/tests.rs` — dead code that references non-existent Config field
+- Modify: `crates/tama-core/src/config/migrate/mod.rs` — remove #[allow(dead_code)] from unused functions or wire them up; clean up stale_mmproj_args while loop
 
 **What to implement:**
 1. In `verify.rs`, replace both `std::process::exit(1)` calls (lines 146 and 308) with `Err(anyhow::anyhow!("Verification failed: {} files failed", total_bad))`. Update the caller in `lib.rs` to handle this error and print it to stderr before exiting.
@@ -247,21 +247,21 @@ The CLI has two critical bugs: cmd_verify calls std::process::exit(1) directly i
 **Steps:**
 - [ ] Extract verification logic from `cmd_verify()` into a separate `fn verify_files(conn: &Connection, model_id: i64) -> Result<VerificationResult>` that can be unit-tested. The VerificationResult struct contains counts of passed/failed files.
 - [ ] Write failing test for verify_files — mock file system with known hash mismatches (use tempfile::tempdir), verify the function returns correct pass/fail counts
-- [ ] Run `cargo test --package koji-cli -- commands::model::verify`
+- [ ] Run `cargo test --package tama-cli -- commands::model::verify`
   - Did it fail? If passed, fix the test.
 - [ ] Refactor verify.rs to extract verification logic into a testable function; replace exit(1) with Err return
 - [ ] Update lib.rs caller to handle the error and print to stderr
 - [ ] Write failing test for server rm — create a server config with name != repo_id, call cmd_server_rm, verify the correct config is deleted
-- [ ] Run `cargo test --package koji-cli`
+- [ ] Run `cargo test --package tama-cli`
   - Did it fail? If passed, fix the test.
 - [ ] Fix model config deletion in `rm.rs` to match by config name
-- [ ] Delete `config/migrate/tests.rs` and run `cargo check --package koji-core`
+- [ ] Delete `config/migrate/tests.rs` and run `cargo check --package tama-core`
   - Did compilation succeed? If not, check for any references to this file.
 - [ ] Clean up dead code annotations in `migrate/mod.rs`
 - [ ] Replace while loop with retain-based approach in `cleanup_stale_mmproj_args`
-- [ ] Run `cargo test --package koji-cli`
+- [ ] Run `cargo test --package tama-cli`
   - Did all tests pass? If not, fix failures before continuing.
-- [ ] Run `cargo test --package koji-core`
+- [ ] Run `cargo test --package tama-core`
   - Did all tests pass? If not, fix failures before continuing.
 - [ ] Run `cargo fmt --all`
   - Did it succeed? If not, fix and re-run.
@@ -285,29 +285,29 @@ The CLI has two critical bugs: cmd_verify calls std::process::exit(1) directly i
 The web server lacks graceful shutdown, the proxy handler silently swallows body errors, job management has zombie process issues and broadcast channel blocking, and there's no global error handling middleware. These are grouped because they all affect server stability and lifecycle management.
 
 **Files:**
-- Modify: `crates/koji-web/src/server.rs` — implement graceful shutdown with signal handler; add catch_panic middleware; fix silent body error swallowing in proxy_koji
-- Modify: `crates/koji-web/src/jobs.rs` — after SIGKILL, call waitpid() to reap zombies; replace blocking send() with try_send() or send_timeout() in append_log
-- Modify: `crates/koji-web/src/lib.rs` — handle EventSource creation failure gracefully instead of .expect() panic
+- Modify: `crates/tama-web/src/server.rs` — implement graceful shutdown with signal handler; add catch_panic middleware; fix silent body error swallowing in proxy_tama
+- Modify: `crates/tama-web/src/jobs.rs` — after SIGKILL, call waitpid() to reap zombies; replace blocking send() with try_send() or send_timeout() in append_log
+- Modify: `crates/tama-web/src/lib.rs` — handle EventSource creation failure gracefully instead of .expect() panic
 
 **What to implement:**
-1. In `server.rs`, implement graceful shutdown: add a `shutdown_signal()` function that listens for SIGINT/SIGTERM using tokio::signal. Pass this to `axum::serve(listener, app).with_graceful_shutdown(shutdown_signal())`. Before shutdown completes, trigger cleanup of jobs (cancel all active tasks), close SSE channels, and kill child processes. Add `.layer(middleware::from_fn_with_state(state.clone(), |req, next, state| async move { match next.run(req).await { Ok(resp) => Ok(resp), Err(e) => { tracing::error!(error = %e, "Handler error"); Ok(StatusCode::INTERNAL_SERVER_ERROR.into_response()) } } }))` or use `tower_http::catch_panic` layer. Fix proxy_koji body handling: replace `unwrap_or_default()` with proper error check — if `to_bytes` returns an Err, return 400 Bad Request.
+1. In `server.rs`, implement graceful shutdown: add a `shutdown_signal()` function that listens for SIGINT/SIGTERM using tokio::signal. Pass this to `axum::serve(listener, app).with_graceful_shutdown(shutdown_signal())`. Before shutdown completes, trigger cleanup of jobs (cancel all active tasks), close SSE channels, and kill child processes. Add `.layer(middleware::from_fn_with_state(state.clone(), |req, next, state| async move { match next.run(req).await { Ok(resp) => Ok(resp), Err(e) => { tracing::error!(error = %e, "Handler error"); Ok(StatusCode::INTERNAL_SERVER_ERROR.into_response()) } } }))` or use `tower_http::catch_panic` layer. Fix proxy_tama body handling: replace `unwrap_or_default()` with proper error check — if `to_bytes` returns an Err, return 400 Bad Request.
 2. In `jobs.rs`, after sending SIGKILL to each child process, call `waitpid(pid, None)` (via nix crate) to reap the zombie. Replace `log_tx.send()` with `log_tx.try_send()` in append_log — if try_send fails (channel full or no receivers), log a warning and skip that line. In finish(), after releasing the active slot, check if broadcast send succeeded; if not, log a critical warning.
 3. In `lib.rs`, replace the `.expect()` on EventSource creation with graceful error handling: show an offline indicator in the UI and retry periodically.
 
 **Steps:**
 - [ ] Write failing test for graceful shutdown — start server, send SIGINT, verify all spawned tasks complete before server exits
   - Note: This requires integration-style testing; may need to use tokio::spawn + signal simulation
-- [ ] Run `cargo test --package koji-web --test server_test`
+- [ ] Run `cargo test --package tama-web --test server_test`
   - Did it fail? If passed, fix the test.
 - [ ] Implement graceful shutdown in `server.rs` with signal handler and cleanup sequence
 - [ ] Add catch_panic error handling middleware to router
-- [ ] Fix proxy_koji body error handling — return 400 on extraction failure instead of silently defaulting to empty body
+- [ ] Fix proxy_tama body error handling — return 400 on extraction failure instead of silently defaulting to empty body
 - [ ] Write failing test for zombie processes — spawn a child, kill it with SIGKILL, verify waitpid reaps it (no zombie state)
   - Note: Unix-only test; use #[cfg(unix)] attribute
 - [ ] Implement waitpid after SIGKILL in `jobs.rs`
 - [ ] Replace blocking send() with try_send() in append_log
 - [ ] Add EventSource error handling in `lib.rs` — show offline indicator and retry logic
-- [ ] Run `cargo test --package koji-web`
+- [ ] Run `cargo test --package tama-web`
   - Did all tests pass? If not, fix failures before continuing.
 - [ ] Run `cargo fmt --all`
   - Did it succeed? If not, fix and re-run.
@@ -339,7 +339,7 @@ Task 5 → (independent)
 Task 6 → depends on Task 1 (both modify server.rs)
 ```
 
-**Recommended execution order:** Run Tasks 2, 3, 4, 5 in any order (they're independent and touch different crates). Then run Task 1 (security fixes in koji-web), then Task 6 (server changes that overlap with Task 1's server.rs edits). Or sequentially: 1 → 2 → 3 → 4 → 5 → 6.
+**Recommended execution order:** Run Tasks 2, 3, 4, 5 in any order (they're independent and touch different crates). Then run Task 1 (security fixes in tama-web), then Task 6 (server changes that overlap with Task 1's server.rs edits). Or sequentially: 1 → 2 → 3 → 4 → 5 → 6.
 
 ## Estimated Effort
 

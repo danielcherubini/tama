@@ -1,8 +1,8 @@
 # Benchmarks Page Plan
 
-**Goal:** Add a web-based benchmarking page to koji-web that uses llama-bench to benchmark GGUF models with real-time progress via SSE, history persistence, and preset configurations.
+**Goal:** Add a web-based benchmarking page to tama-web that uses llama-bench to benchmark GGUF models with real-time progress via SSE, history persistence, and preset configurations.
 
-**Architecture:** Extend the existing job system with a new `Benchmark` job kind in `koji-web/src/jobs.rs`. Create a new `koji-core/src/bench/llama_bench.rs` module that wraps the llama-bench binary. Add REST API endpoints in a new `api/benchmarks.rs` module. Build a Leptos page at `/benchmarks` with configuration UI, live SSE progress display, and results table. Persist benchmark results via a new SQLite migration (v13) and query module following the existing pattern (`metrics_queries.rs`, `backend_queries.rs`).
+**Architecture:** Extend the existing job system with a new `Benchmark` job kind in `tama-web/src/jobs.rs`. Create a new `tama-core/src/bench/llama_bench.rs` module that wraps the llama-bench binary. Add REST API endpoints in a new `api/benchmarks.rs` module. Build a Leptos page at `/benchmarks` with configuration UI, live SSE progress display, and results table. Persist benchmark results via a new SQLite migration (v13) and query module following the existing pattern (`metrics_queries.rs`, `backend_queries.rs`).
 
 **Tech Stack:** Leptos 0.7 (WASM frontend), Axum (SSR backend), tokio (async subprocess), SQLite (history storage, migration-based), llama-bench binary (external tool).
 
@@ -11,17 +11,17 @@
 ### Task 1: Add SQLite Migration and Query Functions for Benchmark History
 
 **Context:**
-Koji uses a migration-based schema system in `migrations.rs` — new tables must be added as a new migration entry (incrementing `LATEST_VERSION`). Query functions live in separate files under `db/queries/` (e.g. `metrics_queries.rs`, `backend_queries.rs`). This task adds the benchmark history table and all CRUD query functions following this established pattern.
+Tama uses a migration-based schema system in `migrations.rs` — new tables must be added as a new migration entry (incrementing `LATEST_VERSION`). Query functions live in separate files under `db/queries/` (e.g. `metrics_queries.rs`, `backend_queries.rs`). This task adds the benchmark history table and all CRUD query functions following this established pattern.
 
 **Key references:**
-- `crates/koji-core/src/db/migrations.rs` — migration list, `LATEST_VERSION` constant currently at 12
-- `crates/koji-core/src/db/queries/mod.rs` — module re-exports
-- `crates/koji-core/src/db/queries/metrics_queries.rs` — example of a simple table with insert + select queries
+- `crates/tama-core/src/db/migrations.rs` — migration list, `LATEST_VERSION` constant currently at 12
+- `crates/tama-core/src/db/queries/mod.rs` — module re-exports
+- `crates/tama-core/src/db/queries/metrics_queries.rs` — example of a simple table with insert + select queries
 
 **Files:**
-- Create: `crates/koji-core/src/db/queries/benchmark_queries.rs`
-- Modify: `crates/koji-core/src/db/migrations.rs`
-- Modify: `crates/koji-core/src/db/queries/mod.rs`
+- Create: `crates/tama-core/src/db/queries/benchmark_queries.rs`
+- Modify: `crates/tama-core/src/db/migrations.rs`
+- Modify: `crates/tama-core/src/db/queries/mod.rs`
 
 **What to implement:**
 
@@ -63,7 +63,7 @@ Add a new entry to the migrations array, incrementing `LATEST_VERSION` from 12 t
 
 #### 1.2 Query module `benchmark_queries.rs`:
 
-Create `crates/koji-core/src/db/queries/benchmark_queries.rs` with these functions following the `metrics_queries.rs` pattern:
+Create `crates/tama-core/src/db/queries/benchmark_queries.rs` with these functions following the `metrics_queries.rs` pattern:
 
 ```rust
 //! Benchmark history database query functions.
@@ -205,12 +205,12 @@ pub use benchmark_queries::*;
 ```
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/db/queries/metrics_queries.rs` to understand the exact query pattern (parameter binding, transaction usage, query_map)
-- [ ] Create `crates/koji-core/src/db/queries/benchmark_queries.rs` with all functions above
-- [ ] Add `mod benchmark_queries;` and `pub use benchmark_queries::*;` to `crates/koji-core/src/db/queries/mod.rs`
+- [ ] Read `crates/tama-core/src/db/queries/metrics_queries.rs` to understand the exact query pattern (parameter binding, transaction usage, query_map)
+- [ ] Create `crates/tama-core/src/db/queries/benchmark_queries.rs` with all functions above
+- [ ] Add `mod benchmark_queries;` and `pub use benchmark_queries::*;` to `crates/tama-core/src/db/queries/mod.rs`
 - [ ] Increment `LATEST_VERSION` from 12 to 13 in `migrations.rs`
 - [ ] Add the v13 migration entry to the migrations array in `migrations.rs`
-- [ ] Run `cargo check --package koji-core`
+- [ ] Run `cargo check --package tama-core`
   - Did it succeed? If not, fix the failures and re-run before continuing.
 - [ ] Commit with message: "feat(db): add benchmarks table via migration v13"
 
@@ -220,28 +220,28 @@ pub use benchmark_queries::*;
 - [ ] `list_benchmarks` returns entries ordered by `created_at DESC`
 - [ ] `delete_benchmark` removes a row by id
 - [ ] Migration is idempotent (running twice doesn't error)
-- [ ] All existing DB tests still pass (`cargo test --package koji-core db`)
+- [ ] All existing DB tests still pass (`cargo test --package tama-core db`)
 
 ---
 
-### Task 2: Create llama-bench Runner Module in koji-core
+### Task 2: Create llama-bench Runner Module in tama-core
 
 **Context:**
-The existing `koji-core/src/bench/` module has core types (`BenchConfig`, `BenchReport`, `BenchSummary`, etc.) and an HTTP-based runner (`runner.rs`). We need a new submodule that wraps the llama-bench binary. This module detects the binary, builds CLI arguments, executes the benchmark, parses JSON output, and returns a `BenchReport`. It integrates with the existing `ProgressSink` trait for progress streaming.
+The existing `tama-core/src/bench/` module has core types (`BenchConfig`, `BenchReport`, `BenchSummary`, etc.) and an HTTP-based runner (`runner.rs`). We need a new submodule that wraps the llama-bench binary. This module detects the binary, builds CLI arguments, executes the benchmark, parses JSON output, and returns a `BenchReport`. It integrates with the existing `ProgressSink` trait for progress streaming.
 
 **Key references:**
-- `crates/koji-core/src/bench/mod.rs` — existing types (`BenchConfig`, `BenchReport`, `BenchSummary`, `ModelInfo`)
-- `crates/koji-core/src/bench/runner.rs` — existing HTTP-based runner for patterns
-- `crates/koji-core/src/backends/mod.rs` — `ProgressSink` trait definition
-- `crates/koji-core/src/config/resolve/mod.rs` — `resolve_backend_path()` function
+- `crates/tama-core/src/bench/mod.rs` — existing types (`BenchConfig`, `BenchReport`, `BenchSummary`, `ModelInfo`)
+- `crates/tama-core/src/bench/runner.rs` — existing HTTP-based runner for patterns
+- `crates/tama-core/src/backends/mod.rs` — `ProgressSink` trait definition
+- `crates/tama-core/src/config/resolve/mod.rs` — `resolve_backend_path()` function
 
 **Files:**
-- Create: `crates/koji-core/src/bench/llama_bench.rs`
-- Modify: `crates/koji-core/src/bench/mod.rs` (add `pub mod llama_bench;`)
+- Create: `crates/tama-core/src/bench/llama_bench.rs`
+- Modify: `crates/tama-core/src/bench/mod.rs` (add `pub mod llama_bench;`)
 
 **What to implement:**
 
-New file `crates/koji-core/src/bench/llama_bench.rs`:
+New file `crates/tama-core/src/bench/llama_bench.rs`:
 
 ```rust
 //! llama-bench integration for benchmarking GGUF files directly.
@@ -517,7 +517,7 @@ pub async fn run_llama_bench(
                     .map(|f| {
                         // Build full path: model storage dir + filename
                         let config_dir = db_dir;
-                        // Model files are stored in the koji data directory
+                        // Model files are stored in the tama data directory
                         // The path is relative to the model's storage location
                         // We need to find the actual file — check common locations
                         let model_data_dir = config_dir.join("models");
@@ -624,10 +624,10 @@ pub async fn run_llama_bench(
 ```
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/bench/runner.rs` to understand the existing runner patterns (how it resolves configs, spawns processes)
-- [ ] Create `crates/koji-core/src/bench/llama_bench.rs` with all functions above
-- [ ] Add `pub mod llama_bench;` to `crates/koji-core/src/bench/mod.rs`
-- [ ] Run `cargo check --package koji-core`
+- [ ] Read `crates/tama-core/src/bench/runner.rs` to understand the existing runner patterns (how it resolves configs, spawns processes)
+- [ ] Create `crates/tama-core/src/bench/llama_bench.rs` with all functions above
+- [ ] Add `pub mod llama_bench;` to `crates/tama-core/src/bench/mod.rs`
+- [ ] Run `cargo check --package tama-core`
   - Did it succeed? If not, fix the failures and re-run before continuing.
 - [ ] Commit with message: "feat(bench): add llama-bench runner module"
 
@@ -640,24 +640,24 @@ pub async fn run_llama_bench(
 
 ---
 
-### Task 3: Add Benchmark API Endpoints in koji-web
+### Task 3: Add Benchmark API Endpoints in tama-web
 
 **Context:**
 REST API endpoints that the frontend calls. These accept benchmark configuration, run llama-bench as a background job (using the existing job system), stream progress via SSE, and persist results to the database. Follows the pattern of `api/backends/jobs.rs` for job submission and SSE streaming.
 
 **Key references:**
-- `crates/koji-web/src/api/backends/jobs.rs` — job submission + SSE patterns
-- `crates/koji-web/src/api/backends/types.rs` — DTO patterns, `job_to_active_dto` helper
-- `crates/koji-web/Cargo.toml` — `async-stream` is already included in the `ssr` feature
+- `crates/tama-web/src/api/backends/jobs.rs` — job submission + SSE patterns
+- `crates/tama-web/src/api/backends/types.rs` — DTO patterns, `job_to_active_dto` helper
+- `crates/tama-web/Cargo.toml` — `async-stream` is already included in the `ssr` feature
 
 **Files:**
-- Create: `crates/koji-web/src/api/benchmarks.rs`
-- Modify: `crates/koji-web/src/api.rs` (add `pub mod benchmarks;`)
-- Modify: `crates/koji-web/src/server.rs` (add route imports and routes)
+- Create: `crates/tama-web/src/api/benchmarks.rs`
+- Modify: `crates/tama-web/src/api.rs` (add `pub mod benchmarks;`)
+- Modify: `crates/tama-web/src/server.rs` (add route imports and routes)
 
 **What to implement:**
 
-New file `crates/koji-web/src/api/benchmarks.rs`:
+New file `crates/tama-web/src/api/benchmarks.rs`:
 
 ```rust
 //! Benchmark API endpoints.
@@ -768,7 +768,7 @@ async fn run_benchmark_inner(
     req: &BenchmarkRunRequest,
     config_path: &Option<std::path::PathBuf>,
 ) -> Result<()> {
-    use koji_core::bench::llama_bench::{self, LlamaBenchConfig};
+    use tama_core::bench::llama_bench::{self, LlamaBenchConfig};
 
     // Load config
     let config_dir = config_path.as_ref()
@@ -776,7 +776,7 @@ async fn run_benchmark_inner(
         .context("Cannot determine config directory")?;
 
     let config = tokio::task::spawn_blocking(move || {
-        koji_core::config::Config::load_from(config_dir)
+        tama_core::config::Config::load_from(config_dir)
     })
     .await??;
 
@@ -787,7 +787,7 @@ async fn run_benchmark_inner(
         job: Arc<crate::jobs::Job>,
         jobs: Arc<JobManager>,
     }
-    impl koji_core::backends::ProgressSink for BenchProgressSink {
+    impl tama_core::backends::ProgressSink for BenchProgressSink {
         fn log(&self, line: &str) {
             let job = self.job.clone();
             let jobs = self.jobs.clone();
@@ -818,11 +818,11 @@ async fn run_benchmark_inner(
     let report = llama_bench::run_llama_bench(&config, &req.model_id, &bench_config, &sink).await?;
 
     // Store results in database
-    let db_dir = koji_core::config::Config::config_dir()?;
-    let OpenResult { conn, .. } = koji_core::db::open(&db_dir)?;
+    let db_dir = tama_core::config::Config::config_dir()?;
+    let OpenResult { conn, .. } = tama_core::db::open(&db_dir)?;
 
     // Get model display name from config
-    let model_configs = koji_core::db::load_model_configs(&conn)?;
+    let model_configs = tama_core::db::load_model_configs(&conn)?;
     let display_name = model_configs.get(&req.model_id)
         .and_then(|mc| mc.display_name.clone());
 
@@ -842,7 +842,7 @@ async fn run_benchmark_inner(
     let vram = crate::gpu::query_vram();
 
     // Insert into database
-    let _id = koji_core::db::queries::insert_benchmark(
+    let _id = tama_core::db::queries::insert_benchmark(
         &conn,
         &req.model_id,
         display_name.as_deref(),
@@ -981,7 +981,7 @@ pub async fn benchmark_events(
 pub async fn list_benchmark_history(
     State(_state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    let db_dir = match koji_core::config::Config::config_dir() {
+    let db_dir = match tama_core::config::Config::config_dir() {
         Ok(d) => d,
         Err(e) => {
             return (
@@ -992,8 +992,8 @@ pub async fn list_benchmark_history(
     };
 
     let entries = match tokio::task::spawn_blocking(move || {
-        let OpenResult { conn, .. } = koji_core::db::open(&db_dir)?;
-        koji_core::db::queries::list_benchmarks(&conn)
+        let OpenResult { conn, .. } = tama_core::db::open(&db_dir)?;
+        tama_core::db::queries::list_benchmarks(&conn)
     }).await {
         Ok(Ok(entries)) => entries,
         Ok(Err(e)) => {
@@ -1037,7 +1037,7 @@ pub async fn delete_benchmark(
     State(_state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
-    let db_dir = match koji_core::config::Config::config_dir() {
+    let db_dir = match tama_core::config::Config::config_dir() {
         Ok(d) => d,
         Err(e) => {
             return (
@@ -1048,8 +1048,8 @@ pub async fn delete_benchmark(
     };
 
     match tokio::task::spawn_blocking(move || {
-        let OpenResult { conn, .. } = koji_core::db::open(&db_dir)?;
-        koji_core::db::queries::delete_benchmark(&conn, id)
+        let OpenResult { conn, .. } = tama_core::db::open(&db_dir)?;
+        tama_core::db::queries::delete_benchmark(&conn, id)
     }).await {
         Ok(Ok(())) => Json(serde_json::json!({"ok": true})).into_response(),
         Ok(Err(e)) => (
@@ -1064,10 +1064,10 @@ pub async fn delete_benchmark(
 }
 ```
 
-Modify `crates/koji-web/src/api.rs`:
+Modify `crates/tama-web/src/api.rs`:
 - Add `pub mod benchmarks;` to the module declarations
 
-Modify `crates/koji-web/src/server.rs`:
+Modify `crates/tama-web/src/server.rs`:
 - Add import: `use crate::api::benchmarks::{run_benchmark, get_benchmark_result, benchmark_events, list_benchmark_history, delete_benchmark};`
 - Add routes to the main router (before `.merge(backend_routes)`):
   ```rust
@@ -1079,12 +1079,12 @@ Modify `crates/koji-web/src/server.rs`:
   ```
 
 **Steps:**
-- [ ] Read `crates/koji-web/src/api/backends/jobs.rs` to understand the job submission + SSE patterns
-- [ ] Create `crates/koji-web/src/api/benchmarks.rs` with all handlers above
-- [ ] Add `pub mod benchmarks;` to `crates/koji-web/src/api.rs`
-- [ ] Add route imports and routes to `crates/koji-web/src/server.rs`
-- [ ] Verify `async-stream`, `futures`, and `tokio-stream` are in the `ssr` feature deps of `crates/koji-web/Cargo.toml` (they should be — `async-stream` is already there, add `futures` and `tokio-stream` if missing)
-- [ ] Run `cargo check --package koji-web --features ssr`
+- [ ] Read `crates/tama-web/src/api/backends/jobs.rs` to understand the job submission + SSE patterns
+- [ ] Create `crates/tama-web/src/api/benchmarks.rs` with all handlers above
+- [ ] Add `pub mod benchmarks;` to `crates/tama-web/src/api.rs`
+- [ ] Add route imports and routes to `crates/tama-web/src/server.rs`
+- [ ] Verify `async-stream`, `futures`, and `tokio-stream` are in the `ssr` feature deps of `crates/tama-web/Cargo.toml` (they should be — `async-stream` is already there, add `futures` and `tokio-stream` if missing)
+- [ ] Run `cargo check --package tama-web --features ssr`
   - Did it succeed? If not, fix the failures and re-run before continuing.
 - [ ] Commit with message: "feat(api): add benchmark REST API endpoints"
 
@@ -1098,25 +1098,25 @@ Modify `crates/koji-web/src/server.rs`:
 
 ---
 
-### Task 4: Add Benchmark Page and Components to koji-web Frontend
+### Task 4: Add Benchmark Page and Components to tama-web Frontend
 
 **Context:**
 The Leptos frontend page at `/benchmarks`. Uses the same patterns as `pages/dashboard.rs`: SSE for real-time progress, actions for form submission, signals for state management. Must NOT use `chrono` (not available in WASM CSR target) — use `web_sys::Date` or simple string formatting instead.
 
 **Key references:**
-- `crates/koji-web/src/pages/dashboard.rs` — SSE connection, Action usage, signal patterns
-- `crates/koji-web/src/components/sidebar.rs` — nav link pattern
-- `crates/koji-web/Cargo.toml` — `web_sys` features already include `EventSource`, `HtmlSelectElement`, etc.
+- `crates/tama-web/src/pages/dashboard.rs` — SSE connection, Action usage, signal patterns
+- `crates/tama-web/src/components/sidebar.rs` — nav link pattern
+- `crates/tama-web/Cargo.toml` — `web_sys` features already include `EventSource`, `HtmlSelectElement`, etc.
 
 **Files:**
-- Create: `crates/koji-web/src/pages/benchmarks.rs`
-- Modify: `crates/koji-web/src/pages/mod.rs` (add `pub mod benchmarks;`)
-- Modify: `crates/koji-web/src/lib.rs` (add `<Route path=path!("/benchmarks") view=pages::benchmarks::Benchmarks />`)
-- Modify: `crates/koji-web/src/components/sidebar.rs` (add nav link)
+- Create: `crates/tama-web/src/pages/benchmarks.rs`
+- Modify: `crates/tama-web/src/pages/mod.rs` (add `pub mod benchmarks;`)
+- Modify: `crates/tama-web/src/lib.rs` (add `<Route path=path!("/benchmarks") view=pages::benchmarks::Benchmarks />`)
+- Modify: `crates/tama-web/src/components/sidebar.rs` (add nav link)
 
 **What to implement:**
 
-New file `crates/koji-web/src/pages/benchmarks.rs`:
+New file `crates/tama-web/src/pages/benchmarks.rs`:
 
 ```rust
 //! Benchmarks page — run llama-bench benchmarks from the web UI.
@@ -1251,7 +1251,7 @@ pub fn Benchmarks() -> impl IntoView {
     {
         let available_models = available_models;
         spawn_local(async move {
-            if let Ok(resp) = gloo_net::http::Request::get("/koji/v1/models").send().await {
+            if let Ok(resp) = gloo_net::http::Request::get("/tama/v1/models").send().await {
                 if let Ok(models) = resp.json::<Vec<serde_json::Value>>().await {
                     let model_list: Vec<(String, String, String)> = models.iter().filter_map(|m| {
                         let id = m.get("id")?.as_str()?.to_string();
@@ -1628,13 +1628,13 @@ pub fn Benchmarks() -> impl IntoView {
 }
 ```
 
-Modify `crates/koji-web/src/pages/mod.rs`:
+Modify `crates/tama-web/src/pages/mod.rs`:
 - Add `pub mod benchmarks;`
 
-Modify `crates/koji-web/src/lib.rs`:
+Modify `crates/tama-web/src/lib.rs`:
 - Add route: `<Route path=path!("/benchmarks") view=pages::benchmarks::Benchmarks />`
 
-Modify `crates/koji-web/src/components/sidebar.rs`:
+Modify `crates/tama-web/src/components/sidebar.rs`:
 - Add nav link between "Downloads" and "Config":
   ```html
   <A href="/benchmarks" attr:class="sidebar-item" attr:data-tooltip="Benchmarks" on:click=move |_| mobile_open.set(false)>
@@ -1644,19 +1644,19 @@ Modify `crates/koji-web/src/components/sidebar.rs`:
   ```
 
 **Steps:**
-- [ ] Read `crates/koji-web/src/pages/dashboard.rs` to understand Leptos patterns used in the project (SSE connection, Action usage, signal management)
-- [ ] Create `crates/koji-web/src/pages/benchmarks.rs` with the full component
-- [ ] Add `pub mod benchmarks;` to `crates/koji-web/src/pages/mod.rs`
-- [ ] Add route to `crates/koji-web/src/lib.rs`
-- [ ] Add nav link to `crates/koji-web/src/components/sidebar.rs`
-- [ ] Run `cargo check --package koji-web` (for CSR) and `cargo check --package koji-web --features ssr` (for SSR)
+- [ ] Read `crates/tama-web/src/pages/dashboard.rs` to understand Leptos patterns used in the project (SSE connection, Action usage, signal management)
+- [ ] Create `crates/tama-web/src/pages/benchmarks.rs` with the full component
+- [ ] Add `pub mod benchmarks;` to `crates/tama-web/src/pages/mod.rs`
+- [ ] Add route to `crates/tama-web/src/lib.rs`
+- [ ] Add nav link to `crates/tama-web/src/components/sidebar.rs`
+- [ ] Run `cargo check --package tama-web` (for CSR) and `cargo check --package tama-web --features ssr` (for SSR)
   - Did it succeed? If not, fix the failures and re-run before continuing.
 - [ ] Commit with message: "feat(web): add benchmarks page with configuration UI and results display"
 
 **Acceptance criteria:**
 - [ ] `/benchmarks` route renders the benchmark page
 - [ ] Sidebar shows "Benchmarks" nav link with 📊 icon
-- [ ] Model dropdown populates from `/koji/v1/models` API
+- [ ] Model dropdown populates from `/tama/v1/models` API
 - [ ] Preset buttons correctly update all configuration fields
 - [ ] Run button is disabled when no model selected
 - [ ] SSE connection streams log lines to the progress panel
@@ -1671,7 +1671,7 @@ Modify `crates/koji-web/src/components/sidebar.rs`:
 The benchmarks page needs specific styling for preset buttons, log panel, results table, and grid layout. Find the existing CSS file and add benchmark-specific styles following the project's naming conventions.
 
 **Files:**
-- Find the CSS file by searching for `*.css` in `crates/koji-web/src/` or `crates/koji-web/dist/`
+- Find the CSS file by searching for `*.css` in `crates/tama-web/src/` or `crates/tama-web/dist/`
 - Modify: that CSS file
 
 **What to implement:**
@@ -1683,10 +1683,10 @@ Add CSS rules for:
 5. Benchmark-specific table styling
 
 **Steps:**
-- [ ] Find the project's CSS file: `find crates/koji-web/src -name "*.css" -o -name "*.scss"` or check `dist/` directory
+- [ ] Find the project's CSS file: `find crates/tama-web/src -name "*.css" -o -name "*.scss"` or check `dist/` directory
 - [ ] Read the existing CSS to understand naming conventions and CSS variable usage
 - [ ] Add benchmark-specific styles following the existing patterns
-- [ ] Run `cargo check --package koji-web` to verify nothing broke
+- [ ] Run `cargo check --package tama-web` to verify nothing broke
 - [ ] Commit with message: "style: add benchmarks page CSS"
 
 **Acceptance criteria:**
@@ -1703,24 +1703,24 @@ Add CSS rules for:
 Verify that all pieces work together: DB migration creates correctly, llama-bench runner detects the binary, API endpoints respond properly, and the frontend renders and interacts correctly.
 
 **Files:**
-- Modify: `crates/koji-core/src/db/queries/benchmark_queries.rs` (add tests)
-- Modify: `crates/koji-core/src/bench/llama_bench.rs` (add tests)
+- Modify: `crates/tama-core/src/db/queries/benchmark_queries.rs` (add tests)
+- Modify: `crates/tama-core/src/bench/llama_bench.rs` (add tests)
 
 **What to implement:**
 Unit tests for the new DB functions and the llama-bench argument builder.
 
 **Steps:**
-- [ ] Add tests to `crates/koji-core/src/db/queries/benchmark_queries.rs`:
+- [ ] Add tests to `crates/tama-core/src/db/queries/benchmark_queries.rs`:
   - Test `insert_benchmark` + `list_benchmarks` round-trip
   - Test `delete_benchmark` removes entry
   - Use `open_in_memory()` for in-memory SQLite testing
-- [ ] Add tests to `crates/koji-core/src/bench/llama_bench.rs`:
+- [ ] Add tests to `crates/tama-core/src/bench/llama_bench.rs`:
   - Test `build_args` with single values (should use `-p 512`, not `-p 512,512`)
   - Test `build_args` with multiple values (should use `-p 128,256,512`)
   - Test `build_args` with threads Some vs None
   - Test `build_args` with ngl_range Some vs None
   - Test `parse_bench_json` with sample llama-bench output
-- [ ] Run `cargo test --package koji-core bench` and `cargo test --package koji-core db::queries::benchmark`
+- [ ] Run `cargo test --package tama-core bench` and `cargo test --package tama-core db::queries::benchmark`
   - Did all tests pass? If not, fix the failures and re-run before continuing.
 - [ ] Run `cargo check --workspace`
   - Did it succeed? If not, fix and re-run before continuing.

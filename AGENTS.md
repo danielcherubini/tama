@@ -1,6 +1,6 @@
-# AGENTS.md - Koji Development Guide
+# AGENTS.md - Tama Development Guide
 
-This file documents build commands, code style, and conventions for the Koji project.
+This file documents build commands, code style, and conventions for the Tama project.
 
 ## Build & Testing
 
@@ -17,16 +17,16 @@ cargo build --release --workspace
 cargo test --workspace
 
 # Run tests for a specific crate
-cargo test --package koji-core
+cargo test --package tama-core
 
 # Run a single test
-cargo test --package koji-core test_function_name
+cargo test --package tama-core test_function_name
 
 # Run a single test with full output
-cargo test --package koji-core test_function_name -- --nocapture
+cargo test --package tama-core test_function_name -- --nocapture
 
 # Run tests with filtering
-cargo test --package koji-core -- backends::registry::tests::test_add
+cargo test --package tama-core -- backends::registry::tests::test_add
 
 # Check formatting, clippy, and tests
 cargo check --workspace
@@ -142,11 +142,11 @@ fn test_concurrent_access() {
 ## Project Structure
 
 ```text
-koji/
+tama/
 ├── crates/
-│   ├── koji-core/      # Core library (types, models, logic)
-│   ├── koji-cli/       # CLI application
-│   └── koji-mock/      # Mock utilities for testing
+│   ├── tama-core/      # Core library (types, models, logic)
+│   ├── tama-cli/       # CLI application
+│   └── tama-mock/      # Mock utilities for testing
 ├── config/              # Configuration templates
 ├── docs/                # Documentation
 ├── installer/           # Windows installer scripts
@@ -186,10 +186,10 @@ When bumping the version, update **all** of these files:
 | File | Field |
 |------|-------|
 | `Cargo.toml` | `[workspace.package] version` |
-| `crates/koji-core/Cargo.toml` | `[package] version` |
-| `crates/koji-cli/Cargo.toml` | `[package] version` |
-| `crates/koji-mock/Cargo.toml` | `[package] version` |
-| `crates/koji-web/Cargo.toml` | `[package] version` |
+| `crates/tama-core/Cargo.toml` | `[package] version` |
+| `crates/tama-cli/Cargo.toml` | `[package] version` |
+| `crates/tama-mock/Cargo.toml` | `[package] version` |
+| `crates/tama-web/Cargo.toml` | `[package] version` |
 
 After bumping, run `cargo fmt --all` before committing — CI will fail on formatting errors.
 

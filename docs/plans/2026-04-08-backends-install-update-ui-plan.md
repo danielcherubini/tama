@@ -1,10 +1,10 @@
 # Backends Install / Update UI — Implementation Plan
 
-**Goal:** Surface the existing `koji-core` backend install/update/remove flow in the web UI with live build logs, so users never have to drop to the terminal.
+**Goal:** Surface the existing `tama-core` backend install/update/remove flow in the web UI with live build logs, so users never have to drop to the terminal.
 
-**Architecture:** A new in-memory `JobManager` in `koji-web::AppState` runs install/update jobs spawned via new `install_backend_with_progress` / `update_backend_with_progress` wrappers in `koji-core`. The UI shows two cards (`llama_cpp`, `ik_llama`) keyed off the existing `BackendRegistry`. Live logs stream over SSE with a head+tail replay buffer. New routes are origin-checked and live behind a non-permissive CORS layer.
+**Architecture:** A new in-memory `JobManager` in `tama-web::AppState` runs install/update jobs spawned via new `install_backend_with_progress` / `update_backend_with_progress` wrappers in `tama-core`. The UI shows two cards (`llama_cpp`, `ik_llama`) keyed off the existing `BackendRegistry`. Live logs stream over SSE with a head+tail replay buffer. New routes are origin-checked and live behind a non-permissive CORS layer.
 
-**Tech Stack:** Rust, axum 0.7, Leptos, tokio (broadcast + RwLock), async-stream, SQLite via rusqlite (existing `koji-core::db`).
+**Tech Stack:** Rust, axum 0.7, Leptos, tokio (broadcast + RwLock), async-stream, SQLite via rusqlite (existing `tama-core::db`).
 
 **Spec reference:** `docs/plans/2026-04-08-backends-install-update-ui-spec.md` (commit `0428aab`). Read it before any task — every section reference (§N) below points there.
 
@@ -17,30 +17,30 @@
 - **Workspace commands:** `cargo check --workspace`, `cargo clippy --workspace -- -D warnings`, `cargo fmt --all`, `cargo test --workspace`. These are the gates for every task. **Before committing, also run `cargo fmt --all -- --check`** (the spec §11 acceptance criterion) to verify the formatting is stable, not just that your local formatter rewrote files.
 - **TDD:** Write the failing test first, run it, see it fail with the expected error, then implement, then re-run.
 - **Commit per task.** Do not stack multiple tasks into one commit.
-- **Wire DTOs are snake_case** (§4.1). Never expose `koji-core` enum serde shapes directly through the HTTP API.
+- **Wire DTOs are snake_case** (§4.1). Never expose `tama-core` enum serde shapes directly through the HTTP API.
 - **Do not modify `InstallOptions`.** No new fields, no derive changes, no `Default` impl. (§6.2 spells out why.)
-- **Do not change CLI behavior.** `koji backend install/update/list/remove` must work identically before and after.
+- **Do not change CLI behavior.** `tama backend install/update/list/remove` must work identically before and after.
 
 ---
 
-### Task 1: Lift shared backend helpers and constants into `koji-core`
+### Task 1: Lift shared backend helpers and constants into `tama-core`
 
 **Context:**
-The CLI (`crates/koji-cli/src/commands/backend.rs`) has private helpers `backends_dir()` and an inline `canonicalize → starts_with` safety check inside `cmd_remove`. The web API needs the same logic, so they must move into `koji-core`. We also need to introduce the `ProgressSink` trait that subsequent tasks will use, and export the `SUPPORTED_CUDA_VERSIONS` constant from `urls.rs` so the UI/API and the URL mapper share a single source of truth. CLI code is then refactored to use the lifted helpers — this is the only CLI behavior change in the entire feature, and it must be a pure refactor (no semantic difference).
+The CLI (`crates/tama-cli/src/commands/backend.rs`) has private helpers `backends_dir()` and an inline `canonicalize → starts_with` safety check inside `cmd_remove`. The web API needs the same logic, so they must move into `tama-core`. We also need to introduce the `ProgressSink` trait that subsequent tasks will use, and export the `SUPPORTED_CUDA_VERSIONS` constant from `urls.rs` so the UI/API and the URL mapper share a single source of truth. CLI code is then refactored to use the lifted helpers — this is the only CLI behavior change in the entire feature, and it must be a pure refactor (no semantic difference).
 
 **Files:**
-- Modify: `crates/koji-core/src/backends/mod.rs`
-- Modify: `crates/koji-core/src/backends/installer/urls.rs`
-- Modify: `crates/koji-cli/src/commands/backend.rs`
-- Test: `crates/koji-core/src/backends/mod.rs` (unit tests at the bottom of the file under `#[cfg(test)] mod tests`)
-- Test: `crates/koji-core/src/backends/installer/urls.rs` (unit test at the bottom)
+- Modify: `crates/tama-core/src/backends/mod.rs`
+- Modify: `crates/tama-core/src/backends/installer/urls.rs`
+- Modify: `crates/tama-cli/src/commands/backend.rs`
+- Test: `crates/tama-core/src/backends/mod.rs` (unit tests at the bottom of the file under `#[cfg(test)] mod tests`)
+- Test: `crates/tama-core/src/backends/installer/urls.rs` (unit test at the bottom)
 
 **What to implement:**
 
-1. In `crates/koji-core/src/backends/mod.rs`:
+1. In `crates/tama-core/src/backends/mod.rs`:
    - Add `pub trait ProgressSink: Send + Sync { fn log(&self, line: &str); }`.
    - Add `pub struct NullSink;` with `impl ProgressSink for NullSink { fn log(&self, _line: &str) {} }`.
-   - Add `pub fn backends_dir() -> anyhow::Result<std::path::PathBuf>` that returns `Config::base_dir()?.join("backends")` — **exactly** the resolution used by the current CLI helper at `crates/koji-cli/src/commands/backend.rs:165-168`. Do **not** use `dirs::config_dir()`. Create the directory if missing (`std::fs::create_dir_all`).
+   - Add `pub fn backends_dir() -> anyhow::Result<std::path::PathBuf>` that returns `Config::base_dir()?.join("backends")` — **exactly** the resolution used by the current CLI helper at `crates/tama-cli/src/commands/backend.rs:165-168`. Do **not** use `dirs::config_dir()`. Create the directory if missing (`std::fs::create_dir_all`).
    - Add `pub fn safe_remove_installation(info: &BackendInfo) -> anyhow::Result<()>`. Behavior:
      - Take `info.path.parent()` (binary lives one level inside the per-backend dir).
      - `canonicalize()` it.
@@ -48,37 +48,37 @@ The CLI (`crates/koji-cli/src/commands/backend.rs`) has private helpers `backend
      - Assert the parent's canonical path starts with the canonical backends dir; otherwise return `anyhow::bail!("path is outside the managed backends directory")`.
      - `std::fs::remove_dir_all` the parent.
      - **Preserve the existing Windows `ErrorKind::PermissionDenied` handling** from `cmd_remove` (lines 561–584 at the time of writing): on Windows, retry once after a short delay if removal fails with `PermissionDenied`. Match the exact retry shape used in `cmd_remove` so behavior is identical.
-   - Re-export both functions and `ProgressSink` from `koji_core::backends`.
+   - Re-export both functions and `ProgressSink` from `tama_core::backends`.
 
-2. In `crates/koji-core/src/backends/installer/urls.rs`:
+2. In `crates/tama-core/src/backends/installer/urls.rs`:
    - Add `pub const SUPPORTED_CUDA_VERSIONS: &[&str] = &["11.1", "12.4", "13.1"];`.
    - Refactor `get_prebuilt_url`'s CUDA match arms (currently around lines 41-43) to iterate `SUPPORTED_CUDA_VERSIONS` so the constant is the single source of truth. If a refactor would meaningfully change behavior, just add the constant alongside the existing match and add a unit test asserting every version in the constant matches one of the arms — the refactor is a nice-to-have, the constant + test is the requirement.
 
-3. In `crates/koji-cli/src/commands/backend.rs`:
+3. In `crates/tama-cli/src/commands/backend.rs`:
    - Delete the local `fn backends_dir()` helper around line 165.
-   - `use koji_core::backends::{backends_dir, safe_remove_installation};`.
+   - `use tama_core::backends::{backends_dir, safe_remove_installation};`.
    - Replace the filesystem removal block in `cmd_remove` with a single call to `safe_remove_installation(&info)`. Keep the surrounding interactive `inquire::Confirm` prompt.
    - All other CLI behavior must be byte-identical.
 
 **Steps:**
-- [ ] Write a failing test `test_backends_dir_returns_config_subdir` in `crates/koji-core/src/backends/mod.rs` `#[cfg(test)]` module asserting `backends_dir()` returns a path ending in `/backends` and that the directory exists after the call.
+- [ ] Write a failing test `test_backends_dir_returns_config_subdir` in `crates/tama-core/src/backends/mod.rs` `#[cfg(test)]` module asserting `backends_dir()` returns a path ending in `/backends` and that the directory exists after the call.
 - [ ] Write a failing test `test_safe_remove_installation_rejects_outside_path` that constructs a `BackendInfo` whose `path` points to `/tmp/llama-server` (outside `backends_dir()`) and asserts `safe_remove_installation` returns an error containing `"outside the managed backends directory"`.
 - [ ] Write a failing test `test_supported_cuda_versions_all_map_to_urls` in `urls.rs` that iterates `SUPPORTED_CUDA_VERSIONS` and asserts each one produces a successful prebuilt URL via the existing URL helper.
-- [ ] Run `cargo test --package koji-core backends::`
+- [ ] Run `cargo test --package tama-core backends::`
   - All three tests should fail to compile (missing items). If they fail with a different error, stop and investigate.
-- [ ] Implement `ProgressSink`, `NullSink`, `backends_dir`, `safe_remove_installation` in `crates/koji-core/src/backends/mod.rs` and the `SUPPORTED_CUDA_VERSIONS` constant in `urls.rs`.
-- [ ] Run `cargo test --package koji-core backends::`
+- [ ] Implement `ProgressSink`, `NullSink`, `backends_dir`, `safe_remove_installation` in `crates/tama-core/src/backends/mod.rs` and the `SUPPORTED_CUDA_VERSIONS` constant in `urls.rs`.
+- [ ] Run `cargo test --package tama-core backends::`
   - All three new tests should pass. Existing backends tests must still pass.
-- [ ] Refactor `crates/koji-cli/src/commands/backend.rs`: delete local `backends_dir`, import the shared helpers, replace the removal block in `cmd_remove`.
+- [ ] Refactor `crates/tama-cli/src/commands/backend.rs`: delete local `backends_dir`, import the shared helpers, replace the removal block in `cmd_remove`.
 - [ ] Run `cargo test --workspace`
   - All workspace tests still pass. If any CLI test breaks, the refactor changed behavior — stop and reconcile.
 - [ ] Run `cargo fmt --all`.
 - [ ] Run `cargo clippy --workspace -- -D warnings`.
-- [ ] Commit: `feat(core): lift backends_dir and safe_remove_installation into koji-core`
+- [ ] Commit: `feat(core): lift backends_dir and safe_remove_installation into tama-core`
 
 **Acceptance criteria:**
-- [ ] `koji_core::backends::{backends_dir, safe_remove_installation, ProgressSink, NullSink}` are public.
-- [ ] `koji_core::backends::installer::urls::SUPPORTED_CUDA_VERSIONS` is public and has 3 entries.
+- [ ] `tama_core::backends::{backends_dir, safe_remove_installation, ProgressSink, NullSink}` are public.
+- [ ] `tama_core::backends::installer::urls::SUPPORTED_CUDA_VERSIONS` is public and has 3 entries.
 - [ ] CLI `cmd_remove` calls the shared helper; the local helper and inline safety check are gone.
 - [ ] The Windows `PermissionDenied` retry path is preserved in the lifted helper.
 - [ ] All workspace tests, clippy, and fmt pass.
@@ -91,12 +91,12 @@ The CLI (`crates/koji-cli/src/commands/backend.rs`) has private helpers `backend
 The web layer needs to capture install/update output as line-oriented events instead of letting it write to stdout. The spec (§6.2) explicitly forbids modifying `InstallOptions` because it derives `Debug` and has three call sites that don't use a `Default` impl. Instead, we add **wrapper functions** alongside the existing entry points. The original `install_backend` / `update_backend` become thin wrappers calling `_with_progress(..., None)`, so existing call sites compile unchanged. Inside the installer, `println!`s for high-level milestones become `emit(progress, ...)` calls. Spawned subprocesses (`git`, `cmake`, `make`/`ninja`) switch from `Stdio::inherit()` to `Stdio::piped()` and their lines are forwarded through the sink. Prebuilt downloads gain an optional progress parameter — when `Some`, `indicatif` is skipped entirely; when `None`, the existing CLI TTY bar is preserved unchanged.
 
 **Files:**
-- Modify: `crates/koji-core/src/backends/installer/mod.rs`
-- Modify: `crates/koji-core/src/backends/installer/source.rs`
-- Modify: `crates/koji-core/src/backends/installer/prebuilt.rs`
-- Modify: `crates/koji-core/src/backends/installer/download.rs`
-- Modify: `crates/koji-core/src/backends/updater.rs`
-- Test: `crates/koji-core/src/backends/installer/mod.rs` (`#[cfg(test)] mod tests`)
+- Modify: `crates/tama-core/src/backends/installer/mod.rs`
+- Modify: `crates/tama-core/src/backends/installer/source.rs`
+- Modify: `crates/tama-core/src/backends/installer/prebuilt.rs`
+- Modify: `crates/tama-core/src/backends/installer/download.rs`
+- Modify: `crates/tama-core/src/backends/updater.rs`
+- Test: `crates/tama-core/src/backends/installer/mod.rs` (`#[cfg(test)] mod tests`)
 
 **What to implement:**
 
@@ -137,23 +137,23 @@ The web layer needs to capture install/update output as line-oriented events ins
 - [ ] Write a failing test `test_install_backend_parity_with_null_progress` in `installer/mod.rs` tests that uses a `MockSink` (a struct with `Mutex<Vec<String>>`, implementing `ProgressSink`) and asserts `install_backend_with_progress(opts, None)` and `install_backend_with_progress(opts, Some(Arc::new(NullSink)))` both produce identical results on a mocked installer path. If the installer is hard to mock end-to-end, narrow the test to a helper function that exercises the `emit` routing directly.
 - [ ] Write a failing test `test_progress_sink_captures_milestone_lines` that calls the wrapper with a `MockSink` and asserts the captured lines include at least one expected milestone (e.g., contains `"Cloning"` or `"Downloading"` for the relevant code path). This test can use a feature-flag-gated helper that emits a fixed milestone if the full installer is too heavy to invoke.
 - [ ] Write a failing test `_assert_install_options_debug` in the same test module: `fn _assert<T: std::fmt::Debug>() {}; _assert::<InstallOptions>();`. This is a compile-time guard against accidentally adding non-Debug fields to `InstallOptions`.
-- [ ] Run `cargo test --package koji-core installer::mod::tests`
+- [ ] Run `cargo test --package tama-core installer::mod::tests`
   - Tests should fail to compile (missing wrapper / MockSink). Fix by implementing.
 - [ ] Implement `install_backend_with_progress`, the `emit` helper, and rewire `install_backend` as a thin wrapper. Add the `MockSink` helper inside the test module.
 - [ ] Implement `update_backend_with_progress` and rewire `update_backend`.
 - [ ] Update `source.rs` to accept and thread `progress`, switching to piped stdio when `Some`.
 - [ ] Update `download.rs` and `prebuilt.rs` to accept and thread `progress`, skipping `indicatif` when `Some`.
-- [ ] Run `cargo test --package koji-core`
+- [ ] Run `cargo test --package tama-core`
   - All tests pass, including the parity test and the Debug-derive smoke test.
 - [ ] Run `cargo build --workspace`
-  - Should succeed with zero changes to `koji-cli` files. If `koji-cli` fails to compile, you broke the wrapper invariant — fix the wrapper, do not edit CLI call sites.
-- [ ] **Manual sanity check (optional but recommended):** `cargo run -p koji-cli -- backend install llama_cpp` and confirm the TTY progress bar still appears. Skip if no GPU/network. The Debug test + parity test cover the regression surface.
+  - Should succeed with zero changes to `tama-cli` files. If `tama-cli` fails to compile, you broke the wrapper invariant — fix the wrapper, do not edit CLI call sites.
+- [ ] **Manual sanity check (optional but recommended):** `cargo run -p tama-cli -- backend install llama_cpp` and confirm the TTY progress bar still appears. Skip if no GPU/network. The Debug test + parity test cover the regression surface.
 - [ ] Run `cargo fmt --all` and `cargo clippy --workspace -- -D warnings`.
 - [ ] Commit: `feat(core): add install/update progress wrappers with piped child stdio`
 
 **Acceptance criteria:**
 - [ ] `install_backend_with_progress` and `update_backend_with_progress` are public; `install_backend` / `update_backend` remain in place as thin wrappers.
-- [ ] Zero call-site changes in `crates/koji-cli/`.
+- [ ] Zero call-site changes in `crates/tama-cli/`.
 - [ ] `InstallOptions` is unmodified — same fields, same derives.
 - [ ] Source builds with `progress: Some(...)` capture child stdout/stderr line-by-line into the sink.
 - [ ] Source builds with `progress: None` still inherit stdio (CLI behavior unchanged).
@@ -168,13 +168,13 @@ The web layer needs to capture install/update output as line-oriented events ins
 The web layer needs to track install/update jobs in memory: their status, captured logs, and a broadcast channel for live SSE subscribers. Per spec §6.1, only one job runs at a time; finished jobs are retained (max 8, FIFO) so the UI can fetch their final log; logs are stored as `log_head` (first 100 lines, never evicted) + `log_tail` (last 400 lines, FIFO) with a `log_dropped` counter for the gap. SSE subscribers replay head → marker → tail before attaching to the live broadcast channel (which lives in capacity 1024). This task implements the `JobManager` and `Job` types with thorough unit tests; the HTTP handlers and SSE wiring come in later tasks.
 
 **Files:**
-- Create: `crates/koji-web/src/jobs.rs`
-- Modify: `crates/koji-web/src/lib.rs` (to declare the new module; check if it's `lib.rs` or `main.rs` — `koji-web` is a binary+lib crate, the module declaration goes wherever existing `mod api;` etc. live)
-- Test: `crates/koji-web/src/jobs.rs` (`#[cfg(test)] mod tests` at bottom)
+- Create: `crates/tama-web/src/jobs.rs`
+- Modify: `crates/tama-web/src/lib.rs` (to declare the new module; check if it's `lib.rs` or `main.rs` — `tama-web` is a binary+lib crate, the module declaration goes wherever existing `mod api;` etc. live)
+- Test: `crates/tama-web/src/jobs.rs` (`#[cfg(test)] mod tests` at bottom)
 
 **What to implement:**
 
-In `crates/koji-web/src/jobs.rs`:
+In `crates/tama-web/src/jobs.rs`:
 
 ```rust
 use std::collections::{HashMap, VecDeque};
@@ -207,7 +207,7 @@ pub struct JobState {
 pub struct Job {
     pub id: JobId,
     pub kind: JobKind,
-    pub backend_type: koji_core::backends::BackendType,
+    pub backend_type: tama_core::backends::BackendType,
     pub state: RwLock<JobState>,
     pub log_head: RwLock<VecDeque<String>>,   // cap 100
     pub log_tail: RwLock<VecDeque<String>>,   // cap 400
@@ -241,7 +241,7 @@ impl JobManager {
     pub async fn submit(
         &self,
         kind: JobKind,
-        backend_type: koji_core::backends::BackendType,
+        backend_type: tama_core::backends::BackendType,
     ) -> Result<Arc<Job>, JobError> { ... }
 
     pub async fn get(&self, id: &JobId) -> Option<Arc<Job>>;
@@ -270,27 +270,27 @@ Behavior details:
   - Set `*active.lock() = None`.
   - Push `id` onto `finished_order`. If `finished_order.len() > RETAINED_FINISHED_JOBS`, `pop_front` and remove that id from `jobs`. **Important:** any SSE subscriber that already holds an `Arc<Job>` is unaffected by the map removal.
 
-`thiserror` and `uuid` should already be in the `koji-web` `Cargo.toml`; check before adding. If `uuid` is missing and you don't want to add it, use a simple counter + random suffix.
+`thiserror` and `uuid` should already be in the `tama-web` `Cargo.toml`; check before adding. If `uuid` is missing and you don't want to add it, use a simple counter + random suffix.
 
 **Steps:**
-- [ ] Read `crates/koji-web/Cargo.toml` to check whether `uuid`, `thiserror`, `tokio` (with `sync` feature), and `serde` are already deps. Add `thiserror` if missing. Use whatever ID scheme is already available.
-- [ ] Read `crates/koji-web/src/lib.rs` (or `main.rs`) to identify how existing modules (`api`, `server`, etc.) are declared.
+- [ ] Read `crates/tama-web/Cargo.toml` to check whether `uuid`, `thiserror`, `tokio` (with `sync` feature), and `serde` are already deps. Add `thiserror` if missing. Use whatever ID scheme is already available.
+- [ ] Read `crates/tama-web/src/lib.rs` (or `main.rs`) to identify how existing modules (`api`, `server`, etc.) are declared.
 - [ ] Write failing test `test_submit_then_finish_transitions_state` in `jobs.rs` tests: submit a job, assert it's active and Running; call `finish(_, Succeeded, None)`; assert state is Succeeded, `active()` returns `None`.
 - [ ] Write failing test `test_concurrent_submit_returns_already_running`: submit one job, then submit another; assert the second returns `JobError::AlreadyRunning(first_id)`.
 - [ ] Write failing test `test_fifo_eviction_after_retained_limit`: submit-and-finish 9 jobs sequentially (resetting `active` between each via `finish`); assert `manager.get(&first_id).await.is_none()` and `manager.get(&second_id).await.is_some()`.
 - [ ] Write failing test `test_log_head_invariant_first_100_lines_pinned`: append 150 lines; assert `log_head.len() == 100`, `log_head.front() == "line 0"` (or whatever you used), `log_dropped == 0`, `log_tail.len() == 50`.
 - [ ] Write failing test `test_log_tail_eviction_after_overflow`: append 1000 lines; assert `log_head.len() == 100`, `log_tail.len() == 400`, `log_dropped == 500`, `log_tail.front() == "line 600"`.
 - [ ] Write failing test `test_broadcast_channel_delivers_live_lines`: submit job, subscribe `log_tx.subscribe()`, append 3 lines, assert the receiver gets 3 `JobEvent::Log` events in order.
-- [ ] Run `cargo test --package koji-web jobs::tests`
+- [ ] Run `cargo test --package tama-web jobs::tests`
   - All tests should fail to compile.
 - [ ] Implement `jobs.rs` end-to-end. Add `pub mod jobs;` declaration in `lib.rs`/`main.rs` next to existing module decls.
-- [ ] Run `cargo test --package koji-web jobs::tests`
+- [ ] Run `cargo test --package tama-web jobs::tests`
   - All six tests pass.
 - [ ] Run `cargo fmt --all` and `cargo clippy --workspace -- -D warnings`.
 - [ ] Commit: `feat(web): add JobManager with head+tail log buffer and broadcast channel`
 
 **Acceptance criteria:**
-- [ ] `crates/koji-web/src/jobs.rs` exists and is declared as a module.
+- [ ] `crates/tama-web/src/jobs.rs` exists and is declared as a module.
 - [ ] `JobManager` enforces single-in-flight via `submit` returning `AlreadyRunning`.
 - [ ] FIFO eviction caps retained finished jobs at 8.
 - [ ] `log_head` is bounded at 100 and never evicts; `log_tail` is bounded at 400 and FIFO-evicts; `log_dropped` counts the gap.
@@ -302,16 +302,16 @@ Behavior details:
 ### Task 4: Read API — capabilities, list backends, wire DTOs, security middleware
 
 **Context:**
-Add the read-only HTTP surface: `GET /api/system/capabilities`, `GET /api/backends`, and the dedicated CORS layer + origin-header middleware that protect the new routes (§7a). The capabilities handler must call blocking process probes via `tokio::task::spawn_blocking` and cache results for 5 seconds to avoid hammering. Wire DTOs must be defined in `koji-web` (snake_case, flat tagging) — never expose `koji-core` enum serde shapes directly. JSON snapshot tests catch drift.
+Add the read-only HTTP surface: `GET /api/system/capabilities`, `GET /api/backends`, and the dedicated CORS layer + origin-header middleware that protect the new routes (§7a). The capabilities handler must call blocking process probes via `tokio::task::spawn_blocking` and cache results for 5 seconds to avoid hammering. Wire DTOs must be defined in `tama-web` (snake_case, flat tagging) — never expose `tama-core` enum serde shapes directly. JSON snapshot tests catch drift.
 
 **Files:**
-- Create: `crates/koji-web/src/api/backends.rs`
-- Create: `crates/koji-web/src/api/backends_dto.rs` (or inline in `backends.rs` — pick one and stick with it)
-- Create: `crates/koji-web/tests/backends_api.rs` (integration test file using `axum::Router` + `tower::ServiceExt::oneshot`)
-- Create: `crates/koji-web/tests/fixtures/backends_list.json` (snapshot fixture)
-- Modify: `crates/koji-web/src/api.rs` (add `pub mod backends;`)
-- Modify: `crates/koji-web/src/server.rs` (register routes, wire JobManager into AppState, attach origin middleware + CORS layer)
-- Modify: `crates/koji-web/Cargo.toml` (add `tower` dev-dep if needed for `oneshot`; `async-stream` will be needed in Task 6 but add it now under ssr feature so it's covered)
+- Create: `crates/tama-web/src/api/backends.rs`
+- Create: `crates/tama-web/src/api/backends_dto.rs` (or inline in `backends.rs` — pick one and stick with it)
+- Create: `crates/tama-web/tests/backends_api.rs` (integration test file using `axum::Router` + `tower::ServiceExt::oneshot`)
+- Create: `crates/tama-web/tests/fixtures/backends_list.json` (snapshot fixture)
+- Modify: `crates/tama-web/src/api.rs` (add `pub mod backends;`)
+- Modify: `crates/tama-web/src/server.rs` (register routes, wire JobManager into AppState, attach origin middleware + CORS layer)
+- Modify: `crates/tama-web/Cargo.toml` (add `tower` dev-dep if needed for `oneshot`; `async-stream` will be needed in Task 6 but add it now under ssr feature so it's covered)
 
 **What to implement:**
 
@@ -391,9 +391,9 @@ Add the read-only HTTP surface: `GET /api/system/capabilities`, `GET /api/backen
    }
    ```
 
-   Implement `From<koji_core::backends::BackendInfo> for BackendInfoDto`, `From<&koji_core::gpu::GpuType> for GpuTypeDto`, and `From<&koji_core::backends::BackendSource> for BackendSourceDto`. **`GpuType` lives in `koji_core::gpu`, not `koji_core::backends`** (confirmed `gpu.rs:5`). Match against the actual variants of those core enums (read `crates/koji-core/src/backends/mod.rs`, `backends/registry/` for `BackendSource`, and `gpu.rs` to confirm field names).
+   Implement `From<tama_core::backends::BackendInfo> for BackendInfoDto`, `From<&tama_core::gpu::GpuType> for GpuTypeDto`, and `From<&tama_core::backends::BackendSource> for BackendSourceDto`. **`GpuType` lives in `tama_core::gpu`, not `tama_core::backends`** (confirmed `gpu.rs:5`). Match against the actual variants of those core enums (read `crates/tama-core/src/backends/mod.rs`, `backends/registry/` for `BackendSource`, and `gpu.rs` to confirm field names).
 
-   **`BackendSourceDto::SourceCode` must match the real variant** — `koji_core::backends::BackendSource::SourceCode { version, git_url, commit }` has three fields, not one. The DTO must preserve all three:
+   **`BackendSourceDto::SourceCode` must match the real variant** — `tama_core::backends::BackendSource::SourceCode { version, git_url, commit }` has three fields, not one. The DTO must preserve all three:
    ```rust
    #[derive(Debug, serde::Serialize)]
    #[serde(tag = "kind", rename_all = "snake_case")]
@@ -423,8 +423,8 @@ Add the read-only HTTP surface: `GET /api/system/capabilities`, `GET /api/backen
        }
        // Cold path: shell out to probes inside spawn_blocking.
        let fresh = tokio::task::spawn_blocking(|| {
-           let prereqs = koji_core::gpu::detect_build_prerequisites();
-           let cuda = koji_core::gpu::detect_cuda_version();
+           let prereqs = tama_core::gpu::detect_build_prerequisites();
+           let cuda = tama_core::gpu::detect_cuda_version();
            CapabilitiesDto {
                os: std::env::consts::OS.to_string(),
                arch: std::env::consts::ARCH.to_string(),
@@ -432,7 +432,7 @@ Add the read-only HTTP surface: `GET /api/system/capabilities`, `GET /api/backen
                cmake_available: prereqs.cmake_available,
                compiler_available: prereqs.compiler_available,
                detected_cuda_version: cuda,
-               supported_cuda_versions: koji_core::backends::installer::urls::SUPPORTED_CUDA_VERSIONS
+               supported_cuda_versions: tama_core::backends::installer::urls::SUPPORTED_CUDA_VERSIONS
                    .iter().map(|s| s.to_string()).collect(),
            }
        }).await;
@@ -448,7 +448,7 @@ Add the read-only HTTP surface: `GET /api/system/capabilities`, `GET /api/backen
                    cmake_available: false,
                    compiler_available: false,
                    detected_cuda_version: None,
-                   supported_cuda_versions: koji_core::backends::installer::urls::SUPPORTED_CUDA_VERSIONS
+                   supported_cuda_versions: tama_core::backends::installer::urls::SUPPORTED_CUDA_VERSIONS
                        .iter().map(|s| s.to_string()).collect(),
                }
            }
@@ -457,7 +457,7 @@ Add the read-only HTTP surface: `GET /api/system/capabilities`, `GET /api/backen
        Json(fresh)
    }
    ```
-   Verify the actual field names of `BuildPrerequisites` in `crates/koji-core/src/gpu.rs` before writing this — they may be different. Adjust accordingly.
+   Verify the actual field names of `BuildPrerequisites` in `crates/tama-core/src/gpu.rs` before writing this — they may be different. Adjust accordingly.
 
 3. **List backends handler:**
    ```rust
@@ -507,7 +507,7 @@ Add the read-only HTTP surface: `GET /api/system/capabilities`, `GET /api/backen
        Ok(next.run(req).await)
    }
    ```
-   Add `url` to `koji-web` deps if it isn't already.
+   Add `url` to `tama-web` deps if it isn't already.
 
 5. **Router wiring** in `server.rs`:
    - Add `pub jobs: Arc<JobManager>` and `pub capabilities: Arc<CapabilitiesCache>` fields to `AppState`. Initialize in the constructor.
@@ -528,20 +528,20 @@ Add the read-only HTTP surface: `GET /api/system/capabilities`, `GET /api/backen
    - Existing routes keep their existing `CorsLayer::permissive()` (no regression).
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/backends/mod.rs` (specifically `BackendInfo`, `BackendType`, `BackendSource` enums) and `crates/koji-core/src/gpu.rs` (`GpuType`, `BuildPrerequisites`, `detect_build_prerequisites`, `detect_cuda_version`) to confirm exact field/variant names. Adjust the DTO `From` impls accordingly.
-- [ ] Read `crates/koji-web/src/server.rs` and `crates/koji-web/src/api.rs` to understand existing module layout, `AppState` struct, and how routes are currently merged.
-- [ ] Read `crates/koji-web/Cargo.toml` to check for `tower-http`, `tower`, `url`. Add what's missing under `[dependencies]` (and `tower` under `[dev-dependencies]` if needed for tests).
-- [ ] Add `async-stream` to `koji-web/Cargo.toml` under `[dependencies]` gated to `ssr` feature now (will be used in Task 6).
-- [ ] Create `crates/koji-web/tests/fixtures/backends_list.json` with the exact expected JSON for an empty registry (use the §5.1 example as a template, but with `installed: false` for both backends and `info: null`).
-- [ ] Write failing integration test `test_get_backends_empty_registry_matches_snapshot` in `crates/koji-web/tests/backends_api.rs`. Build a router with an empty `AppState`, call `GET /api/backends` via `tower::ServiceExt::oneshot`, parse the response body as JSON, and assert it matches the fixture (use `serde_json::Value` equality or `pretty_assertions`).
+- [ ] Read `crates/tama-core/src/backends/mod.rs` (specifically `BackendInfo`, `BackendType`, `BackendSource` enums) and `crates/tama-core/src/gpu.rs` (`GpuType`, `BuildPrerequisites`, `detect_build_prerequisites`, `detect_cuda_version`) to confirm exact field/variant names. Adjust the DTO `From` impls accordingly.
+- [ ] Read `crates/tama-web/src/server.rs` and `crates/tama-web/src/api.rs` to understand existing module layout, `AppState` struct, and how routes are currently merged.
+- [ ] Read `crates/tama-web/Cargo.toml` to check for `tower-http`, `tower`, `url`. Add what's missing under `[dependencies]` (and `tower` under `[dev-dependencies]` if needed for tests).
+- [ ] Add `async-stream` to `tama-web/Cargo.toml` under `[dependencies]` gated to `ssr` feature now (will be used in Task 6).
+- [ ] Create `crates/tama-web/tests/fixtures/backends_list.json` with the exact expected JSON for an empty registry (use the §5.1 example as a template, but with `installed: false` for both backends and `info: null`).
+- [ ] Write failing integration test `test_get_backends_empty_registry_matches_snapshot` in `crates/tama-web/tests/backends_api.rs`. Build a router with an empty `AppState`, call `GET /api/backends` via `tower::ServiceExt::oneshot`, parse the response body as JSON, and assert it matches the fixture (use `serde_json::Value` equality or `pretty_assertions`).
 - [ ] Write failing test `test_get_backends_includes_installed_entry`: seed a `BackendRegistry` with one fake `BackendInfo` for `llama_cpp`, assert `installed: true` and `info` is populated with the expected snake_case fields.
 - [ ] Write failing test `test_get_backends_custom_entry_appears_in_custom_array`: seed a `BackendType::Custom` entry, assert it appears in `custom`, not in `backends`.
 - [ ] Write failing test `test_get_capabilities_returns_supported_cuda_versions`: assert the response includes `supported_cuda_versions: ["11.1", "12.4", "13.1"]` and the `os` matches `std::env::consts::OS`.
 - [ ] Write failing test `test_origin_enforcement_blocks_cross_origin_post`: this test will only meaningfully fire in Task 5 when POST routes exist. **Skip for this task; add a TODO comment** and re-enable in Task 5.
-- [ ] Run `cargo test --package koji-web --test backends_api`
+- [ ] Run `cargo test --package tama-web --test backends_api`
   - All four enabled tests should fail to compile.
 - [ ] Implement DTOs, `From` conversions, `system_capabilities`, `list_backends`, `enforce_same_origin` middleware. Wire `JobManager` and `CapabilitiesCache` into `AppState`. Register the two GET routes with the new sub-router pattern.
-- [ ] Run `cargo test --package koji-web --test backends_api`
+- [ ] Run `cargo test --package tama-web --test backends_api`
   - All four tests pass.
 - [ ] Run `cargo test --workspace`
   - Nothing else regresses.
@@ -552,7 +552,7 @@ Add the read-only HTTP surface: `GET /api/system/capabilities`, `GET /api/backen
 - [ ] `GET /api/system/capabilities` returns the documented shape with `supported_cuda_versions` populated from the shared constant.
 - [ ] `GET /api/backends` returns the documented snake_case shape; both known backends always appear; `BackendType::Custom` entries land in `custom`.
 - [ ] The capabilities handler uses `spawn_blocking` and a 5-second TTL cache.
-- [ ] Wire DTOs are defined in `koji-web`; core types are not directly serialized over the wire.
+- [ ] Wire DTOs are defined in `tama-web`; core types are not directly serialized over the wire.
 - [ ] JSON snapshot test against a fixture file passes.
 - [ ] `enforce_same_origin` middleware exists and is wired to the new sub-router (no POST routes exist yet, so the cross-origin test is deferred to Task 5).
 - [ ] All workspace tests, clippy, and fmt pass.
@@ -565,9 +565,9 @@ Add the read-only HTTP surface: `GET /api/system/capabilities`, `GET /api/backen
 Add `POST /api/backends/install`, `POST /api/backends/:name/update`, `DELETE /api/backends/:name`, and `POST /api/backends/check-updates`. The install handler must (a) force `build_from_source=true` server-side for `ik_llama` (any OS) and `llama_cpp` on Linux+CUDA, (b) validate `cmake/git/compiler` availability when source build is selected (returning 400 with a clear error if missing), and (c) return 409 if a job is already running. Update pre-resolves the latest tag once via `check_latest_version` and passes it explicitly to `update_backend_with_progress`. Delete uses `safe_remove_installation` and rejects paths outside `backends_dir()` with 409. The job tasks are spawned with a `JobAdapter: ProgressSink` that forwards lines into the JobManager. Origin-header enforcement now applies to real POST/DELETE routes — re-enable the deferred test from Task 4.
 
 **Files:**
-- Modify: `crates/koji-web/src/api/backends.rs`
-- Modify: `crates/koji-web/src/server.rs` (register the four new routes, extend the sub-router's `allow_methods` to include POST/DELETE)
-- Modify: `crates/koji-web/tests/backends_api.rs` (add the deferred test + new ones)
+- Modify: `crates/tama-web/src/api/backends.rs`
+- Modify: `crates/tama-web/src/server.rs` (register the four new routes, extend the sub-router's `allow_methods` to include POST/DELETE)
+- Modify: `crates/tama-web/tests/backends_api.rs` (add the deferred test + new ones)
 
 **What to implement:**
 
@@ -623,7 +623,7 @@ Add `POST /api/backends/install`, `POST /api/backends/:name/update`, `DELETE /ap
      - Else use the requested value.
    - Build a `notices: Vec<String>` describing any forced upgrades.
    - If `effective_build_from_source`, fetch capabilities (via the cache) and check `git_available && cmake_available && compiler_available`. If any false, return `400 Bad Request` with `{ "error": "missing build prerequisite: cmake" }` (or whichever is missing).
-   - Convert `GpuTypeDto` → `koji_core::gpu::GpuType`.
+   - Convert `GpuTypeDto` → `tama_core::gpu::GpuType`.
    - Call `state.jobs.submit(JobKind::Install, backend_type.clone()).await`. On `AlreadyRunning(id)` return `409 Conflict` with `{ "error": "another backend job is already running", "job_id": id }`.
    - Build `InstallOptions` using the **real** field set (`installer/mod.rs:17-26`): `{ backend_type, source, target_dir, gpu_type, allow_overwrite }`. There is no `name`, `version`, or `build_from_source` field — the web handler must translate its inputs into a `BackendSource`:
      ```rust
@@ -637,7 +637,7 @@ Add `POST /api/backends/install`, `POST /api/backends/:name/update`, `DELETE /ap
      } else {
          BackendSource::Prebuilt { version }
      };
-     let target_dir = koji_core::backends::backends_dir()?.join(default_dir_name_for(backend_type));
+     let target_dir = tama_core::backends::backends_dir()?.join(default_dir_name_for(backend_type));
      let options = InstallOptions {
          backend_type: backend_type.clone(),
          source,
@@ -646,13 +646,13 @@ Add `POST /api/backends/install`, `POST /api/backends/:name/update`, `DELETE /ap
          allow_overwrite: req.force,
      };
      ```
-     Mirror the `source` and `target_dir` construction from `cmd_install` in `crates/koji-cli/src/commands/backend.rs` rather than reinventing it. Do **not** add fields to `InstallOptions`.
+     Mirror the `source` and `target_dir` construction from `cmd_install` in `crates/tama-cli/src/commands/backend.rs` rather than reinventing it. Do **not** add fields to `InstallOptions`.
    - `tokio::spawn(async move { let adapter = Arc::new(JobAdapter { jobs, job }); match install_backend_with_progress(opts, Some(adapter)).await { Ok(_) => jobs.finish(&job, JobStatus::Succeeded, None).await, Err(e) => jobs.finish(&job, JobStatus::Failed, Some(e.to_string())).await, } });`
    - Return `202 Accepted` with `InstallResponse`.
 
 3. **Update handler** (`POST /api/backends/:name/update`, empty body):
    - Look up the backend in the registry. 404 if missing.
-   - Call `koji_core::backends::check_latest_version(backend_type, &source).await?` to resolve the concrete tag (e.g. `b8410` or `main@abcd1234`). On error, return 502 with the error message.
+   - Call `tama_core::backends::check_latest_version(backend_type, &source).await?` to resolve the concrete tag (e.g. `b8410` or `main@abcd1234`). On error, return 502 with the error message.
    - `state.jobs.submit(JobKind::Update, backend_type).await` — 409 on `AlreadyRunning`.
    - Spawn the update task: `update_backend_with_progress(&mut registry, &name, options_built_from_existing_info, latest_tag, Some(adapter)).await`.
    - Return 202 with the same shape as install (no notices).
@@ -673,8 +673,8 @@ Add `POST /api/backends/install`, `POST /api/backends/:name/update`, `DELETE /ap
    - Extend the `CorsLayer` to include `POST` and `DELETE` in `allow_methods`. **The middleware still enforces same-origin for these methods** — the CORS layer just controls preflight responses; the rejection happens in `enforce_same_origin`.
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/backends/installer/mod.rs` for the exact `InstallOptions` field names.
-- [ ] Read `crates/koji-core/src/backends/mod.rs` for `check_latest_version` and `check_updates` signatures.
+- [ ] Read `crates/tama-core/src/backends/installer/mod.rs` for the exact `InstallOptions` field names.
+- [ ] Read `crates/tama-core/src/backends/mod.rs` for `check_latest_version` and `check_updates` signatures.
 - [ ] Write failing test `test_install_returns_202_and_job_id`: POST a valid install request, assert 202 and a job_id is returned.
 - [ ] Write failing test `test_concurrent_install_returns_409`: POST install twice in quick succession (use a long-running mock or just rely on the first job not finishing within the test); assert second response is 409 with `{"error": ..., "job_id": ...}`.
 - [ ] Write failing test `test_install_ik_llama_forces_source_build`: POST with `backend_type: "ik_llama"`, `build_from_source: false`; assert response notices array contains the forced-upgrade message. To verify the upgrade actually happened, read the job's first log line or check via a test-only hook on the installer; if too invasive, just assert the notice is present.
@@ -685,10 +685,10 @@ Add `POST /api/backends/install`, `POST /api/backends/:name/update`, `DELETE /ap
 - [ ] Write failing test `test_delete_path_traversal_returns_409`: seed a registry entry with `path: "/usr/local/bin/llama-server"`; DELETE; assert 409 with the documented error.
 - [ ] Write failing test `test_delete_while_job_running_returns_409`: submit a job for `llama_cpp`, then DELETE `llama_cpp`; assert 409.
 - [ ] Write failing test `test_origin_enforcement_blocks_cross_origin_post`: POST install with `Origin: http://evil.example` and `Host: 127.0.0.1:8080`; assert 403. (Re-enabled from Task 4.)
-- [ ] Run `cargo test --package koji-web --test backends_api`
+- [ ] Run `cargo test --package tama-web --test backends_api`
   - All new tests should fail to compile.
 - [ ] Implement `JobAdapter`, the four handlers, and update the router.
-- [ ] Run `cargo test --package koji-web --test backends_api`
+- [ ] Run `cargo test --package tama-web --test backends_api`
   - All tests pass.
 - [ ] Run `cargo test --workspace`.
 - [ ] Run `cargo fmt --all` and `cargo clippy --workspace -- -D warnings`.
@@ -712,9 +712,9 @@ Add `POST /api/backends/install`, `POST /api/backends/:name/update`, `DELETE /ap
 Add `GET /api/backends/jobs/:id` (snapshot) and `GET /api/backends/jobs/:id/events` (SSE). The SSE handler implements the head + skipped-marker + tail replay protocol from §6.3 and emits a synthesized `[N lines dropped]` event when the broadcast channel laps. If the job is already terminal at connect time, replay the buffered logs + final status, then close. Otherwise close on terminal status from the live stream.
 
 **Files:**
-- Modify: `crates/koji-web/src/api/backends.rs` (add `get_job` and `job_events_sse`)
-- Modify: `crates/koji-web/src/server.rs` (register the two routes under the new sub-router)
-- Modify: `crates/koji-web/tests/backends_api.rs`
+- Modify: `crates/tama-web/src/api/backends.rs` (add `get_job` and `job_events_sse`)
+- Modify: `crates/tama-web/src/server.rs` (register the two routes under the new sub-router)
+- Modify: `crates/tama-web/tests/backends_api.rs`
 
 **What to implement:**
 
@@ -761,17 +761,17 @@ Add `GET /api/backends/jobs/:id` (snapshot) and `GET /api/backends/jobs/:id/even
    Update the `Job` struct accordingly: instead of three independent `RwLock` fields, use `pub log: tokio::sync::Mutex<LogBuffer>` where `struct LogBuffer { head: VecDeque<String>, tail: VecDeque<String>, dropped: u64 }`. The `log_tx` stays as a sibling field. This is a small retroactive edit to Task 3 — update Task 3's unit tests to call through the new accessor shape.
 
 **Steps:**
-- [ ] Verify `async-stream` is in `koji-web/Cargo.toml` (added in Task 4). If not, add it under `[dependencies]` gated to ssr.
+- [ ] Verify `async-stream` is in `tama-web/Cargo.toml` (added in Task 4). If not, add it under `[dependencies]` gated to ssr.
 - [ ] Write failing test `test_get_job_404_on_unknown`.
 - [ ] Write failing test `test_get_job_returns_snapshot_after_finish`: submit a job, finish it as `Succeeded`, GET `/api/backends/jobs/:id`, assert status is `succeeded`.
 - [ ] Write failing test `test_sse_replays_buffered_lines_after_terminal`: submit a job, append 5 log lines via the JobManager, finish as `Succeeded`, then connect SSE; collect the events from the response body (use `eventsource-stream` or parse the `text/event-stream` format manually); assert 5 `log` events + 1 terminal `status` event then close.
 - [ ] Write failing test `test_sse_emits_skipped_marker_when_dropped_nonzero`: submit a job, append 1000 lines (filling head, overflowing tail, leaving `log_dropped > 0`), finish, then connect SSE; assert one of the events is a log line containing `lines skipped`.
 - [ ] Write failing test `test_sse_lagged_marker_emitted_to_slow_subscriber`: submit a job, subscribe SSE but don't read for a while, append >1024 lines fast enough to trigger `Lagged`, then read and assert one of the events is a log line containing `lines dropped`. **This test is racy by nature** — if it's flaky, gate it with `#[ignore]` and document the expected manual verification.
 - [ ] Write failing test `test_sse_disconnect_does_not_kill_worker`: spawn a job task that takes ~200ms to complete (use a sleep), connect SSE, drop the connection immediately, wait for the job to finish, then GET the job snapshot and assert `status == Succeeded`.
-- [ ] Run `cargo test --package koji-web --test backends_api`
+- [ ] Run `cargo test --package tama-web --test backends_api`
   - All new tests should fail to compile.
 - [ ] Implement `get_job` and `job_events_sse`. Wire both into `backends_routes` in `server.rs`.
-- [ ] Run `cargo test --package koji-web --test backends_api`.
+- [ ] Run `cargo test --package tama-web --test backends_api`.
 - [ ] Run `cargo test --workspace`, `cargo fmt --all`, `cargo clippy --workspace -- -D warnings`.
 - [ ] Commit: `feat(web): add job snapshot and SSE event stream endpoints`
 
@@ -790,10 +790,10 @@ Add `GET /api/backends/jobs/:id` (snapshot) and `GET /api/backends/jobs/:id/even
 Per spec §6.4, the current `axum::serve(...)` call has no `with_graceful_shutdown`, so spawned subprocesses survive parent death and leave half-built trees that block the next install. Two mitigations: (a) graceful shutdown that kills any `Running` job's child processes, and (b) stale-build-dir detection on startup that surfaces leftovers via a UI cleanup affordance. The cleanup endpoint and UI button are added here too.
 
 **Files:**
-- Modify: `crates/koji-web/src/server.rs`
-- Modify: `crates/koji-web/src/jobs.rs` (track child PIDs in `Job`, add `kill_active`)
-- Modify: `crates/koji-core/src/backends/installer/source.rs` (publish child PIDs back to caller — see implementation note)
-- Modify: `crates/koji-web/src/api/backends.rs` (add `GET /api/backends/stale` and `POST /api/backends/stale/cleanup` endpoints)
+- Modify: `crates/tama-web/src/server.rs`
+- Modify: `crates/tama-web/src/jobs.rs` (track child PIDs in `Job`, add `kill_active`)
+- Modify: `crates/tama-core/src/backends/installer/source.rs` (publish child PIDs back to caller — see implementation note)
+- Modify: `crates/tama-web/src/api/backends.rs` (add `GET /api/backends/stale` and `POST /api/backends/stale/cleanup` endpoints)
 
 **What to implement:**
 
@@ -828,7 +828,7 @@ Per spec §6.4, the current `axum::serve(...)` call has no `with_graceful_shutdo
      ```
 
 3. **Stale build dir detection:**
-   - In `JobManager::new`, scan `koji_core::backends::backends_dir()`. For each subdirectory `<name>/`:
+   - In `JobManager::new`, scan `tama_core::backends::backends_dir()`. For each subdirectory `<name>/`:
      - If `<name>/build/` exists AND the registry has no row for `<name>` whose `path` resolves to a real file inside `<name>/`, mark it stale.
    - Store the stale list in `JobManager`: `pub stale_dirs: RwLock<Vec<PathBuf>>`.
    - Log a warning at startup: `tracing::warn!("Found N stale backend build directories: {:?}", paths);`. (If `tracing` isn't used, fall back to `eprintln!`.)
@@ -839,14 +839,14 @@ Per spec §6.4, the current `axum::serve(...)` call has no `with_graceful_shutdo
    - Both endpoints go behind `enforce_same_origin`.
 
 **Steps:**
-- [ ] Read `crates/koji-web/Cargo.toml` for existing tracing/log setup. Confirm whether `nix` (or `rustix`) is available; add if missing.
-- [ ] Add `register_child` default method to `ProgressSink` in `koji-core`. **This is a trait extension** — verify no downstream impl breaks (`NullSink` keeps the default).
+- [ ] Read `crates/tama-web/Cargo.toml` for existing tracing/log setup. Confirm whether `nix` (or `rustix`) is available; add if missing.
+- [ ] Add `register_child` default method to `ProgressSink` in `tama-core`. **This is a trait extension** — verify no downstream impl breaks (`NullSink` keeps the default).
 - [ ] Update `source.rs` to call `progress.register_child(child.id().unwrap_or(0))` after each `Command::spawn`.
 - [ ] Write failing test `test_kill_active_no_active_is_noop` in `jobs.rs` tests.
 - [ ] Write failing test `test_register_child_appends_pid`: submit a job, get a `JobAdapter` for it, call `register_child(12345)`, assert `job.child_pids` contains 12345.
 - [ ] Write failing test `test_stale_dir_detection_finds_orphaned_build_dirs`: in a temp dir stubbed as `backends_dir()`, create `llama_cpp/build/` with no registry entry, instantiate JobManager, assert `stale_dirs` contains `llama_cpp`. **If stubbing `backends_dir()` is too invasive, skip and rely on manual verification.**
 - [ ] Write failing test `test_get_stale_endpoint`.
-- [ ] Run `cargo test --package koji-web`
+- [ ] Run `cargo test --package tama-web`
   - New tests should fail.
 - [ ] Implement child PID tracking, `kill_active`, graceful shutdown, stale-dir scan, and the two cleanup endpoints.
 - [ ] Run `cargo test --workspace`.
@@ -868,11 +868,11 @@ Per spec §6.4, the current `axum::serve(...)` call has no `with_graceful_shutdo
 Build the Leptos components that render each card state, the install modal, and the reusable log panel that consumes an `EventSource`. This task focuses on the components in isolation; the integration into `BackendsForm` and the API client wiring happens in Task 9. Delete the dead `backends_section.rs` file in this task as cleanup.
 
 **Files:**
-- Create: `crates/koji-web/src/components/backend_card.rs`
-- Create: `crates/koji-web/src/components/install_modal.rs`
-- Create: `crates/koji-web/src/components/job_log_panel.rs`
-- Modify: `crates/koji-web/src/components/mod.rs` (declare new modules, remove dead one)
-- Delete: `crates/koji-web/src/components/backends_section.rs`
+- Create: `crates/tama-web/src/components/backend_card.rs`
+- Create: `crates/tama-web/src/components/install_modal.rs`
+- Create: `crates/tama-web/src/components/job_log_panel.rs`
+- Modify: `crates/tama-web/src/components/mod.rs` (declare new modules, remove dead one)
+- Delete: `crates/tama-web/src/components/backends_section.rs`
 
 **What to implement:**
 
@@ -907,12 +907,12 @@ Build the Leptos components that render each card state, the install modal, and 
    - On unmount, closes the EventSource cleanly.
 
 4. **Module wiring:**
-   - In `crates/koji-web/src/components/mod.rs`, declare `pub mod backend_card; pub mod install_modal; pub mod job_log_panel;` and remove the `mod backends_section;` line.
-   - Delete `crates/koji-web/src/components/backends_section.rs`.
+   - In `crates/tama-web/src/components/mod.rs`, declare `pub mod backend_card; pub mod install_modal; pub mod job_log_panel;` and remove the `mod backends_section;` line.
+   - Delete `crates/tama-web/src/components/backends_section.rs`.
 
 **Steps:**
-- [ ] Read `crates/koji-web/src/components/mod.rs` and a representative existing component (e.g., a current modal in `components/`) to understand Leptos patterns used in this codebase.
-- [ ] Read `crates/koji-web/src/components/backends_section.rs` to confirm it's truly unused before deleting (`grep -r backends_section crates/koji-web/src/`).
+- [ ] Read `crates/tama-web/src/components/mod.rs` and a representative existing component (e.g., a current modal in `components/`) to understand Leptos patterns used in this codebase.
+- [ ] Read `crates/tama-web/src/components/backends_section.rs` to confirm it's truly unused before deleting (`grep -r backends_section crates/tama-web/src/`).
 - [ ] Write component tests using `leptos::testing` if the project already uses it; **otherwise skip per-component tests** and rely on Task 9's integration smoke tests. Component tests in Leptos require non-trivial setup; do not introduce a new test framework just for this task.
 - [ ] Implement `BackendCard` rendering all 6 states. Use a simple match-based dispatch on `(card.installed, card.update.update_available, active_job)` to pick the state.
 - [ ] Implement `InstallModal` with smart defaults from `CapabilitiesDto`.
@@ -935,9 +935,9 @@ Build the Leptos components that render each card state, the install modal, and 
 Wire the components from Task 8 into `BackendsForm`, hook them to the HTTP API, and verify the full flow with manual smoke tests. This task replaces the current `BackendsForm` body with a fixed two-card render, adds an API client module, handles SSE rehydration after page reload, and integrates the existing `config.backends` editing into the Advanced disclosure.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/config_editor.rs` (replace `BackendsForm`)
-- Create: `crates/koji-web/src/api_client/backends.rs` (or extend existing api_client module if one exists)
-- Modify: `crates/koji-web/src/components/backend_card.rs` (replace Advanced disclosure placeholder with real config inputs)
+- Modify: `crates/tama-web/src/pages/config_editor.rs` (replace `BackendsForm`)
+- Create: `crates/tama-web/src/api_client/backends.rs` (or extend existing api_client module if one exists)
+- Modify: `crates/tama-web/src/components/backend_card.rs` (replace Advanced disclosure placeholder with real config inputs)
 
 **What to implement:**
 
@@ -953,7 +953,7 @@ Wire the components from Task 8 into `BackendsForm`, hook them to the HTTP API, 
    pub async fn get_stale() -> Result<StaleResponse, ClientError>;
    pub async fn cleanup_stale() -> Result<CleanupResponse, ClientError>;
    ```
-   Use whatever HTTP client convention `koji-web` already uses (likely `reqwasm`, `gloo-net`, or `leptos::server_fn` — read the existing api_client to confirm).
+   Use whatever HTTP client convention `tama-web` already uses (likely `reqwasm`, `gloo-net`, or `leptos::server_fn` — read the existing api_client to confirm).
 
 2. **`BackendsForm` rewrite** in `pages/config_editor.rs`:
    - Replace the existing function body. Keep the function signature and component name.
@@ -975,12 +975,12 @@ Wire the components from Task 8 into `BackendsForm`, hook them to the HTTP API, 
 4. **First-use security banner** (§7a item 3):
    - Extend `CapabilitiesDto` (defined in Task 4) with `pub server_bound_to_loopback: bool` and extend `AppState` with `pub bound_to_loopback: bool`, populated when the listener binds in `server.rs`.
    - **Retroactive Task 4 updates required:** update the capabilities handler to include this field (always read from `AppState::bound_to_loopback`, not from `spawn_blocking`), update `test_get_capabilities_returns_supported_cuda_versions` to assert the field is present, and update `tests/fixtures/backends_list.json` if it references the capabilities shape.
-   - When `false`, render a one-time dismissible banner above the cards: "⚠ Koji is bound to a non-loopback address. Anyone on your network can install backends here."
+   - When `false`, render a one-time dismissible banner above the cards: "⚠ Tama is bound to a non-loopback address. Anyone on your network can install backends here."
    - "One-time dismissible" can be `localStorage`-backed in the browser; if too much scope, just make it always-show-when-applicable for now.
 
 **Steps:**
-- [ ] Read `crates/koji-web/src/pages/config_editor.rs` to understand the existing `BackendsForm`, the structured-config save flow, and the Leptos patterns in use.
-- [ ] Read `crates/koji-web/src/api_client/` (or wherever the existing client lives) to mirror its style.
+- [ ] Read `crates/tama-web/src/pages/config_editor.rs` to understand the existing `BackendsForm`, the structured-config save flow, and the Leptos patterns in use.
+- [ ] Read `crates/tama-web/src/api_client/` (or wherever the existing client lives) to mirror its style.
 - [ ] Extend `CapabilitiesDto` (in Task 4's file) and `system_capabilities` handler (in Task 4's file) to include `server_bound_to_loopback: bool`. The listener address has to be threaded into `AppState` from `server.rs` — add `pub bound_to_loopback: bool` to `AppState`, populate when the listener binds.
 - [ ] Implement the API client module.
 - [ ] Rewrite `BackendsForm` per the structure above. Wire the modal state, job state, rehydration on load, and stale-dir banner.
@@ -999,7 +999,7 @@ Wire the components from Task 8 into `BackendsForm`, hook them to the HTTP API, 
 
 **Acceptance criteria:**
 - [ ] `BackendsForm` renders two cards backed by `GET /api/backends`.
-- [ ] Install / Update / Uninstall flows work end-to-end against a real `koji-core` registry.
+- [ ] Install / Update / Uninstall flows work end-to-end against a real `tama-core` registry.
 - [ ] Live build logs stream into `JobLogPanel` via SSE.
 - [ ] Page reload mid-install rehydrates the running job and re-attaches the SSE stream.
 - [ ] Existing config.backends path/args/health/version editing still works through the Advanced disclosure.
@@ -1026,6 +1026,6 @@ Spec §7.2 mentions a "Retry" button for the Job-failed state. Wiring:
 ## Out-of-band notes for the executing agent
 
 - **If a task's tests are too invasive to write meaningfully** (e.g., the stale-dir scan in Task 7 or the lagged-marker test in Task 6), it is acceptable to mark them `#[ignore]` with a comment explaining why and note them in the commit message. Do not skip silently.
-- **If `koji-cli` fails to compile after Task 2,** you broke the wrapper invariant — fix the wrapper, do not edit CLI call sites. The whole point of the wrapper approach is zero CLI churn.
+- **If `tama-cli` fails to compile after Task 2,** you broke the wrapper invariant — fix the wrapper, do not edit CLI call sites. The whole point of the wrapper approach is zero CLI churn.
 - **If the JSON snapshot test in Task 4 fails after a serde change,** that is the test working as intended. Do not "fix" it by regenerating the snapshot blindly — figure out which DTO field drifted and decide whether the change was intentional.
 - **The `BackendType::Custom` path is partially handled.** If the registry contains a custom entry, it appears in `custom: []` in the list response and as a read-only row in the UI, with no install/update/uninstall actions. Do not add wiring beyond that.

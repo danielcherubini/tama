@@ -1,6 +1,6 @@
-# Koji Core Test Coverage Plan
+# Tama Core Test Coverage Plan
 
-**Goal:** Increase `koji-core` test coverage from ~30% to ~50% by adding unit and integration tests for the highest-impact untested modules.
+**Goal:** Increase `tama-core` test coverage from ~30% to ~50% by adding unit and integration tests for the highest-impact untested modules.
 
 **Architecture:** Each task adds tests against existing public APIs without modifying production code behavior. Tests use `tempfile::tempdir()` for filesystem operations, in-memory SQLite for DB tests, and mock data for external service interactions.
 
@@ -14,7 +14,7 @@
 `proxy/forward.rs` has 161 lines with 0% coverage. This module handles HTTP request forwarding in the proxy, including header manipulation, body rewriting, and streaming passthrough. The existing `proxy/forward.rs` tests in the test suite cover some streaming cases, but the core forwarding logic (header filtering, body size changes, model name rewriting) needs comprehensive coverage.
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy/forward.rs` (add `#[cfg(test)]` module)
+- Modify: `crates/tama-core/src/proxy/forward.rs` (add `#[cfg(test)]` module)
 
 **What to implement:**
 Add a `#[cfg(test)]` module with tests for:
@@ -28,21 +28,21 @@ Add a `#[cfg(test)]` module with tests for:
 8. `strip_response_headers()` — test stripping hop-by-hop headers from upstream response
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/proxy/forward.rs` to understand all public functions and their signatures
-- [ ] Write failing test for `filter_request_headers()` stripping dangerous headers in `crates/koji-core/src/proxy/forward.rs`
-- [ ] Run `cargo test --package koji-core proxy::forward::tests` — verify it fails
+- [ ] Read `crates/tama-core/src/proxy/forward.rs` to understand all public functions and their signatures
+- [ ] Write failing test for `filter_request_headers()` stripping dangerous headers in `crates/tama-core/src/proxy/forward.rs`
+- [ ] Run `cargo test --package tama-core proxy::forward::tests` — verify it fails
 - [ ] Write failing test for `filter_request_headers()` passing safe headers
-- [ ] Run `cargo test --package koji-core proxy::forward::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core proxy::forward::tests` — verify it fails
 - [ ] Write failing test for `rewrite_model_name_in_body()` with simple JSON
-- [ ] Run `cargo test --package koji-core proxy::forward::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core proxy::forward::tests` — verify it fails
 - [ ] Write failing test for `rewrite_model_name_in_body()` when model field is absent
-- [ ] Run `cargo test --package koji-core proxy::forward::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core proxy::forward::tests` — verify it fails
 - [ ] Write failing test for `build_forward_request()` with POST body
-- [ ] Run `cargo test --package koji-core proxy::forward::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core proxy::forward::tests` — verify it fails
 - [ ] Write failing test for `strip_response_headers()` removing hop-by-hop headers
-- [ ] Run `cargo test --package koji-core proxy::forward::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core proxy::forward::tests` — verify it fails
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo clippy --package koji-core -- -D warnings`
+- [ ] Run `cargo clippy --package tama-core -- -D warnings`
 - [ ] Commit with message: "feat(core): add proxy forwarding unit tests"
 
 **Acceptance criteria:**
@@ -59,7 +59,7 @@ Add a `#[cfg(test)]` module with tests for:
 `proxy/lifecycle.rs` has 153 lines with 0% coverage. This module manages the server process lifecycle — starting, stopping, restarting, and monitoring the llama.cpp server process. It handles PID tracking, graceful shutdown, and health checking.
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy/lifecycle.rs` (add `#[cfg(test)]` module)
+- Modify: `crates/tama-core/src/proxy/lifecycle.rs` (add `#[cfg(test)]` module)
 
 **What to implement:**
 Add a `#[cfg(test)]` module with tests for:
@@ -73,19 +73,19 @@ Add a `#[cfg(test)]` module with tests for:
 8. `_build_server_args()` — test argument assembly with various config options (port, threads, context)
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/proxy/lifecycle.rs` to understand all public functions and their signatures
+- [ ] Read `crates/tama-core/src/proxy/lifecycle.rs` to understand all public functions and their signatures
 - [ ] Write failing test for `_build_server_args()` assembling correct command line
-- [ ] Run `cargo test --package koji-core proxy::lifecycle::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core proxy::lifecycle::tests` — verify it fails
 - [ ] Implement minimal test helpers (dummy process spawning)
-- [ ] Run `cargo test --package koji-core proxy::lifecycle::tests` — verify failure persists
+- [ ] Run `cargo test --package tama-core proxy::lifecycle::tests` — verify failure persists
 - [ ] Write failing test for stop_server() with dummy process
-- [ ] Run `cargo test --package koji-core proxy::lifecycle::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core proxy::lifecycle::tests` — verify it fails
 - [ ] Write failing test for is_server_ready() health check parsing
-- [ ] Run `cargo test --package koji-core proxy::lifecycle::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core proxy::lifecycle::tests` — verify it fails
 - [ ] Write failing test for `_build_server_args()` with CUDA backend flags
-- [ ] Run `cargo test --package koji-core proxy::lifecycle::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core proxy::lifecycle::tests` — verify it fails
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo clippy --package koji-core -- -D warnings`
+- [ ] Run `cargo clippy --package tama-core -- -D warnings`
 - [ ] Commit with message: "feat(core): add server lifecycle unit tests"
 
 **Acceptance criteria:**
@@ -102,9 +102,9 @@ Add a `#[cfg(test)]` module with tests for:
 `models/download/parallel.rs` has 123 lines and `models/download/single.rs` has 62 lines — both at 0% coverage. These modules handle downloading model files from URLs, with support for parallel chunked downloads and single-file downloads. The existing `models::download` tests cover content-length parsing but not the actual download logic.
 
 **Files:**
-- Modify: `crates/koji-core/src/models/download/mod.rs` (add `#[cfg(test)]` module)
-- Modify: `crates/koji-core/src/models/download/parallel.rs` (add `#[cfg(test)]` module)
-- Modify: `crates/koji-core/src/models/download/single.rs` (add `#[cfg(test)]` module)
+- Modify: `crates/tama-core/src/models/download/mod.rs` (add `#[cfg(test)]` module)
+- Modify: `crates/tama-core/src/models/download/parallel.rs` (add `#[cfg(test)]` module)
+- Modify: `crates/tama-core/src/models/download/single.rs` (add `#[cfg(test)]` module)
 
 **What to implement:**
 Add tests for:
@@ -116,17 +116,17 @@ Add tests for:
 6. `calculate_chunk_ranges()` — test splitting a file into N chunks
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/models/download/mod.rs`, `parallel.rs`, and `single.rs` to understand all public functions
+- [ ] Read `crates/tama-core/src/models/download/mod.rs`, `parallel.rs`, and `single.rs` to understand all public functions
 - [ ] Write failing test for `calculate_chunk_ranges()` with various file sizes and chunk counts
-- [ ] Run `cargo test --package koji-core models::download::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core models::download::tests` — verify it fails
 - [ ] Write failing test for `_download_chunk()` using a local HTTP server (use `tiny_http` or similar)
-- [ ] Run `cargo test --package koji-core models::download::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core models::download::tests` — verify it fails
 - [ ] Write failing test for `download_single_file()` to temp directory
-- [ ] Run `cargo test --package koji-core models::download::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core models::download::tests` — verify it fails
 - [ ] Write failing test for `resume_download()` with partial file
-- [ ] Run `cargo test --package koji-core models::download::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core models::download::tests` — verify it fails
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo clippy --package koji-core -- -D warnings`
+- [ ] Run `cargo clippy --package tama-core -- -D warnings`
 - [ ] Commit with message: "feat(core): add model download unit tests"
 
 **Acceptance criteria:**
@@ -140,10 +140,10 @@ Add tests for:
 ### Task 4: Self-Update Tests
 
 **Context:**
-`self_update.rs` has 195 lines with only 21 covered. This module handles updating the koji CLI binary itself. The existing tests cover `detect_archive_kind()` and `is_running_as_service()`, but the core update logic (`check_for_update()`, `update_binary()`, `download_and_install()`) is untested.
+`self_update.rs` has 195 lines with only 21 covered. This module handles updating the tama CLI binary itself. The existing tests cover `detect_archive_kind()` and `is_running_as_service()`, but the core update logic (`check_for_update()`, `update_binary()`, `download_and_install()`) is untested.
 
 **Files:**
-- Modify: `crates/koji-core/src/self_update.rs` (add `#[cfg(test)]` module)
+- Modify: `crates/tama-core/src/self_update.rs` (add `#[cfg(test)]` module)
 
 **What to implement:**
 Add tests for:
@@ -154,17 +154,17 @@ Add tests for:
 5. `needs_update()` — test version comparison: newer available, same version, older available
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/self_update.rs` to understand all public functions and their signatures
+- [ ] Read `crates/tama-core/src/self_update.rs` to understand all public functions and their signatures
 - [ ] Write failing test for `_extract_and_install()` extracting a tar.gz archive to temp dir
-- [ ] Run `cargo test --package koji-core self_update::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core self_update::tests` — verify it fails
 - [ ] Write failing test for version comparison: newer available
-- [ ] Run `cargo test --package koji-core self_update::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core self_update::tests` — verify it fails
 - [ ] Write failing test for version comparison: same version (no update needed)
-- [ ] Run `cargo test --package koji-core self_update::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core self_update::tests` — verify it fails
 - [ ] Write failing test for `get_latest_version()` with invalid JSON response
-- [ ] Run `cargo test --package koji-core self_update::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core self_update::tests` — verify it fails
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo clippy --package koji-core -- -D warnings`
+- [ ] Run `cargo clippy --package tama-core -- -D warnings`
 - [ ] Commit with message: "feat(core): add self-update unit tests"
 
 **Acceptance criteria:**
@@ -180,7 +180,7 @@ Add tests for:
 `updates/checker.rs` has 204 lines with only 25 covered. This module checks for model and backend updates by comparing local files against remote manifests. The existing tests cover basic checking, but edge cases around manifest parsing, conflict resolution, and stale data handling are untested.
 
 **Files:**
-- Modify: `crates/koji-core/src/updates/checker.rs` (add `#[cfg(test)]` module)
+- Modify: `crates/tama-core/src/updates/checker.rs` (add `#[cfg(test)]` module)
 
 **What to implement:**
 Add tests for:
@@ -193,17 +193,17 @@ Add tests for:
 7. `stale_data_cleanup()` — test removing entries older than retention period
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/updates/checker.rs` to understand all public functions and their signatures
+- [ ] Read `crates/tama-core/src/updates/checker.rs` to understand all public functions and their signatures
 - [ ] Write failing test for `parse_remote_manifest()` with valid JSON
-- [ ] Run `cargo test --package koji-core updates::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core updates::tests` — verify it fails
 - [ ] Write failing test for `compare_local_vs_remote()` detecting new files
-- [ ] Run `cargo test --package koji-core updates::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core updates::tests` — verify it fails
 - [ ] Write failing test for `compare_local_vs_remote()` detecting modified files
-- [ ] Run `cargo test --package koji-core updates::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core updates::tests` — verify it fails
 - [ ] Write failing test for `should_check()` with stale data
-- [ ] Run `cargo test --package koji-core updates::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core updates::tests` — verify it fails
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo clippy --package koji-core -- -D warnings`
+- [ ] Run `cargo clippy --package tama-core -- -D warnings`
 - [ ] Commit with message: "feat(core): add update checker unit tests"
 
 **Acceptance criteria:**
@@ -219,8 +219,8 @@ Add tests for:
 `backends/updater.rs` has 60 lines with 0% coverage, and `backends/installer/source.rs` has 205 lines with only 25 covered. These modules handle backend version checking and installation source configuration (CUDA vs ROCm vs CPU). The existing tests cover some URL generation but not the update flow or source resolution logic.
 
 **Files:**
-- Modify: `crates/koji-core/src/backends/updater.rs` (add `#[cfg(test)]` module)
-- Modify: `crates/koji-core/src/backends/installer/source.rs` (add `#[cfg(test)]` module)
+- Modify: `crates/tama-core/src/backends/updater.rs` (add `#[cfg(test)]` module)
+- Modify: `crates/tama-core/src/backends/installer/source.rs` (add `#[cfg(test)]` module)
 
 **What to implement:**
 Add tests for:
@@ -230,15 +230,15 @@ Add tests for:
 4. `validate_backend_version()` — test version format validation
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/backends/updater.rs` and `source.rs` to understand all public functions
+- [ ] Read `crates/tama-core/src/backends/updater.rs` and `source.rs` to understand all public functions
 - [ ] Write failing test for `resolve_install_source()` selecting CUDA backend
-- [ ] Run `cargo test --package koji-core backends::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core backends::tests` — verify it fails
 - [ ] Write failing test for `build_install_args()` with ROCm targets
-- [ ] Run `cargo test --package koji-core backends::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core backends::tests` — verify it fails
 - [ ] Write failing test for `validate_backend_version()` with valid/invalid versions
-- [ ] Run `cargo test --package koji-core backends::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core backends::tests` — verify it fails
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo clippy --package koji-core -- -D warnings`
+- [ ] Run `cargo clippy --package tama-core -- -D warnings`
 - [ ] Commit with message: "feat(core): add backend updater and installer source tests"
 
 **Acceptance criteria:**
@@ -255,10 +255,10 @@ Add tests for:
 Several well-covered modules still have gaps. `db/queries/active_model_queries.rs` (33 lines, 5 covered), `db/queries/metrics_queries.rs` (46 lines, 15 covered), `logging.rs` (61 lines, 18 covered), and `gpu.rs` (167 lines, 112 covered) need additional edge case coverage.
 
 **Files:**
-- Modify: `crates/koji-core/src/db/queries/active_model_queries.rs` (add `#[cfg(test)]` module)
-- Modify: `crates/koji-core/src/db/queries/metrics_queries.rs` (add `#[cfg(test)]` module)
-- Modify: `crates/koji-core/src/logging.rs` (add `#[cfg(test)]` module)
-- Modify: `crates/koji-core/src/gpu.rs` (add `#[cfg(test)]` module)
+- Modify: `crates/tama-core/src/db/queries/active_model_queries.rs` (add `#[cfg(test)]` module)
+- Modify: `crates/tama-core/src/db/queries/metrics_queries.rs` (add `#[cfg(test)]` module)
+- Modify: `crates/tama-core/src/logging.rs` (add `#[cfg(test)]` module)
+- Modify: `crates/tama-core/src/gpu.rs` (add `#[cfg(test)]` module)
 
 **What to implement:**
 Add tests for:
@@ -273,15 +273,15 @@ Add tests for:
 **Steps:**
 - [ ] Read each target file to understand function signatures
 - [ ] Write failing tests for active model queries with filter conditions
-- [ ] Run `cargo test --package koji-core` — verify failures
+- [ ] Run `cargo test --package tama-core` — verify failures
 - [ ] Write failing tests for metrics query insertions
-- [ ] Run `cargo test --package koji-core` — verify failures
+- [ ] Run `cargo test --package tama-core` — verify failures
 - [ ] Write failing tests for log file tailing
-- [ ] Run `cargo test --package koji-core` — verify failures
+- [ ] Run `cargo test --package tama-core` — verify failures
 - [ ] Write failing tests for GPU detection and context size suggestions
-- [ ] Run `cargo test --package koji-core` — verify failures
+- [ ] Run `cargo test --package tama-core` — verify failures
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo clippy --package koji-core -- -D warnings`
+- [ ] Run `cargo clippy --package tama-core -- -D warnings`
 - [ ] Commit with message: "feat(core): add edge case tests for DB queries, logging, and GPU"
 
 **Acceptance criteria:**
@@ -297,8 +297,8 @@ Add tests for:
 `backup/merge.rs` has 66 lines with only 10 covered, and `models/update.rs` has 105 lines with 37 covered. These modules handle config backup merging and model update checking respectively.
 
 **Files:**
-- Modify: `crates/koji-core/src/backup/merge.rs` (add `#[cfg(test)]` module)
-- Modify: `crates/koji-core/src/models/update.rs` (add `#[cfg(test)]` module)
+- Modify: `crates/tama-core/src/backup/merge.rs` (add `#[cfg(test)]` module)
+- Modify: `crates/tama-core/src/models/update.rs` (add `#[cfg(test)]` module)
 
 **What to implement:**
 Add tests for:
@@ -308,13 +308,13 @@ Add tests for:
 4. `compare_local_hash()` — test hash comparison for file integrity
 
 **Steps:**
-- [ ] Read `crates/koji-core/src/backup/merge.rs` and `models/update.rs`
+- [ ] Read `crates/tama-core/src/backup/merge.rs` and `models/update.rs`
 - [ ] Write failing tests for backup merge conflict resolution
-- [ ] Run `cargo test --package koji-core backup::merge::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core backup::merge::tests` — verify it fails
 - [ ] Write failing tests for model update detection
-- [ ] Run `cargo test --package koji-core models::update::tests` — verify it fails
+- [ ] Run `cargo test --package tama-core models::update::tests` — verify it fails
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo clippy --package koji-core -- -D warnings`
+- [ ] Run `cargo clippy --package tama-core -- -D warnings`
 - [ ] Commit with message: "feat(core): add backup merge and model update tests"
 
 **Acceptance criteria:**
@@ -328,7 +328,7 @@ Add tests for:
 ## Expected Outcome
 
 After all 8 tasks:
-- `koji-core` coverage should reach ~50-55%
+- `tama-core` coverage should reach ~50-55%
 - ~2,000+ additional lines covered
 - All critical paths (proxy forwarding, lifecycle, downloads, updates) have test coverage
 - Existing tests continue to pass

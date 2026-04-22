@@ -4,7 +4,7 @@
 
 **Architecture:** The SQLite `backend_installations` table already supports multiple versions with an `is_active` flag. We expose this through new `BackendRegistry` methods, new REST API endpoints, a redesigned backends page showing one card per version, and new CLI commands. Default args remain per-backend (shared across versions) via config.toml.
 
-**Tech Stack:** Rust (koji-core, koji-web, koji-cli), SQLite (rusqlite), Leptos (wasm frontend), Axum (REST API).
+**Tech Stack:** Rust (tama-core, tama-web, tama-cli), SQLite (rusqlite), Leptos (wasm frontend), Axum (REST API).
 
 ---
 
@@ -14,9 +14,9 @@
 The `backend_installations` table already has an `is_active` column and a `list_backend_versions()` query that returns all versions. However, the public `BackendRegistry` API only exposes active-only methods (`get()`, `list()`). We need to add methods to list all versions and activate a specific version. This is the foundation — all other tasks depend on this.
 
 **Files:**
-- Modify: `/home/daniel/Coding/Rust/koji/crates/koji-core/src/db/queries/backend_queries.rs`
-- Modify: `/home/daniel/Coding/Rust/koji/crates/koji-core/src/backends/registry/registry_ops.rs`
-- Test: `/home/daniel/Coding/Rust/koji/crates/koji-core/src/backends/registry/registry_ops.rs` (inline `#[cfg(test)]` module)
+- Modify: `/home/daniel/Coding/Rust/tama/crates/tama-core/src/db/queries/backend_queries.rs`
+- Modify: `/home/daniel/Coding/Rust/tama/crates/tama-core/src/backends/registry/registry_ops.rs`
+- Test: `/home/daniel/Coding/Rust/tama/crates/tama-core/src/backends/registry/registry_ops.rs` (inline `#[cfg(test)]` module)
 
 **What to implement:**
 
@@ -242,10 +242,10 @@ fn test_registry_remove_last_version_deactivates_others() {
 ```
 
 **Steps:**
-- [ ] Add `activate_backend_version()` function to `/home/daniel/Coding/Rust/koji/crates/koji-core/src/db/queries/backend_queries.rs`
-- [ ] Add `list_all_versions()`, `activate()`, and `remove_version()` methods to `BackendRegistry` in `/home/daniel/Coding/Rust/koji/crates/koji-core/src/backends/registry/registry_ops.rs`
+- [ ] Add `activate_backend_version()` function to `/home/daniel/Coding/Rust/tama/crates/tama-core/src/db/queries/backend_queries.rs`
+- [ ] Add `list_all_versions()`, `activate()`, and `remove_version()` methods to `BackendRegistry` in `/home/daniel/Coding/Rust/tama/crates/tama-core/src/backends/registry/registry_ops.rs`
 - [ ] Add the 5 tests listed above to the `#[cfg(test)] mod tests` block in `registry_ops.rs`
-- [ ] Run `cd /home/daniel/Coding/Rust/koji && cargo test --package koji-core -- backends::registry::tests` — all 9 tests pass (4 existing + 5 new)
+- [ ] Run `cd /home/daniel/Coding/Rust/tama && cargo test --package tama-core -- backends::registry::tests` — all 9 tests pass (4 existing + 5 new)
 - [ ] Run `cargo test --workspace` — no regressions
 - [ ] Run `cargo fmt --all`
 - [ ] Run `cargo build --workspace` — succeeds
@@ -266,9 +266,9 @@ fn test_registry_remove_last_version_deactivates_others() {
 The backends page fetches data from `GET /api/backends`. Currently this returns one card per backend type. We need to: (1) add a new endpoint to get all versions of a specific backend, (2) add an endpoint to activate a version, and (3) update the existing list endpoint to return all versions as separate cards.
 
 **Files:**
-- Modify: `/home/daniel/Coding/Rust/koji/crates/koji-web/src/api/backends.rs`
-- Modify: `/home/daniel/Coding/Rust/koji/crates/koji-web/src/server.rs`
-- Test: `/home/daniel/Coding/Rust/koji/crates/koji-web/tests/backends_api.rs` (enable existing ignored tests)
+- Modify: `/home/daniel/Coding/Rust/tama/crates/tama-web/src/api/backends.rs`
+- Modify: `/home/daniel/Coding/Rust/tama/crates/tama-web/src/server.rs`
+- Test: `/home/daniel/Coding/Rust/tama/crates/tama-web/tests/backends_api.rs` (enable existing ignored tests)
 
 **What to implement:**
 
@@ -381,9 +381,9 @@ pub async fn list_backend_versions(
     };
 
     let config_dir_clone = config_dir.clone();
-    let registry_result: Result<koji_core::backends::BackendRegistry, _> =
+    let registry_result: Result<tama_core::backends::BackendRegistry, _> =
         tokio::task::spawn_blocking(move || {
-            koji_core::backends::BackendRegistry::open(&config_dir_clone)
+            tama_core::backends::BackendRegistry::open(&config_dir_clone)
         })
         .await
         .map_err(|e| anyhow::anyhow!("spawn error: {}", e))
@@ -489,9 +489,9 @@ pub async fn activate_backend_version(
 
     let config_dir_clone = config_dir.clone();
     let version_clone = req.version.clone();
-    let registry_result: Result<(koji_core::backends::BackendRegistry, bool), _> =
+    let registry_result: Result<(tama_core::backends::BackendRegistry, bool), _> =
         tokio::task::spawn_blocking(move || {
-            let mut reg = koji_core::backends::BackendRegistry::open(&config_dir_clone)?;
+            let mut reg = tama_core::backends::BackendRegistry::open(&config_dir_clone)?;
             let activated = reg.activate(&name, &version_clone)?;
             Ok((reg, activated))
         })
@@ -644,14 +644,14 @@ use crate::api::backends::{
 ```
 
 **Steps:**
-- [ ] Add `BackendVersionDto`, `BackendVersionsResponse`, `ActivateRequest`, `ActivateResponse` DTOs to `/home/daniel/Coding/Rust/koji/crates/koji-web/src/api/backends.rs`
+- [ ] Add `BackendVersionDto`, `BackendVersionsResponse`, `ActivateRequest`, `ActivateResponse` DTOs to `/home/daniel/Coding/Rust/tama/crates/tama-web/src/api/backends.rs`
 - [ ] Add `list_backend_versions()` handler function to `api/backends.rs`
 - [ ] Add `activate_backend_version()` handler function to `api/backends.rs`
 - [ ] Update `list_backends()` handler to emit one card per version instead of one per type
-- [ ] Add route registrations in `/home/daniel/Coding/Rust/koji/crates/koji-web/src/server.rs`
+- [ ] Add route registrations in `/home/daniel/Coding/Rust/tama/crates/tama-web/src/server.rs`
 - [ ] Update the import line in `server.rs` to include new handlers
-- [ ] Run `cd /home/daniel/Coding/Rust/koji && cargo build --package koji-web` — succeeds
-- [ ] Run `cargo test --package koji-web -- backends_api` — no regressions
+- [ ] Run `cd /home/daniel/Coding/Rust/tama && cargo build --package tama-web` — succeeds
+- [ ] Run `cargo test --package tama-web -- backends_api` — no regressions
 - [ ] Run `cargo fmt --all`
 - [ ] Commit with message: `feat(web): add version endpoints and return all versions in list_backends`
 
@@ -669,16 +669,16 @@ use crate::api::backends::{
 The backends page currently shows one `BackendCard` per backend type. With multiple versions, we need to show one card per version. The existing `BackendCard` component already displays version info — we just need to add an "Activate" button for inactive versions and a visual "Active" badge.
 
 **Files:**
-- Modify: `/home/daniel/Coding/Rust/koji/crates/koji-web/src/components/backend_card.rs`
-- Modify: `/home/daniel/Coding/Rust/koji/crates/koji-web/src/pages/backends.rs`
+- Modify: `/home/daniel/Coding/Rust/tama/crates/tama-web/src/components/backend_card.rs`
+- Modify: `/home/daniel/Coding/Rust/tama/crates/tama-web/src/pages/backends.rs`
 
 **What to implement:**
 
 ### 3a. Update `BackendCardDto` in BOTH locations
 
 **Important:** `BackendCardDto` is defined in **two places** and both must be updated:
-1. `/home/daniel/Coding/Rust/koji/crates/koji-web/src/api/backends.rs` — server-side DTO (used for JSON serialization in API responses)
-2. `/home/daniel/Coding/Rust/koji/crates/koji-web/src/components/backend_card.rs` — client-side DTO (used by Leptos wasm frontend)
+1. `/home/daniel/Coding/Rust/tama/crates/tama-web/src/api/backends.rs` — server-side DTO (used for JSON serialization in API responses)
+2. `/home/daniel/Coding/Rust/tama/crates/tama-web/src/components/backend_card.rs` — client-side DTO (used by Leptos wasm frontend)
 
 Add a new field to track whether this specific version card is the active one:
 
@@ -752,7 +752,7 @@ on_activate: Option<Callback<String>>,
 
 ### 3c. Update Backends page to pass version data
 
-In `/home/daniel/Coding/Rust/koji/crates/koji-web/src/pages/backends.rs`, update the card rendering to include `is_active`:
+In `/home/daniel/Coding/Rust/tama/crates/tama-web/src/pages/backends.rs`, update the card rendering to include `is_active`:
 
 ```rust
 // In the card rendering loop, change:
@@ -847,13 +847,13 @@ let is_active = info.version == active_version;  // where active_version comes f
 ```
 
 **Steps:**
-- [ ] Add `is_active: bool` field to `BackendCardDto` in `/home/daniel/Coding/Rust/koji/crates/koji-web/src/components/backend_card.rs`
+- [ ] Add `is_active: bool` field to `BackendCardDto` in `/home/daniel/Coding/Rust/tama/crates/tama-web/src/components/backend_card.rs`
 - [ ] Add `on_activate: Option<Callback<(String, String)>>` prop to `BackendCard` component
 - [ ] Update the legend in `BackendCard` to show "Active" badge for active versions
 - [ ] Add "Activate" button to `BackendCard` for inactive installed versions
-- [ ] Update `/home/daniel/Coding/Rust/koji/crates/koji-web/src/pages/backends.rs` to pass `is_active` and `on_activate` callback
+- [ ] Update `/home/daniel/Coding/Rust/tama/crates/tama-web/src/pages/backends.rs` to pass `is_active` and `on_activate` callback
 - [ ] Update API response building in `api/backends.rs` to set `is_active` per card
-- [ ] Build the web frontend: `cd /home/daniel/Coding/Rust/koji/crates/koji-web && cargo build` — succeeds
+- [ ] Build the web frontend: `cd /home/daniel/Coding/Rust/tama/crates/tama-web && cargo build` — succeeds
 - [ ] Run `cargo test --workspace` — no regressions
 - [ ] Run `cargo fmt --all`
 - [ ] Commit with message: `feat(web): show version cards with activate button in backends page`
@@ -873,7 +873,7 @@ let is_active = info.version == active_version;  // where active_version comes f
 The CLI needs commands to list all versions and switch between them. This gives power users a quick way to manage versions without editing config.toml.
 
 **Files:**
-- Modify: `/home/daniel/Coding/Rust/koji/crates/koji-cli/src/commands/backend.rs`
+- Modify: `/home/daniel/Coding/Rust/tama/crates/tama-cli/src/commands/backend.rs`
 
 **What to implement:**
 
@@ -932,7 +932,7 @@ async fn cmd_all_versions(_config: &Config, name: Option<&str>) -> Result<()> {
         backend_type: BackendType,
         version: String,
         path: std::path::PathBuf,
-        gpu_type: Option<koji_core::gpu::GpuType>,
+        gpu_type: Option<tama_core::gpu::GpuType>,
         is_active: bool,
     }
 
@@ -1006,9 +1006,9 @@ async fn cmd_all_versions(_config: &Config, name: Option<&str>) -> Result<()> {
 
     // Show usage tip
     if let Some(target) = name {
-        println!("To activate a version: koji backend switch {} <version>", target);
+        println!("To activate a version: tama backend switch {} <version>", target);
     } else {
-        println!("To activate a version: koji backend switch <backend_name> <version>");
+        println!("To activate a version: tama backend switch <backend_name> <version>");
     }
 
     Ok(())
@@ -1025,7 +1025,7 @@ async fn cmd_switch(_config: &Config, name: &str, version: &str) -> Result<()> {
     let versions = match registry.list_all_versions(name)? {
         Some(v) => v,
         None => anyhow::bail!(
-            "Backend '{}' not found. Run `koji backend list` to see installed backends.",
+            "Backend '{}' not found. Run `tama backend list` to see installed backends.",
             name
         ),
     };
@@ -1122,20 +1122,20 @@ println!("  {} [{}]{} (v{})", backend.name, backend.backend_type, if is_active {
 Where `is_active` can be derived from `registry.get(name)` matching the version.
 
 **Steps:**
-- [ ] Add `AllVersions`, `Switch`, and `RemoveVersion` subcommands to `BackendSubcommand` enum in `/home/daniel/Coding/Rust/koji/crates/koji-cli/src/commands/backend.rs`
+- [ ] Add `AllVersions`, `Switch`, and `RemoveVersion` subcommands to `BackendSubcommand` enum in `/home/daniel/Coding/Rust/tama/crates/tama-cli/src/commands/backend.rs`
 - [ ] Add routing in `run()` function
 - [ ] Implement `cmd_all_versions()`, `cmd_switch()`, and `cmd_remove_version()` functions
 - [ ] Update `cmd_list()` to show active marker with `*`
-- [ ] Run `cd /home/daniel/Coding/Rust/koji && cargo build --package koji-cli` — succeeds
+- [ ] Run `cd /home/daniel/Coding/Rust/tama && cargo build --package tama-cli` — succeeds
 - [ ] Run `cargo test --workspace` — no regressions
 - [ ] Run `cargo fmt --all`
 - [ ] Commit with message: `feat(cli): add backend switch, all-versions, and remove-version commands`
 
 **Acceptance criteria:**
-- [ ] `koji backend list --all` shows all versions with `* active` marker
-- [ ] `koji backend switch <name> <version>` activates a version
-- [ ] `koji backend switch` validates the version exists before activating
-- [ ] `koji backend remove-version <name> <version>` removes one version (files + DB)
+- [ ] `tama backend list --all` shows all versions with `* active` marker
+- [ ] `tama backend switch <name> <version>` activates a version
+- [ ] `tama backend switch` validates the version exists before activating
+- [ ] `tama backend remove-version <name> <version>` removes one version (files + DB)
 - [ ] CLI builds successfully
 
 ---
@@ -1146,8 +1146,8 @@ Where `is_active` can be derived from `registry.get(name)` matching the version.
 When the user edits default args in the backends page, the changes are stored in config.toml under `[backends.<name>]`. Since default args are shared across all versions (per-backend), we need to make sure the API and UI handle this correctly. This is mostly about ensuring the existing `update_backend_default_args` handler works with the new multi-version data model — no changes should be needed, but we should verify.
 
 **Files:**
-- Verify: `/home/daniel/Coding/Rust/koji/crates/koji-web/src/api/backends.rs` (existing `update_backend_default_args`)
-- Verify: `/home/daniel/Coding/Rust/koji/crates/koji-core/src/config/types.rs` (`BackendConfig.version` field)
+- Verify: `/home/daniel/Coding/Rust/tama/crates/tama-web/src/api/backends.rs` (existing `update_backend_default_args`)
+- Verify: `/home/daniel/Coding/Rust/tama/crates/tama-core/src/config/types.rs` (`BackendConfig.version` field)
 
 **What to implement:**
 
@@ -1164,7 +1164,7 @@ let default_args = default_args_map.get(&type_.to_string()).cloned().unwrap_or_d
 
 ### 5b. Verify `resolve_backend_path` works with multi-version
 
-The existing `resolve_backend_path()` in `/home/daniel/Coding/Rust/koji/crates/koji-core/src/config/resolve/mod.rs` already handles version pins from config.toml and falls back to the active version. No changes needed — just verify it works:
+The existing `resolve_backend_path()` in `/home/daniel/Coding/Rust/tama/crates/tama-core/src/config/resolve/mod.rs` already handles version pins from config.toml and falls back to the active version. No changes needed — just verify it works:
 
 - If `config.backends[name].version` is set → looks up that specific version in DB
 - If not set → uses the active version from DB (`is_active = 1`)
@@ -1172,7 +1172,7 @@ The existing `resolve_backend_path()` in `/home/daniel/Coding/Rust/koji/crates/k
 **Steps:**
 - [ ] Verify `update_backend_default_args` handler works unchanged with multi-version cards
 - [ ] Verify `resolve_backend_path()` correctly resolves to active version when no pin is set
-- [ ] Run `cd /home/daniel/Coding/Rust/koji && cargo test --workspace` — all tests pass
+- [ ] Run `cd /home/daniel/Coding/Rust/tama && cargo test --workspace` — all tests pass
 - [ ] Run `cargo fmt --all`
 - [ ] Commit with message: `chore(integration): verify default args and path resolution work with multi-version backends`
 

@@ -1,6 +1,6 @@
 # Status Command Redesign - Implementation Plan
 
-**Goal:** Unify `koji status` and `koji model ps` into a single fast command backed by a new proxy `/status` endpoint.
+**Goal:** Unify `tama status` and `tama model ps` into a single fast command backed by a new proxy `/status` endpoint.
 **Architecture:** Add `GET /status` to the proxy server that returns all model state, config, VRAM, and metrics in one JSON call. Rewrite `cmd_status` to consume this endpoint with a 500ms timeout, falling back to config-only display. Remove `model ps` entirely.
 **Tech Stack:** Rust, axum, reqwest, serde_json, tokio (spawn_blocking for VRAM)
 
@@ -11,8 +11,8 @@
 ### Task 1: Add `GET /status` endpoint to proxy server
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy.rs`
-- Modify: `crates/koji-core/src/proxy/server.rs`
+- Modify: `crates/tama-core/src/proxy.rs`
+- Modify: `crates/tama-core/src/proxy/server.rs`
 
 **Steps:**
 - [ ] Add `build_status_response(&self) -> serde_json::Value` method to `ProxyState` in `proxy.rs`
@@ -34,7 +34,7 @@
 ### Task 2: Rewrite `cmd_status` in CLI
 
 **Files:**
-- Modify: `crates/koji-cli/src/main.rs`
+- Modify: `crates/tama-cli/src/main.rs`
 
 **Steps:**
 - [ ] Rewrite `cmd_status` to:
@@ -51,11 +51,11 @@
 - [ ] Run `cargo build --workspace` to verify compilation
 - [ ] Commit
 
-### Task 3: Remove `koji model ps` command
+### Task 3: Remove `tama model ps` command
 
 **Files:**
-- Modify: `crates/koji-cli/src/commands/model.rs`
-- Modify: `crates/koji-cli/src/main.rs` (if ModelCommands is defined there)
+- Modify: `crates/tama-cli/src/commands/model.rs`
+- Modify: `crates/tama-cli/src/main.rs` (if ModelCommands is defined there)
 
 **Steps:**
 - [ ] Remove `Ps` variant from `ModelCommands` enum

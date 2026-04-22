@@ -1,10 +1,10 @@
 # Pull Quant from HuggingFace on Model Editor — Implementation Plan
 
-**Goal:** Replace the bare "+ Add Quant" button on the koji model edit page with a "+ Pull Quant" button that opens a modal-hosted wizard reused from the existing `/pull` page, downloading new GGUF quants from HuggingFace and merging them into the editor's quants table without losing unsaved form edits.
+**Goal:** Replace the bare "+ Add Quant" button on the tama model edit page with a "+ Pull Quant" button that opens a modal-hosted wizard reused from the existing `/pull` page, downloading new GGUF quants from HuggingFace and merging them into the editor's quants table without losing unsaved form edits.
 
-**Architecture:** Extract the existing wizard state machine from `crates/koji-web/src/pages/pull.rs` into a reusable Leptos component (`components/pull_quant_wizard.rs`). Introduce a new general-purpose `Modal` shell component (`components/modal.rs`) that renders children unconditionally and toggles visibility via a CSS class, so the wizard's SSE futures keep running across modal close/reopen cycles. The model editor mounts the wizard inside the modal, with `form_model` pre-filled as `initial_repo`, and merges completed quants into its local `quants` signal via an `on_complete` callback.
+**Architecture:** Extract the existing wizard state machine from `crates/tama-web/src/pages/pull.rs` into a reusable Leptos component (`components/pull_quant_wizard.rs`). Introduce a new general-purpose `Modal` shell component (`components/modal.rs`) that renders children unconditionally and toggles visibility via a CSS class, so the wizard's SSE futures keep running across modal close/reopen cycles. The model editor mounts the wizard inside the modal, with `form_model` pre-filled as `initial_repo`, and merges completed quants into its local `quants` signal via an `on_complete` callback.
 
-**Tech Stack:** Rust + Leptos 0.7 (CSR/WASM), `gloo-net` for HTTP + SSE, `web-sys` for keyboard events, existing koji backend endpoints (`GET /koji/v1/hf/*repo_id`, `POST /koji/v1/pulls`, `GET /koji/v1/pulls/:job_id/stream`) — no backend changes.
+**Tech Stack:** Rust + Leptos 0.7 (CSR/WASM), `gloo-net` for HTTP + SSE, `web-sys` for keyboard events, existing tama backend endpoints (`GET /tama/v1/hf/*repo_id`, `POST /tama/v1/pulls`, `GET /tama/v1/pulls/:job_id/stream`) — no backend changes.
 
 **Reference spec:** [`docs/plans/2026-04-07-pull-quant-from-model-editor-spec.md`](./2026-04-07-pull-quant-from-model-editor-spec.md) — read this first. Every task in this plan corresponds to a section of that spec; section numbers are cited inline.
 
@@ -12,37 +12,37 @@
 
 **Project conventions** (from `AGENTS.md` and `Makefile`):
 - Format: `cargo fmt --all`
-- Lint: `cargo clippy --workspace -- -D warnings` (the project's full lint pass also runs `cargo clippy --package koji-web --features ssr -- -D warnings` — use `make clippy` to run both)
-- Test: `cargo test --workspace` (or `make test`, which additionally rebuilds the WASM frontend via `trunk build` and runs `cargo test --package koji-web --features ssr`)
+- Lint: `cargo clippy --workspace -- -D warnings` (the project's full lint pass also runs `cargo clippy --package tama-web --features ssr -- -D warnings` — use `make clippy` to run both)
+- Test: `cargo test --workspace` (or `make test`, which additionally rebuilds the WASM frontend via `trunk build` and runs `cargo test --package tama-web --features ssr`)
 - Build (host crates only): `cargo build --workspace`
 - Build the WASM frontend (required to actually serve the UI): `make build-frontend-dev`
-- Run a local koji instance for smoke tests: `make build-frontend-dev && cargo run -p koji-cli -- serve` — then open `http://127.0.0.1:11434/pull` (or `/models`, etc.) in a browser. The default port is 11434 (`crates/koji-cli/src/cli.rs:120`).
+- Run a local tama instance for smoke tests: `make build-frontend-dev && cargo run -p tama-cli -- serve` — then open `http://127.0.0.1:11434/pull` (or `/models`, etc.) in a browser. The default port is 11434 (`crates/tama-cli/src/cli.rs:120`).
 - Commit prefixes: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`
 - 4-space indent, max line ~100 chars
 - Doc comments on public items
 
-**Note on smoke tests:** every smoke test in this plan that says "navigate to `/something`" assumes you have started a local koji instance via the command above. The WASM frontend must be rebuilt with `make build-frontend-dev` after any change to a `crates/koji-web` source file before that change is visible in the browser.
+**Note on smoke tests:** every smoke test in this plan that says "navigate to `/something`" assumes you have started a local tama instance via the command above. The WASM frontend must be rebuilt with `make build-frontend-dev` after any change to a `crates/tama-web` source file before that change is visible in the browser.
 
 ---
 
 ## Task 1: Add the `Modal` shell component
 
 **Context:**
-The koji-web crate currently has zero modal components — `grep -ri modal crates/koji-web/src` returns nothing. Before any wizard work, we introduce a general-purpose `Modal` component that other code can mount inside. Critical design choice (decided in spec rev 3): the modal **always renders its children** in the DOM and toggles visibility via the `modal-backdrop--open` CSS class, so child components are preserved across open/close cycles. This is what makes it safe for the pull wizard to keep its SSE futures running when the user closes the modal mid-download. As a consequence, the `children` prop must be `ChildrenFn` (not `Children`), because Leptos's `Children` is a single-shot `FnOnce`.
+The tama-web crate currently has zero modal components — `grep -ri modal crates/tama-web/src` returns nothing. Before any wizard work, we introduce a general-purpose `Modal` component that other code can mount inside. Critical design choice (decided in spec rev 3): the modal **always renders its children** in the DOM and toggles visibility via the `modal-backdrop--open` CSS class, so child components are preserved across open/close cycles. This is what makes it safe for the pull wizard to keep its SSE futures running when the user closes the modal mid-download. As a consequence, the `children` prop must be `ChildrenFn` (not `Children`), because Leptos's `Children` is a single-shot `FnOnce`.
 
-The Modal also needs an Escape-key handler. The handler is registered **once** at component setup (not inside a Leptos `Effect`, which would re-register on every dependency change). It uses `wasm_bindgen::closure::Closure` and is cleaned up via `on_cleanup`. This requires `web_sys::KeyboardEvent`, which is **not** currently in the `web-sys` features list of `crates/koji-web/Cargo.toml` — that file must be modified or the build will fail.
+The Modal also needs an Escape-key handler. The handler is registered **once** at component setup (not inside a Leptos `Effect`, which would re-register on every dependency change). It uses `wasm_bindgen::closure::Closure` and is cleaned up via `on_cleanup`. This requires `web_sys::KeyboardEvent`, which is **not** currently in the `web-sys` features list of `crates/tama-web/Cargo.toml` — that file must be modified or the build will fail.
 
 This task delivers a compiles-and-runs-but-unused Modal component. No other file references it yet. Spec sections 6.1–6.4 fully describe the props, DOM, behavior, and CSS.
 
 **Files:**
-- Create: `crates/koji-web/src/components/modal.rs`
-- Modify: `crates/koji-web/src/components/mod.rs` (add `pub mod modal;`)
-- Modify: `crates/koji-web/Cargo.toml` (add `KeyboardEvent` to `web-sys` features)
-- Modify: `crates/koji-web/style.css` (append modal CSS)
+- Create: `crates/tama-web/src/components/modal.rs`
+- Modify: `crates/tama-web/src/components/mod.rs` (add `pub mod modal;`)
+- Modify: `crates/tama-web/Cargo.toml` (add `KeyboardEvent` to `web-sys` features)
+- Modify: `crates/tama-web/style.css` (append modal CSS)
 
 **What to implement:**
 
-1. **`crates/koji-web/Cargo.toml`** — locate the `web-sys` dependency line:
+1. **`crates/tama-web/Cargo.toml`** — locate the `web-sys` dependency line:
    ```toml
    web-sys = { workspace = true, features = ["Window", "Document", "HtmlElement", "HtmlInputElement", "EventSource", "EventSourceInit", "MessageEvent", "Event"] }
    ```
@@ -53,16 +53,16 @@ This task delivers a compiles-and-runs-but-unused Modal component. No other file
 
    Note: `web_sys::console::warn_1` requires the `Console` feature
    (`web-sys-0.3.x/src/features/gen_console.rs` documents this). No other file
-   in koji-web currently uses `web_sys::console::*`, so `"Console"` is genuinely
+   in tama-web currently uses `web_sys::console::*`, so `"Console"` is genuinely
    new. Without it, Task 3's `cargo build --workspace` will fail with `function
    or associated item warn_1 not found in module console`.
 
-2. **`crates/koji-web/src/components/mod.rs`** — add `pub mod modal;` alongside the existing `pub mod nav;` and `pub mod sparkline;` declarations.
+2. **`crates/tama-web/src/components/mod.rs`** — add `pub mod modal;` alongside the existing `pub mod nav;` and `pub mod sparkline;` declarations.
 
-3. **`crates/koji-web/src/components/modal.rs`** — new file. Implement:
+3. **`crates/tama-web/src/components/modal.rs`** — new file. Implement:
 
    The Closure construction style follows the existing convention in
-   `crates/koji-web/src/pages/dashboard.rs` (around line 115): use
+   `crates/tama-web/src/pages/dashboard.rs` (around line 115): use
    `Closure::<dyn Fn(...)>::new(move |evt| { ... })`, not
    `Closure::wrap(Box::new(...) as Box<dyn Fn(_)>)`. The class-toggle uses the
    tuple form `class=("modal-backdrop--open", move || open.get())` documented at
@@ -166,7 +166,7 @@ This task delivers a compiles-and-runs-but-unused Modal component. No other file
    - The `on_cleanup` block removes the listener when the Modal is unmounted (which only happens when its host unmounts, e.g. navigating away from the page).
    - Do **not** add `role="dialog"`, `aria-modal`, focus trap, or scroll lock — explicitly out of scope (spec §6.3).
 
-4. **`crates/koji-web/style.css`** — append at end of file:
+4. **`crates/tama-web/style.css`** — append at end of file:
 
    ```css
    /* ── Modal overlay ──────────────────────────────────────────────────────── */
@@ -228,15 +228,15 @@ This task delivers a compiles-and-runs-but-unused Modal component. No other file
 - Do **not** use `Children` instead of `ChildrenFn` — `Children` is `FnOnce` and won't compose with `on:click` handlers cleanly under the always-rendered design.
 
 **Steps:**
-- [ ] Modify `crates/koji-web/Cargo.toml` to add `"KeyboardEvent"` to the `web-sys` features list.
+- [ ] Modify `crates/tama-web/Cargo.toml` to add `"KeyboardEvent"` to the `web-sys` features list.
 - [ ] Run `cargo build --workspace` to verify the Cargo.toml edit alone compiles cleanly (no source changes yet, so this is a sanity check).
   - Did it succeed? Must pass before continuing.
-- [ ] Create `crates/koji-web/src/components/modal.rs` with the contents specified above.
-- [ ] Add `pub mod modal;` to `crates/koji-web/src/components/mod.rs`.
-- [ ] Append the modal CSS block to `crates/koji-web/style.css`.
+- [ ] Create `crates/tama-web/src/components/modal.rs` with the contents specified above.
+- [ ] Add `pub mod modal;` to `crates/tama-web/src/components/mod.rs`.
+- [ ] Append the modal CSS block to `crates/tama-web/style.css`.
 - [ ] Run `cargo build --workspace`.
   - Did it succeed? If not, the most likely failures are: missing `KeyboardEvent` import, `Closure` API mismatch, or `Callback::run` signature drift. Fix and re-run before continuing.
-- [ ] Run `make build-frontend-dev` to verify the WASM build also succeeds (the workspace build above only builds koji-web for the host target).
+- [ ] Run `make build-frontend-dev` to verify the WASM build also succeeds (the workspace build above only builds tama-web for the host target).
   - Did it succeed? Common WASM-only failures: web-sys feature still missing despite the Cargo.toml edit (re-check the file), or `wasm32-unknown-unknown` target not installed (the Makefile target installs it via `rustup target add` automatically). Fix and re-run.
 - [ ] Run `cargo clippy --workspace -- -D warnings`.
   - Did it pass? Common issues: unused import, missing doc comment on a public item. Fix and re-run.
@@ -246,11 +246,11 @@ This task delivers a compiles-and-runs-but-unused Modal component. No other file
 - [ ] Commit with message: `feat(web): add Modal shell component`
 
 **Acceptance criteria:**
-- [ ] `crates/koji-web/src/components/modal.rs` exists and exports `Modal`.
+- [ ] `crates/tama-web/src/components/modal.rs` exists and exports `Modal`.
 - [ ] `cargo build --workspace` passes.
 - [ ] `cargo clippy --workspace -- -D warnings` passes.
 - [ ] `cargo test --workspace` shows the same pass/fail counts as before this task.
-- [ ] `KeyboardEvent` appears in the `web-sys` features list in `crates/koji-web/Cargo.toml`.
+- [ ] `KeyboardEvent` appears in the `web-sys` features list in `crates/tama-web/Cargo.toml`.
 - [ ] `style.css` ends with the modal CSS block.
 - [ ] No other file in the repo references `Modal` yet.
 
@@ -259,12 +259,12 @@ This task delivers a compiles-and-runs-but-unused Modal component. No other file
 ## Task 2: Extract `PullQuantWizard` and rewire `pages/pull.rs`
 
 **Context:**
-Today, `crates/koji-web/src/pages/pull.rs` contains a self-contained 6-step wizard (~600 LOC) that the user accesses at `/pull` to pull GGUF models from HuggingFace. We want to reuse this wizard from the model edit page too. This task hoists the entire state machine into a new reusable component `crates/koji-web/src/components/pull_quant_wizard.rs`, parameterized by three optional props (`initial_repo`, `is_open`, `on_complete`/`on_close`), and shrinks `pages/pull.rs` to a thin wrapper that mounts the new component with no special props (which makes it behave identically to today).
+Today, `crates/tama-web/src/pages/pull.rs` contains a self-contained 6-step wizard (~600 LOC) that the user accesses at `/pull` to pull GGUF models from HuggingFace. We want to reuse this wizard from the model edit page too. This task hoists the entire state machine into a new reusable component `crates/tama-web/src/components/pull_quant_wizard.rs`, parameterized by three optional props (`initial_repo`, `is_open`, `on_complete`/`on_close`), and shrinks `pages/pull.rs` to a thin wrapper that mounts the new component with no special props (which makes it behave identically to today).
 
 The wizard's existing state machine (`RepoInput → LoadingQuants → SelectQuants → SetContext → Downloading → Done`) is moved verbatim. The new additions on top of the verbatim move are:
 
 1. A `CompletedQuant` public struct (spec §5.2) emitted via `on_complete`.
-2. A local copy of `infer_quant_from_filename` (spec §5.5) — duplicated from `crates/koji-core/src/models/pull.rs:283` because `koji-core` is `ssr`-only and can't compile to WASM.
+2. A local copy of `infer_quant_from_filename` (spec §5.5) — duplicated from `crates/tama-core/src/models/pull.rs:283` because `tama-core` is `ssr`-only and can't compile to WASM.
 3. A `did_complete: RwSignal<bool>` flag.
 4. A **reset Effect** that runs on `(closed → open)` transitions when `is_open` is `Some`. **It tracks ONLY `is_open`** — `wizard_step` and `initial_repo` are read via `get_untracked` to prevent a race with the on_complete Effect on the `Done` transition (spec §5.4 #1, rev 3 critical fix).
 5. An **on_complete Effect** that watches `wizard_step`, fires the callback exactly once when step transitions to `Done` and `did_complete == false`, then sets `did_complete = true`.
@@ -275,20 +275,20 @@ The wizard's existing state machine (`RepoInput → LoadingQuants → SelectQuan
    - `Done` step renders a "Close" button when `on_complete.is_some()`, otherwise renders the existing "View Models →" link.
 7. The wizard does **not** render `<div class="form-card card">` chrome anymore — that's now the host's responsibility (spec §5.4 #7), so `pages/pull.rs` retains the wrapper but the model editor's modal does not need to add one.
 
-The verification gate for this task is that visiting `/pull` in a running koji instance still works end-to-end, identically to before — same step indicator, same buttons, same downloads, same "View Models →" link. This is **manual smoke test 1** in spec §9.
+The verification gate for this task is that visiting `/pull` in a running tama instance still works end-to-end, identically to before — same step indicator, same buttons, same downloads, same "View Models →" link. This is **manual smoke test 1** in spec §9.
 
 **Files:**
-- Create: `crates/koji-web/src/components/pull_quant_wizard.rs`
-- Modify: `crates/koji-web/src/components/mod.rs` (add `pub mod pull_quant_wizard;`)
-- Modify: `crates/koji-web/src/pages/pull.rs` (shrink to thin wrapper)
+- Create: `crates/tama-web/src/components/pull_quant_wizard.rs`
+- Modify: `crates/tama-web/src/components/mod.rs` (add `pub mod pull_quant_wizard;`)
+- Modify: `crates/tama-web/src/pages/pull.rs` (shrink to thin wrapper)
 
 **What to implement:**
 
-### 2a. Create `crates/koji-web/src/components/pull_quant_wizard.rs`
+### 2a. Create `crates/tama-web/src/components/pull_quant_wizard.rs`
 
 Move the following items from `pages/pull.rs` verbatim into the new file. Line
 numbers below are approximate — grep by name to be safe (`grep -n 'struct
-QuantEntry\|struct JobProgress\|...' crates/koji-web/src/pages/pull.rs`):
+QuantEntry\|struct JobProgress\|...' crates/tama-web/src/pages/pull.rs`):
 
 - **Types** (around lines 10, 17, 28, 36, 47, 71, 77):
   - `struct QuantEntry { filename, quant, size_bytes }`
@@ -338,10 +338,10 @@ pub struct CompletedQuant {
 }
 
 /// Local copy of `infer_quant_from_filename` from
-/// `crates/koji-core/src/models/pull.rs` (around line 283). **MUST stay in
-/// sync** with that function. Duplicated here because `koji-core` is only
+/// `crates/tama-core/src/models/pull.rs` (around line 283). **MUST stay in
+/// sync** with that function. Duplicated here because `tama-core` is only
 /// available under the `ssr` feature and pulls in tokio/sqlite/reqwest, which
-/// can't compile to WASM. If `koji-core` is later split into a WASM-compatible
+/// can't compile to WASM. If `tama-core` is later split into a WASM-compatible
 /// utility crate, replace this with a direct import.
 fn infer_quant_from_filename(filename: &str) -> Option<String> {
     let stem = filename.strip_suffix(".gguf")?;
@@ -435,7 +435,7 @@ pub fn PullQuantWizard(
 
            // Spawn the same fetch the Search button does today.
            wasm_bindgen_futures::spawn_local(async move {
-               let url = format!("/koji/v1/hf/{}", repo);
+               let url = format!("/tama/v1/hf/{}", repo);
                match gloo_net::http::Request::get(&url).send().await {
                    Ok(resp) => match resp.json::<Vec<QuantEntry>>().await {
                        Ok(quants) => {
@@ -599,11 +599,11 @@ pub fn PullQuantWizard(
      model editor passes both (→ "Close"). The spec was updated to match in
      rev 4 alongside this plan.
 
-### 2b. Update `crates/koji-web/src/components/mod.rs`
+### 2b. Update `crates/tama-web/src/components/mod.rs`
 
 Add `pub mod pull_quant_wizard;` alongside the existing module declarations.
 
-### 2c. Rewrite `crates/koji-web/src/pages/pull.rs`
+### 2c. Rewrite `crates/tama-web/src/pages/pull.rs`
 
 Delete the entire current contents and replace with:
 
@@ -630,26 +630,26 @@ That's the entire file. No imports for `gloo_net`, `EventSource`, etc. — those
 
 **What NOT to do:**
 - Do **not** import `Modal` here. Task 3 is the first place Modal is mounted.
-- Do **not** make any change to `crates/koji-web/src/pages/model_editor.rs`. That's task 3.
-- Do **not** modify `koji-core` to expose `infer_quant_from_filename` — duplicating it locally is the agreed approach (spec §5.5).
+- Do **not** make any change to `crates/tama-web/src/pages/model_editor.rs`. That's task 3.
+- Do **not** modify `tama-core` to expose `infer_quant_from_filename` — duplicating it locally is the agreed approach (spec §5.5).
 - Do **not** "improve" the reset Effect by tracking more signals reactively. The single tracked read of `is_open` is the entire correctness story.
 - Do **not** add `Send + Sync` bounds explicitly anywhere — Leptos's `Callback<T>` already requires them and the captured types in this plan all satisfy them.
 - Do **not** delete or reorganize the existing wizard logic for clarity. Move it verbatim. Refactoring is a future task.
 
 **Steps:**
-- [ ] Create `crates/koji-web/src/components/pull_quant_wizard.rs` with all hoisted types/functions/imports plus the new `CompletedQuant`, `infer_quant_from_filename`, `did_complete` signal, reset Effect, on_complete Effect, and gated UI elements.
-- [ ] Add `pub mod pull_quant_wizard;` to `crates/koji-web/src/components/mod.rs`.
-- [ ] Replace `crates/koji-web/src/pages/pull.rs` contents with the thin wrapper above.
+- [ ] Create `crates/tama-web/src/components/pull_quant_wizard.rs` with all hoisted types/functions/imports plus the new `CompletedQuant`, `infer_quant_from_filename`, `did_complete` signal, reset Effect, on_complete Effect, and gated UI elements.
+- [ ] Add `pub mod pull_quant_wizard;` to `crates/tama-web/src/components/mod.rs`.
+- [ ] Replace `crates/tama-web/src/pages/pull.rs` contents with the thin wrapper above.
 - [ ] Run `cargo build --workspace`.
   - Did it succeed? Most likely failures: missed imports, `Show` not in scope (it's `leptos::prelude::*`), `Effect::new` signature mismatch, `Signal::derive` taking a closure that needs to be `'static`, `Callback::run` arity. Fix and re-run before continuing.
 - [ ] Run `cargo clippy --workspace -- -D warnings`.
   - Common issues: dead code warnings on the old `Pull` page's helper imports that you forgot to delete; unused `format!` arguments. Fix and re-run.
 - [ ] Run `cargo fmt --all`.
 - [ ] Run `cargo test --workspace`.
-  - Did all existing tests still pass? If the koji-web crate has any non-WASM unit tests under `tests/` that still reference `Pull` internals, they'll need adjustment. (At spec-write time, only `tests/server_test.rs` exists, gated on `ssr` feature, and shouldn't touch wizard internals — but verify.)
+  - Did all existing tests still pass? If the tama-web crate has any non-WASM unit tests under `tests/` that still reference `Pull` internals, they'll need adjustment. (At spec-write time, only `tests/server_test.rs` exists, gated on `ssr` feature, and shouldn't touch wizard internals — but verify.)
 - [ ] **Manual smoke test 1 — `/pull` regression** (spec §9 test 1). This is the verification gate. Steps:
   1. Build the WASM frontend: `make build-frontend-dev` (must succeed before the new code is visible in the browser).
-  2. Start a local koji instance: `cargo run -p koji-cli -- serve` (binds to `127.0.0.1:11434` by default — see `crates/koji-cli/src/cli.rs:114-122`).
+  2. Start a local tama instance: `cargo run -p tama-cli -- serve` (binds to `127.0.0.1:11434` by default — see `crates/tama-cli/src/cli.rs:114-122`).
   3. Open <http://127.0.0.1:11434/pull> in a browser.
   4. The "1. Repo" pill is visible in the wizard step indicator (because `initial_repo` is empty).
   5. Enter a real HF repo ID (use `bartowski/Qwen3-0.6B-GGUF` — small download, well-known to work) and click "Search".
@@ -663,8 +663,8 @@ That's the entire file. No imports for `gloo_net`, `EventSource`, etc. — those
 - [ ] If smoke test 1 passes, commit with message: `refactor(web): extract PullQuantWizard component from /pull page`
 
 **Acceptance criteria:**
-- [ ] `crates/koji-web/src/components/pull_quant_wizard.rs` exists and exports `PullQuantWizard` and `CompletedQuant`.
-- [ ] `crates/koji-web/src/pages/pull.rs` is ≤ 25 lines and imports `PullQuantWizard`.
+- [ ] `crates/tama-web/src/components/pull_quant_wizard.rs` exists and exports `PullQuantWizard` and `CompletedQuant`.
+- [ ] `crates/tama-web/src/pages/pull.rs` is ≤ 25 lines and imports `PullQuantWizard`.
 - [ ] `cargo build --workspace`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace` all pass.
 - [ ] Manual smoke test 1 (`/pull` regression) passes — the page behaves identically to before, end-to-end download verified.
 - [ ] The reset Effect's body has exactly one `is_open_sig.get()` call and uses `get_untracked()` for `initial_repo`, `wizard_step`, etc.
@@ -675,7 +675,7 @@ That's the entire file. No imports for `gloo_net`, `EventSource`, etc. — those
 ## Task 3: Wire the modal+wizard into the model editor
 
 **Context:**
-This is the user-facing payoff. The model edit page (`crates/koji-web/src/pages/model_editor.rs`) currently has a "+ Add Quant" button that just appends an empty row to the local `quants` signal. We replace it with a "+ Pull Quant" button that opens the wizard inside a modal, pre-filled with the current model's HF repo ID (`form_model`). When downloads complete, an `on_complete` callback merges the new quants into the local `quants` signal field-by-field, preserving any other unsaved form edits.
+This is the user-facing payoff. The model edit page (`crates/tama-web/src/pages/model_editor.rs`) currently has a "+ Add Quant" button that just appends an empty row to the local `quants` signal. We replace it with a "+ Pull Quant" button that opens the wizard inside a modal, pre-filled with the current model's HF repo ID (`form_model`). When downloads complete, an `on_complete` callback merges the new quants into the local `quants` signal field-by-field, preserving any other unsaved form edits.
 
 The button is disabled when `form_model` is empty, with a tooltip carried by a wrapping `<span>` (Firefox doesn't show `title` on disabled form controls). Spec §8 fully describes this section.
 
@@ -687,7 +687,7 @@ The modal is mounted with `pull_modal_open: RwSignal<bool>`. Because the Modal c
 This task includes manual smoke tests 2-8 from the spec.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/model_editor.rs`
+- Modify: `crates/tama-web/src/pages/model_editor.rs`
 
 **What to implement:**
 
@@ -773,7 +773,7 @@ At the bottom of the model editor's main view, mount the modal as a **sibling
 of the form's outer `<div>`** — i.e. as a second top-level node inside the
 success-branch `view! { }` block, after the closing `</div>` that follows
 `</form>` but before the closing `}.into_any()`. The relevant structure today
-(verified at `crates/koji-web/src/pages/model_editor.rs:1208-1224`):
+(verified at `crates/tama-web/src/pages/model_editor.rs:1208-1224`):
 
 ```rust
                             // ... model_status alert is INSIDE the form ...
@@ -849,14 +849,14 @@ and a confusing intermediate state.
 
 ### 3e. Verify nothing else references `add_quant_counter`
 
-Run `grep -n add_quant_counter crates/koji-web/src/pages/model_editor.rs` after the edits — should return zero matches. Same for the literal string `"+ Add Quant"`.
+Run `grep -n add_quant_counter crates/tama-web/src/pages/model_editor.rs` after the edits — should return zero matches. Same for the literal string `"+ Add Quant"`.
 
 **What NOT to do:**
 - Do **not** call `quants.set(...)` in `on_complete` — use `quants.update(...)`. The set form would discard the existing rows.
 - Do **not** re-fetch the model from `/api/models/:id` in `on_complete`. Decision 4 in the spec is "client-side merge, preserve unsaved form edits" — re-fetching would discard those edits.
 - Do **not** add a busy-state guard preventing modal close during downloads. Decision 6 explicitly chose option A: closing mid-download is allowed and downloads continue in the background.
 - Do **not** modify the Save button's serialization logic. The existing path that converts `quants: Vec<(String, QuantInfo)>` into `BTreeMap` on save (around line 547) handles new rows correctly.
-- Do **not** modify `crates/koji-web/src/pages/pull.rs` further. Task 2 already handled it.
+- Do **not** modify `crates/tama-web/src/pages/pull.rs` further. Task 2 already handled it.
 - Do **not** add a toast / log for mid-download close. Spec §8.7 documents it as a known caveat for v1.
 
 **Steps:**
@@ -864,7 +864,7 @@ Run `grep -n add_quant_counter crates/koji-web/src/pages/model_editor.rs` after 
 - [ ] Replace the `add_quant_counter` signal with `pull_modal_open`.
 - [ ] Replace the "+ Add Quant" button block with the "+ Pull Quant" button (wrapped in `<span title=...>`, with `prop:disabled` gated on `form_model`).
 - [ ] Add the `<Modal>` + `<PullQuantWizard>` mount at the bottom of the success view branch.
-- [ ] Run `grep -n add_quant_counter crates/koji-web/src/pages/model_editor.rs` — should return zero matches.
+- [ ] Run `grep -n add_quant_counter crates/tama-web/src/pages/model_editor.rs` — should return zero matches.
 - [ ] Run `cargo build --workspace`.
   - Did it succeed? Likely failures: closure `'static` errors (move things into the closure), `Callback::new` signature, `Signal::derive` lifetime, missing import. Fix and re-run.
 - [ ] Run `cargo clippy --workspace -- -D warnings`.
@@ -872,7 +872,7 @@ Run `grep -n add_quant_counter crates/koji-web/src/pages/model_editor.rs` after 
 - [ ] Run `cargo test --workspace`.
   - All existing tests should still pass.
 - [ ] **Manual smoke test 2 — disabled state** (spec §9 test 2):
-  1. Start the koji web UI (`make build-frontend-dev && cargo run -p koji-cli -- serve`) and open <http://127.0.0.1:11434/models/new/edit> in a browser. (The route is `/models/:id/edit` per `crates/koji-web/src/lib.rs:24`, with `id == "new"` as a special case handled in `model_editor::fetch_model`.)
+  1. Start the tama web UI (`make build-frontend-dev && cargo run -p tama-cli -- serve`) and open <http://127.0.0.1:11434/models/new/edit> in a browser. (The route is `/models/:id/edit` per `crates/tama-web/src/lib.rs:24`, with `id == "new"` as a special case handled in `model_editor::fetch_model`.)
   2. The "+ Pull Quant" button is visible and **disabled**.
   3. Hover over the button — a tooltip appears reading "Enter the HuggingFace repo above before pulling quants".
   4. Type a value into the model field (e.g. `bartowski/Qwen3-0.6B-GGUF`). The button enables.
@@ -932,7 +932,7 @@ Before pushing the branch / opening a PR:
 - [ ] On `feature/pull-quant-from-model-editor`, run the full check suite. The project's canonical gate is `make check` (which is `make fmt clippy test`):
   ```bash
   make fmt
-  make clippy             # runs both workspace clippy AND koji-web --features ssr clippy
+  make clippy             # runs both workspace clippy AND tama-web --features ssr clippy
   make test               # rebuilds the WASM frontend AND runs both workspace + ssr test passes
   cargo build --workspace # final sanity build
   ```
@@ -940,23 +940,23 @@ Before pushing the branch / opening a PR:
   ```bash
   cargo fmt --all
   cargo clippy --workspace -- -D warnings
-  cargo clippy --package koji-web --features ssr -- -D warnings
-  make build-frontend-dev   # or: cd crates/koji-web && trunk build
+  cargo clippy --package tama-web --features ssr -- -D warnings
+  make build-frontend-dev   # or: cd crates/tama-web && trunk build
   cargo test --workspace
-  cargo test --package koji-web --features ssr
+  cargo test --package tama-web --features ssr
   cargo build --workspace
   ```
 - [ ] `git log --oneline feature/pull-quant-from-model-editor` should show three feature commits (one per task) plus the spec commits from the brainstorming phase.
 - [ ] `git diff main..feature/pull-quant-from-model-editor --stat` should show changes only in:
-  - `crates/koji-web/src/components/mod.rs`
-  - `crates/koji-web/src/components/modal.rs` (new)
-  - `crates/koji-web/src/components/pull_quant_wizard.rs` (new)
-  - `crates/koji-web/src/pages/pull.rs` (massively shrunk)
-  - `crates/koji-web/src/pages/model_editor.rs`
-  - `crates/koji-web/style.css`
-  - `crates/koji-web/Cargo.toml`
+  - `crates/tama-web/src/components/mod.rs`
+  - `crates/tama-web/src/components/modal.rs` (new)
+  - `crates/tama-web/src/components/pull_quant_wizard.rs` (new)
+  - `crates/tama-web/src/pages/pull.rs` (massively shrunk)
+  - `crates/tama-web/src/pages/model_editor.rs`
+  - `crates/tama-web/style.css`
+  - `crates/tama-web/Cargo.toml`
   - `docs/plans/2026-04-07-pull-quant-from-model-editor-spec.md` (new, from brainstorm)
   - `docs/plans/2026-04-07-pull-quant-from-model-editor-plan.md` (new, this file)
 
-  No backend files (`crates/koji-core`, `crates/koji-cli`) should appear. If they do, something is wrong — backend changes were explicitly out of scope.
+  No backend files (`crates/tama-core`, `crates/tama-cli`) should appear. If they do, something is wrong — backend changes were explicitly out of scope.
 - [ ] Push branch, open PR to `develop`.

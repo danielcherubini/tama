@@ -4,7 +4,7 @@
 
 **Architecture:** A new `Option<u32>` field on `ModelConfig` stored in SQLite, resolved multiplicatively in two places: (1) when injecting `-c` into the backend launch command, and (2) in the opencode `/api/models` list response. Default is `Some(1)` via serde default. Migration v14 adds the column with `DEFAULT 1 CHECK(num_parallel >= 1)`.
 
-**Tech Stack:** Rust, SQLite (rusqlite), Axum (koji-web), Leptos (frontend), TOML serialization
+**Tech Stack:** Rust, SQLite (rusqlite), Axum (tama-web), Leptos (frontend), TOML serialization
 
 ---
 
@@ -14,8 +14,8 @@
 This task adds the `num_parallel` field to the core `ModelConfig` type and its DB record conversion methods. This is the foundation that all other tasks depend on. The field uses `Option<u32>` with a serde default of `Some(1)` so new models always serialize explicitly as `1`.
 
 **Files:**
-- Modify: `crates/koji-core/src/config/types.rs`
-- Test: `crates/koji-core/src/config/types.rs` (inline `mod tests`)
+- Modify: `crates/tama-core/src/config/types.rs`
+- Test: `crates/tama-core/src/config/types.rs` (inline `mod tests`)
 
 **What to implement:**
 
@@ -48,9 +48,9 @@ fn default_num_parallel() -> Option<u32> {
 - [ ] Update `to_db_record()` to include `num_parallel: self.num_parallel,`
 - [ ] Update `from_db_record()` to include `num_parallel: record.num_parallel,`
 - [ ] Update the round-trip test to set `num_parallel: Some(2)` in the ModelConfig construction and add `assert_eq!(round_trip.num_parallel, mc.num_parallel);`
-- [ ] Run `cargo test --package koji-core test_model_config_round_trip` — verify it passes with the new field
+- [ ] Run `cargo test --package tama-core test_model_config_round_trip` — verify it passes with the new field
 - [ ] Run `cargo fmt --all`
-- [ ] Run `cargo check --package koji-core` — ensure no compile errors
+- [ ] Run `cargo check --package tama-core` — ensure no compile errors
 - [ ] Commit with message: "feat(core): add num_parallel field to ModelConfig"
 
 **Acceptance criteria:**
@@ -67,9 +67,9 @@ fn default_num_parallel() -> Option<u32> {
 This task adds the `num_parallel` column to the SQLite schema via migration v14, and updates all DB query functions to read/write it. The migration uses `ALTER TABLE ADD COLUMN` with a `CHECK(num_parallel >= 1)` constraint to prevent invalid values at the DB level.
 
 **Files:**
-- Modify: `crates/koji-core/src/db/migrations.rs`
-- Modify: `crates/koji-core/src/db/queries/types.rs`
-- Modify: `crates/koji-core/src/db/queries/model_config_queries.rs`
+- Modify: `crates/tama-core/src/db/migrations.rs`
+- Modify: `crates/tama-core/src/db/queries/types.rs`
+- Modify: `crates/tama-core/src/db/queries/model_config_queries.rs`
 
 **What to implement:**
 
@@ -147,7 +147,7 @@ Place after `context_length: Option<u32>`.
 - [ ] Update `get_model_config`: add column to SELECT, add row.get(8) mapping
 - [ ] Update `get_model_config_by_repo_id`: same as get_model_config
 - [ ] Update `get_all_model_configs`: same as get_model_config
-- [ ] Run `cargo check --package koji-core` — fix any compile errors
+- [ ] Run `cargo check --package tama-core` — fix any compile errors
 - [ ] Run `cargo fmt --all`
 - [ ] Commit with message: "feat(core): add num_parallel column to DB schema via migration v14"
 
@@ -165,7 +165,7 @@ Place after `context_length: Option<u32>`.
 This is the core runtime behavior. When building the backend launch command, the effective context length must be `resolved_context × num_parallel`. We use `saturating_mul` to prevent integer overflow (e.g., context=1_000_000 × slots=10_000 would overflow u32). This affects the `-c` flag injected into the llama.cpp command line.
 
 **Files:**
-- Modify: `crates/koji-core/src/config/resolve/mod.rs`
+- Modify: `crates/tama-core/src/config/resolve/mod.rs`
 
 **What to implement:**
 
@@ -213,9 +213,9 @@ if let Some(ctx) = ctx {
 - [ ] Find the context injection block in `build_full_args` (search for "Inject -c")
 - [ ] Add `let slots = server.num_parallel.unwrap_or(1);` before the `grouped.push`
 - [ ] Change `format!("-c {}", ctx)` to use `ctx.saturating_mul(slots)` instead of raw `ctx`
-- [ ] Run `cargo check --package koji-core` — verify no errors
-- [ ] Run `cargo test --package koji-core` — ensure existing tests still pass
-- [ ] Verify saturating_mul works: context=1_000_000 × slots=10_000 should produce `-c 4294967295` (u32::MAX) without panic. Run `cargo test --package koji-core -- --nocapture` and check the output.
+- [ ] Run `cargo check --package tama-core` — verify no errors
+- [ ] Run `cargo test --package tama-core` — ensure existing tests still pass
+- [ ] Verify saturating_mul works: context=1_000_000 × slots=10_000 should produce `-c 4294967295` (u32::MAX) without panic. Run `cargo test --package tama-core -- --nocapture` and check the output.
 - [ ] Run `cargo fmt --all`
 - [ ] Commit with message: "feat(core): multiply context by num_parallel in build_full_args"
 
@@ -233,7 +233,7 @@ if let Some(ctx) = ctx {
 The `/api/models` endpoint returns model metadata including `context_length`. This must also reflect the multiplied effective context so that OpenCode and other consumers see the correct window size. The multiplication happens after the existing resolution chain (cfg.context_length → card fallback).
 
 **Files:**
-- Modify: `crates/koji-core/src/proxy/koji_handlers/models.rs`
+- Modify: `crates/tama-core/src/proxy/tama_handlers/models.rs`
 
 **What to implement:**
 
@@ -264,8 +264,8 @@ Do NOT rewrite the if-else block. Simply add one new line after the closing `};`
 - [ ] Find context resolution in `handle_opencode_list_models` (search for "context_length = if let Some(ctx)")
 - [ ] Add ONE new line after the existing block's closing `};`: `let context_length = context_length.map(|ctx| ctx.saturating_mul(cfg.num_parallel.unwrap_or(1)));`
   - Do NOT modify or rewrite the existing if-else block
-- [ ] Run `cargo check --package koji-core` — verify no errors
-- [ ] Run `cargo test --package koji-core` — ensure tests pass
+- [ ] Run `cargo check --package tama-core` — verify no errors
+- [ ] Run `cargo test --package tama-core` — ensure tests pass
 - [ ] Run `cargo fmt --all`
 - [ ] Commit with message: "feat(core): apply num_parallel multiplication in opencode list API"
 
@@ -282,8 +282,8 @@ Do NOT rewrite the if-else block. Simply add one new line after the closing `};`
 This task adds `num_parallel` to the web API layer so the frontend can read and write it. Three changes are needed: (1) `ModelBody` deserialization struct for incoming requests, (2) `apply_model_body()` passthrough in CRUD operations, and (3) `model_entry_json()` serialization for GET responses.
 
 **Files:**
-- Modify: `crates/koji-web/src/api/models/crud.rs`
-- Modify: `crates/koji-web/src/api/models/info.rs`
+- Modify: `crates/tama-web/src/api/models/crud.rs`
+- Modify: `crates/tama-web/src/api/models/info.rs`
 
 **What to implement:**
 
@@ -309,7 +309,7 @@ Place after `"context_length": record.context_length,` (or equivalent existing c
 - [ ] Add `pub num_parallel: Option<u32>` with `#[serde(default)]` to `ModelBody` in `crud.rs`
 - [ ] Add `num_parallel: body.num_parallel,` to the ModelConfig return in `apply_model_body()`
 - [ ] Find `model_entry_json()` in `info.rs` — add `"num_parallel": record.num_parallel,` to the JSON object
-- [ ] Run `cargo check --package koji-web` — verify no errors
+- [ ] Run `cargo check --package tama-web` — verify no errors
 - [ ] Run `cargo fmt --all`
 - [ ] Commit with message: "feat(web): add num_parallel to ModelBody, CRUD passthrough, and info serialization"
 
@@ -317,7 +317,7 @@ Place after `"context_length": record.context_length,` (or equivalent existing c
 - [ ] `ModelBody` accepts `num_parallel` from JSON requests
 - [ ] `apply_model_body()` passes `num_parallel` through to ModelConfig
 - [ ] `model_entry_json()` includes `num_parallel` in GET responses
-- [ ] No compile errors in koji-web
+- [ ] No compile errors in tama-web
 
 ---
 
@@ -327,10 +327,10 @@ Place after `"context_length": record.context_length,` (or equivalent existing c
 This task adds the UI for setting `num_parallel` in the model editor. A number input appears next to Context Length in the General section. The save flow includes it in the POST/PUT body, and the initialization effect populates it when switching between models.
 
 **Files:**
-- Modify: `crates/koji-web/src/pages/model_editor/types.rs`
-- Modify: `crates/koji-web/src/pages/model_editor/api.rs`
-- Modify: `crates/koji-web/src/pages/model_editor/general_form.rs`
-- Modify: `crates/koji-web/src/pages/model_editor/mod.rs` (form initialization)
+- Modify: `crates/tama-web/src/pages/model_editor/types.rs`
+- Modify: `crates/tama-web/src/pages/model_editor/api.rs`
+- Modify: `crates/tama-web/src/pages/model_editor/general_form.rs`
+- Modify: `crates/tama-web/src/pages/model_editor/mod.rs` (form initialization)
 
 **What to implement:**
 
@@ -389,7 +389,7 @@ set_input_value(
 - [ ] In `api.rs` save_model(): add `"num_parallel": form.num_parallel,` to body JSON
 - [ ] In `general_form.rs`: add `set_input_value("field-num-parallel", ...)` in initialization effect
 - [ ] In `general_form.rs`: add the number input element after ContextLengthSelector
-- [ ] Run `cargo check --package koji-web` — verify no errors (this compiles the WASM frontend)
+- [ ] Run `cargo check --package tama-web` — verify no errors (this compiles the WASM frontend)
 - [ ] Run `cargo fmt --all`
 - [ ] Commit with message: "feat(web): add num_parallel input to model editor UI"
 

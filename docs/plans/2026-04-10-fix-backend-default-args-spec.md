@@ -4,7 +4,7 @@
 
 Two issues in the backends webui:
 
-1. **Bug: `default_args` never displayed.** The API handlers in `api/backends.rs` call `Config::load_from(&config_path)` with a **file path** (e.g., `~/.config/koji/config.toml`), but `Config::load_from()` expects a **directory path** (e.g., `~/.config/koji/`). It internally calls `fs::create_dir_all(config_dir)` and then joins `"config.toml"`, so passing a file path causes it to fail silently. The `default_args_map` ends up empty, and `skip_serializing_if = "Vec::is_empty"` on the DTOs causes the field to be omitted from the JSON response entirely. The same bug affects `Config::save_to()` in the update endpoint.
+1. **Bug: `default_args` never displayed.** The API handlers in `api/backends.rs` call `Config::load_from(&config_path)` with a **file path** (e.g., `~/.config/tama/config.toml`), but `Config::load_from()` expects a **directory path** (e.g., `~/.config/tama/`). It internally calls `fs::create_dir_all(config_dir)` and then joins `"config.toml"`, so passing a file path causes it to fail silently. The `default_args_map` ends up empty, and `skip_serializing_if = "Vec::is_empty"` on the DTOs causes the field to be omitted from the JSON response entirely. The same bug affects `Config::save_to()` in the update endpoint.
 
 2. **UX: Per-card save buttons.** Each backend card has its own "Save" button for `default_args`, plus an `on:blur` save that fires independently. This is inconsistent with the config editor page which uses a single "Save Changes" button in the top right corner. There's also no save feedback (success/failure) in the current implementation — the response is discarded (`let _ = ...`).
 
@@ -14,7 +14,7 @@ Follow the **config-editor pattern**: single page-level save button in the top r
 
 ### API Fix (Bug)
 
-Four call sites in `crates/koji-web/src/api/backends.rs` need fixing:
+Four call sites in `crates/tama-web/src/api/backends.rs` need fixing:
 
 | Line | Function | Bug | Fix |
 |------|----------|-----|-----|
@@ -42,7 +42,7 @@ Reference pattern: `load_config_from_state()` in `api.rs` (lines 275-300).
 ### DTO Change
 
 Remove `#[serde(skip_serializing_if = "Vec::is_empty")]` from `default_args` in both:
-- `crates/koji-web/src/api/backends.rs` (line 48) — `BackendCardDto.default_args`
-- `crates/koji-web/src/components/backend_card.rs` (line 83) — frontend `BackendCardDto.default_args`
+- `crates/tama-web/src/api/backends.rs` (line 48) — `BackendCardDto.default_args`
+- `crates/tama-web/src/components/backend_card.rs` (line 83) — frontend `BackendCardDto.default_args`
 
 This ensures `default_args` is always present in the JSON response, even when empty.
