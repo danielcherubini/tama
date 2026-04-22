@@ -183,15 +183,20 @@ async fn cmd_install(
     );
     println!();
 
-    // Fetch latest version if not specified
+    // Fetch latest version if not specified (skip for TTS backends — they use pinned versions)
     let version = match version {
         Some(v) => v,
+        None if matches!(backend_type, BackendType::TtsKokoro | BackendType::TtsPiper) => {
+            String::from("latest")
+        }
         None => {
             println!("\nFetching latest version...");
             check_latest_version(&backend_type).await?
         }
     };
-    println!("Version: {}", version);
+    if !matches!(backend_type, BackendType::TtsKokoro | BackendType::TtsPiper) {
+        println!("Version: {}", version);
+    }
 
     // Parse GPU type from flag or use interactive selection
     let gpu_type = if let Some(gpu_str) = gpu_flag {
