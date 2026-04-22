@@ -2063,7 +2063,6 @@ dependencies = [
  "http-body-util",
  "indicatif",
  "inquire",
- "koji-tts",
  "libc",
  "lru",
  "reqwest 0.12.28",

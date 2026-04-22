@@ -12,7 +12,7 @@ use axum::{
 };
 use base64::Engine;
 use futures::StreamExt;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 
 /// Request body for speech synthesis.
@@ -44,21 +44,8 @@ fn default_speed() -> f32 {
     1.0
 }
 
-/// Response for voice listing.
-#[derive(Debug, Serialize)]
-pub struct VoiceResponse {
-    pub id: String,
-    pub name: String,
-    pub language: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub gender: Option<String>,
-}
-
 /// Ensure a TTS backend is loaded and return its server URL.
-async fn ensure_tts_server(
-    state: &ProxyState,
-    model_name: &str,
-) -> anyhow::Result<String> {
+async fn ensure_tts_server(state: &ProxyState, model_name: &str) -> anyhow::Result<String> {
     // Check if already loaded
     if let Some(server) = state.get_tts_server(model_name).await {
         return Ok(format!("http://{}", server));
@@ -75,7 +62,10 @@ async fn ensure_tts_server(
     // After loading, get the server URL from models map
     let models = state.models.read().await;
     if let Some(state) = models.get(backend_name) {
-        return Ok(state.backend_url().map(|u| u.to_string()).unwrap_or_default());
+        return Ok(state
+            .backend_url()
+            .map(|u| u.to_string())
+            .unwrap_or_default());
     }
 
     anyhow::bail!("TTS backend '{}' loaded but URL not found", backend_name);
@@ -93,7 +83,11 @@ pub async fn handle_audio_voices(State(state): State<Arc<ProxyState>>) -> impl I
             match state.client.get(&url).send().await {
                 Ok(response) => {
                     let body = response.text().await.unwrap_or_default();
-                    Json(serde_json::from_str::<serde_json::Value>(&body).unwrap_or_else(|_| serde_json::json!({"data": []}))).into_response()
+                    Json(
+                        serde_json::from_str::<serde_json::Value>(&body)
+                            .unwrap_or_else(|_| serde_json::json!({"data": []})),
+                    )
+                    .into_response()
                 }
                 Err(e) => (
                     StatusCode::BAD_GATEWAY,
@@ -172,11 +166,12 @@ pub async fn handle_audio_speech(
 
     // Build the request body for Kokoro-FastAPI (OpenAI-compatible format)
     let voice = req.voice.unwrap_or_default();
-    let model_name = if req.model.to_lowercase() == "kokoro" || req.model.to_lowercase() == "tts_kokoro" {
-        "kokoro"
-    } else {
-        &req.model
-    };
+    let model_name =
+        if req.model.to_lowercase() == "kokoro" || req.model.to_lowercase() == "tts_kokoro" {
+            "kokoro"
+        } else {
+            &req.model
+        };
 
     let speech_req = serde_json::json!({
         "model": model_name,
@@ -196,7 +191,9 @@ pub async fn handle_audio_speech(
                 .status(status)
                 .header("Content-Type", content_type)
                 .body(axum::body::Body::from(bytes))
-                .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response())
+                .unwrap_or_else(|_| {
+                    (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
+                })
         }
         Err(e) => (
             StatusCode::BAD_GATEWAY,
@@ -249,11 +246,12 @@ pub async fn handle_audio_stream(
     };
 
     let voice = req.voice.unwrap_or_default();
-    let model_name = if req.model.to_lowercase() == "kokoro" || req.model.to_lowercase() == "tts_kokoro" {
-        "kokoro"
-    } else {
-        &req.model
-    };
+    let model_name =
+        if req.model.to_lowercase() == "kokoro" || req.model.to_lowercase() == "tts_kokoro" {
+            "kokoro"
+        } else {
+            &req.model
+        };
 
     let speech_req = serde_json::json!({
         "model": model_name,
@@ -275,12 +273,11 @@ pub async fn handle_audio_stream(
                     Ok(chunk) => {
                         let encoded = base64::engine::general_purpose::STANDARD.encode(&chunk);
                         // Simple framing: each SSE event contains one audio chunk
-                        Ok::<Event, anyhow::Error>(
-                            Event::default().event("audio").data(encoded),
-                        )
+                        Ok::<Event, anyhow::Error>(Event::default().event("audio").data(encoded))
                     }
                     Err(e) => {
-                        let encoded = base64::engine::general_purpose::STANDARD.encode(e.to_string().as_bytes());
+                        let encoded = base64::engine::general_purpose::STANDARD
+                            .encode(e.to_string().as_bytes());
                         Ok(Event::default().event("error").data(encoded))
                     }
                 }
