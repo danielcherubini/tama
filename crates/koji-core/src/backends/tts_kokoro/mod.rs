@@ -14,13 +14,15 @@ pub async fn install_tts_kokoro(
     // Run the full Kokoro-FastAPI installation pipeline
     download::install_kokoro_fastapi(&p).await?;
 
-    // Register in the backend registry — path points to install_dir (repo root)
+    // Register in the backend registry — path points to base_dir (parent of
+    // install_dir and venv). This allows safe_remove_installation to remove
+    // the entire backends/tts_kokoro/ directory including both venv and repo.
     let base_dir = crate::backends::backends_dir()?;
     let info = BackendInfo {
         name: "tts_kokoro".to_string(),
         backend_type: BackendType::TtsKokoro,
         version: paths::KOKORO_FASTAPI_TAG.to_string(),
-        path: paths::install_dir(&base_dir),
+        path: paths::base_dir(&base_dir),
         installed_at: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs() as i64),
@@ -47,13 +49,15 @@ pub async fn install_tts_kokoro(
 /// (c) venv python can import uvicorn and kokoro
 /// (d) model file exists at model_dir/kokoro-v1_0.pth
 pub fn verify_tts_kokoro(info: &BackendInfo) -> anyhow::Result<()> {
-    let base = crate::backends::backends_dir()?;
-
-    // Resolve the install dir from the backend info path
-    let install_path = &info.path;
+    // info.path is now the base_dir (backends/tts_kokoro/)
+    let base = &info.path;
 
     // (a) Check api/src/main.py exists
-    let main_py = install_path.join("api").join("src").join("main.py");
+    let main_py = base
+        .join("kokoro-fastapi")
+        .join("api")
+        .join("src")
+        .join("main.py");
     if !main_py.exists() {
         return Err(anyhow::anyhow!(
             "Kokoro-FastAPI main.py not found at: {}",
@@ -62,7 +66,7 @@ pub fn verify_tts_kokoro(info: &BackendInfo) -> anyhow::Result<()> {
     }
 
     // (b) Check .git directory exists (proves clone worked)
-    let git_dir = install_path.join(".git");
+    let git_dir = base.join("kokoro-fastapi").join(".git");
     if !git_dir.is_dir() {
         return Err(anyhow::anyhow!(
             ".git directory not found at {}; \
@@ -72,7 +76,7 @@ pub fn verify_tts_kokoro(info: &BackendInfo) -> anyhow::Result<()> {
     }
 
     // (c) Check venv python can import uvicorn and kokoro
-    let python_bin = paths::python_bin(&base);
+    let python_bin = paths::python_bin(base);
     if !python_bin.exists() {
         return Err(anyhow::anyhow!(
             "Python binary not found at {}; \
@@ -108,7 +112,7 @@ pub fn verify_tts_kokoro(info: &BackendInfo) -> anyhow::Result<()> {
     }
 
     // (d) Check model file exists
-    let model_file = paths::model_file(&base);
+    let model_file = paths::model_file(base);
     if !model_file.exists() {
         return Err(anyhow::anyhow!(
             "Kokoro model file not found at: {}",

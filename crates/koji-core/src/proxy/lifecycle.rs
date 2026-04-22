@@ -478,13 +478,11 @@ impl ProxyState {
             .with_context(|| format!("Backend '{}' not found in registry", backend_name))?
             .ok_or_else(|| anyhow::anyhow!("Backend '{}' not installed", backend_name))?;
 
-        // Derive paths from BackendInfo.path (repo root = kokoro-fastapi dir).
-        // The venv is a sibling directory: backends_dir/tts_kokoro/venv/
-        let repo_root = info.path.as_path();
-        let venv_parent = repo_root
-            .parent()
-            .ok_or_else(|| anyhow::anyhow!("Cannot get parent of backend path"))?;
-        let venv_dir = venv_parent.join("venv");
+        // Derive paths from BackendInfo.path (base_dir = backends/tts_kokoro/).
+        // The repo root is the kokoro-fastapi subdirectory, and venv is a sibling.
+        let base_path = info.path.as_path();
+        let repo_root = base_path.join("kokoro-fastapi");
+        let venv_dir = base_path.join("venv");
         let python_bin = venv_dir.join("bin").join("python");
 
         // Atomically check if already loaded and reserve if not
@@ -533,8 +531,8 @@ impl ProxyState {
                 "--port",
                 &port.to_string(),
             ])
-            .current_dir(repo_root)
-            .env("PYTHONPATH", repo_root)
+            .current_dir(&repo_root)
+            .env("PYTHONPATH", &repo_root)
             .env("MODEL_DIR", "api/src/models")
             .env("VOICES_DIR", "api/src/voices/v1_0");
 
