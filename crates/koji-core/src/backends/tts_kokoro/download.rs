@@ -141,7 +141,7 @@ async fn install_dependencies(
     );
     progress.log(&msg);
     let status = tokio::process::Command::new(python_bin)
-        .args(["-m", "pip", "install", "-e", &format!("\".{extra}\"")])
+        .args(["-m", "pip", "install", "-e", &format!(".{extra}")])
         .current_dir(install_path)
         .status()
         .await
