@@ -358,27 +358,33 @@ async fn download_voices(
     std::fs::create_dir_all(voices_dir).with_context(|| "Failed to create voices directory")?;
 
     progress.log("Downloading Kokoro voice packs from HuggingFace...");
+
+    // Write a temp script since `for` can't be used in -c one-liners
+    let script = format!(
+        r#"import os
+from huggingface_hub import hf_hub_download, list_repo_files
+repo_id = 'hexgrad/Kokoro-82M'
+voice_files = [f for f in list_repo_files(repo_id) if f.startswith('voices/') and f.endswith('.pt')]
+out_dir = '{}'
+os.makedirs(out_dir, exist_ok=True)
+for vf in voice_files:
+    hf_hub_download(repo_id, vf, local_dir=out_dir)
+    print(f'Downloaded {{vf}}')
+print(f'Total: {{len(voice_files)}} voices')"#,
+        voices_dir.to_string_lossy()
+    );
+
+    let script_path = install_path.join(".download_voices_tmp.py");
+    std::fs::write(&script_path, &script).with_context(|| "Failed to write voice download script")?;
+
     let status = tokio::process::Command::new(python_bin)
-        .args([
-            "-c",
-            &format!(
-                "import os; \
-                 from huggingface_hub import hf_hub_download, list_repo_files; \
-                 repo_id = 'hexgrad/Kokoro-82M'; \
-                 voice_files = [f for f in list_repo_files(repo_id) if f.startswith('voices/') and f.endswith('.pt')]; \
-                 out_dir = '{}'; \
-                 os.makedirs(out_dir, exist_ok=True); \
-                 for vf in voice_files: \
-                     hf_hub_download(repo_id, vf, local_dir=out_dir); \
-                     print(f'Downloaded {{vf}}'); \
-                 print(f'Total: {{len(voice_files)}} voices')",
-                voices_dir.to_string_lossy()
-            ),
-        ])
-        .current_dir(install_path)
+        .arg(&script_path)
         .status()
         .await
-        .with_context(|| "Failed to spawn voice download script")?;
+        .with_context(|| "Failed to run voice download script")?;
+
+    // Clean up temp script
+    let _ = std::fs::remove_file(&script_path);
 
     if !status.success() {
         return Err(anyhow!("Voice pack download failed."));
