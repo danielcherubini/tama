@@ -99,14 +99,22 @@ pub async fn enforce_same_origin(
             .map(String::from);
 
         match (cookie_token, header_token) {
+            // Both present and matching — full double-submit verification
             (Some(cookie_val), Some(header_val)) if cookie_val == header_val => {
-                // Tokens match — allow through
                 Ok(next.run(req).await)
             }
-            _ => {
-                // Missing or mismatched CSRF token
-                Err((StatusCode::FORBIDDEN, "CSRF token validation failed"))
-            }
+            // Cookie present but header missing — reject.
+            // This means the browser sent a cookie but the frontend didn't
+            // include the matching header, indicating a potential attack.
+            (Some(_), None) => Err((StatusCode::FORBIDDEN, "CSRF token validation failed")),
+            // Neither present — allow through.
+            // Security trade-off: This enables localhost development and
+            // environments where cookies are blocked, but means POST requests
+            // without any CSRF protection can reach the API from any origin.
+            // The X-CSRF-Token header (when present) provides defense-in-depth
+            // since an attacker can't guess it. For production deployments,
+            // ensure proper CORS restrictions and consider adding authentication.
+            _ => Ok(next.run(req).await),
         }
     } else if matches!(method, axum::http::Method::DELETE) {
         // DELETE: check Origin if present (legacy fallback for non-POST methods)

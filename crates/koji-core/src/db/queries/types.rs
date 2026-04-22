@@ -81,6 +81,19 @@ pub struct ActiveModelRecord {
     pub last_accessed: String,
 }
 
+/// TTS engine configuration record.
+#[derive(Debug, Clone)]
+pub struct TtsConfigRecord {
+    pub id: i64,        // auto-increment primary key
+    pub engine: String, // TTS engine name (e.g., 'kokoro')
+    pub default_voice: Option<String>,
+    pub speed: f32,     // 0.5 to 2.0
+    pub format: String, // mp3, wav, ogg
+    pub enabled: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 /// A stored update check record for a backend or model.
 #[derive(Debug, Clone)]
 pub struct UpdateCheckRecord {

@@ -184,6 +184,7 @@ pub(super) fn job_to_active_dto(j: &crate::jobs::Job) -> ActiveJobDto {
         backend_type: match j.backend_type.as_ref() {
             Some(koji_core::backends::BackendType::LlamaCpp) => "llama_cpp".to_string(),
             Some(koji_core::backends::BackendType::IkLlama) => "ik_llama".to_string(),
+            Some(koji_core::backends::BackendType::TtsKokoro) => "tts_kokoro".to_string(),
             Some(koji_core::backends::BackendType::Custom) => "custom".to_string(),
             None => String::new(),
         },
@@ -314,6 +315,12 @@ pub(super) const KNOWN_BACKENDS: &[(&str, &str, Option<&str>)] = &[
         "ik_llama",
         "ik_llama.cpp",
         Some("https://github.com/ikawrakow/ik_llama.cpp/commits/main"),
+    ),
+    // TTS backends — installed via HuggingFace model downloads (no GPU needed)
+    (
+        "tts_kokoro",
+        "Kokoro TTS",
+        Some("https://huggingface.co/hexgrad/Kokoro-82M"),
     ),
 ];
 

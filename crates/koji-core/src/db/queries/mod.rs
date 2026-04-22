@@ -10,6 +10,7 @@ mod download_queue_queries;
 mod metrics_queries;
 mod model_config_queries;
 mod model_queries;
+mod tts_config_queries;
 mod types;
 mod update_check_queries;
 
@@ -20,6 +21,7 @@ pub use download_queue_queries::*;
 pub use metrics_queries::*;
 pub use model_config_queries::*;
 pub use model_queries::*;
+pub use tts_config_queries::*;
 pub use types::*;
 pub use update_check_queries::*;
 

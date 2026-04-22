@@ -94,6 +94,13 @@ impl ModelState {
         }
     }
 
+    /// Returns true if this is a TTS backend (identified by backend name prefix).
+    /// TTS backends are stored with names like "tts_kokoro" and have their own
+    /// lifecycle management separate from LLM models.
+    pub fn is_tts_backend(&self) -> bool {
+        self.backend().starts_with("tts_")
+    }
+
     pub fn consecutive_failures(&self) -> Option<&Arc<std::sync::atomic::AtomicU32>> {
         match self {
             ModelState::Starting {

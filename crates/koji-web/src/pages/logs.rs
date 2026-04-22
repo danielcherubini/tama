@@ -1,6 +1,8 @@
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::utils::extract_and_store_csrf_token;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LogsResponse {
     lines: Vec<String>,
@@ -30,6 +32,7 @@ pub fn Logs() -> impl IntoView {
             .send()
             .await
             .ok()?;
+        extract_and_store_csrf_token(&resp);
         resp.json::<LogsResponse>().await.ok()
     });
 

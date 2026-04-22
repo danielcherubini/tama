@@ -6,8 +6,9 @@ pub(crate) use parse::{parse_backend_type, parse_gpu_type};
 use anyhow::{anyhow, Result};
 use clap::{Args, Subcommand};
 use koji_core::backends::{
-    backends_dir, check_latest_version, check_updates, install_backend, safe_remove_installation,
-    update_backend, BackendInfo, BackendRegistry, BackendSource, BackendType, InstallOptions,
+    backends_dir, check_latest_version, check_updates, install_backend, install_tts_kokoro,
+    safe_remove_installation, update_backend, BackendInfo, BackendRegistry, BackendSource,
+    BackendType, InstallOptions, NullSink,
 };
 use koji_core::config::Config;
 use koji_core::db::queries::get_backend_by_version;
@@ -23,9 +24,9 @@ pub struct BackendArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum BackendSubcommand {
-    /// Install a new backend
+    /// Install a new backend (LLM or TTS)
     Install {
-        /// Backend type: llama_cpp or ik_llama
+        /// Backend type: llama_cpp, ik_llama, or tts_kokoro
         #[arg(value_name = "TYPE")]
         backend_type: String,
 
@@ -182,15 +183,18 @@ async fn cmd_install(
     );
     println!();
 
-    // Fetch latest version if not specified
+    // Fetch latest version if not specified (skip for TTS backends — they use pinned versions)
     let version = match version {
         Some(v) => v,
+        None if matches!(backend_type, BackendType::TtsKokoro) => String::from("latest"),
         None => {
             println!("\nFetching latest version...");
             check_latest_version(&backend_type).await?
         }
     };
-    println!("Version: {}", version);
+    if !matches!(backend_type, BackendType::TtsKokoro) {
+        println!("Version: {}", version);
+    }
 
     // Parse GPU type from flag or use interactive selection
     let gpu_type = if let Some(gpu_str) = gpu_flag {
@@ -274,6 +278,10 @@ async fn cmd_install(
             true
         }
         _ if force_build => true,
+        BackendType::TtsKokoro => {
+            // TTS backends are handled separately above; this is unreachable.
+            false
+        }
         _ => {
             let choice = inquire::Select::new(
                 "Installation method:",
@@ -292,13 +300,25 @@ async fn cmd_install(
 
     let target_dir = backends_dir()?.join(&backend_name);
 
-    // Build install options
+    // Handle TTS backends with dedicated installers (no GPU selection needed)
+    if matches!(backend_type, BackendType::TtsKokoro) {
+        let mut registry = BackendRegistry::open(&registry_config_dir()?)?;
+
+        install_tts_kokoro(&mut registry, Box::new(NullSink)).await?;
+
+        println!("\nKokoro TTS backend installed successfully!");
+        println!("  Name:    {}", backend_name);
+        return Ok(());
+    }
+
     let git_url = match backend_type {
         BackendType::LlamaCpp => "https://github.com/ggml-org/llama.cpp.git",
         BackendType::IkLlama => "https://github.com/ikawrakow/ik_llama.cpp.git",
         BackendType::Custom => {
             anyhow::bail!("Custom backends cannot be installed via this command");
         }
+        // TTS variants handled earlier with dedicated installers
+        BackendType::TtsKokoro => unreachable!(),
     };
 
     let source = if use_source {
@@ -428,6 +448,9 @@ async fn cmd_update(_config: &Config, name: &str, force: bool) -> Result<()> {
                 BackendType::LlamaCpp => BackendSource::Prebuilt {
                     version: update_check.latest_version.clone(),
                 },
+                BackendType::TtsKokoro => {
+                    return Err(anyhow!("Cannot update TTS backends via this command"))
+                }
                 BackendType::Custom => return Err(anyhow!("Cannot update custom backends")),
             }
         }

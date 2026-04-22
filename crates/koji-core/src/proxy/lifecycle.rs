@@ -5,6 +5,7 @@ use tracing::{debug, info, warn};
 
 use super::process::{force_kill_process, is_process_alive, kill_process, override_arg};
 use super::types::{ModelState, ProxyState};
+use crate::backends::BackendRegistry;
 
 impl ProxyState {
     /// Load a model by starting its backend process.
@@ -228,17 +229,44 @@ impl ProxyState {
             return Ok(None);
         }
 
-        let mut models = self.models.write().await;
-        if models.len() < max as usize {
+        // Collect all Ready server names while holding the write lock.
+        let models = self.models.write().await;
+        let ready_servers: Vec<String> = models
+            .iter()
+            .filter(|(_, s)| matches!(s, ModelState::Ready { .. }))
+            .map(|(name, _)| name.clone())
+            .collect();
+
+        // Release the write lock before reading model_configs (avoids deadlock).
+        drop(models);
+
+        // Only count LLM (non-TTS) models against the limit.
+        let model_configs = self.model_configs.read().await;
+        let llm_count = ready_servers
+            .iter()
+            .filter(|server_name| {
+                !model_configs
+                    .get(server_name.as_str())
+                    .is_some_and(|mc| mc.backend.starts_with("tts_"))
+            })
+            .count();
+
+        if llm_count < max as usize {
             return Ok(None);
         }
 
-        // Find LRU Ready model (skip Starting, Failed, Unloading)
-        let lru_name = models
+        // Find LRU Ready model among LLM (non-TTS) models only.
+        let mut models = self.models.write().await;
+        let lru_name = ready_servers
             .iter()
-            .filter(|(_, s)| matches!(s, ModelState::Ready { .. }))
+            .filter(|server_name| {
+                !model_configs
+                    .get(server_name.as_str())
+                    .is_some_and(|mc| mc.backend.starts_with("tts_"))
+            })
+            .filter_map(|server_name| models.get(server_name).map(|s| (server_name, s)))
             .min_by_key(|(_, s)| s.last_accessed())
-            .map(|(name, _)| name.clone());
+            .map(|(name, _)| name.to_string());
 
         // Atomically transition Ready → Unloading
         if let Some(ref name) = lru_name {
@@ -382,6 +410,12 @@ impl ProxyState {
                 continue;
             }
 
+            // Skip TTS backends — they're singleton, managed separately via
+            // load_tts_backend/unload_tts_backend lifecycle.
+            if state.is_tts_backend() {
+                continue;
+            }
+
             // Failed models have no last_accessed; always mark them for cleanup
             let last = match state.last_accessed() {
                 Some(t) => t,
@@ -427,6 +461,254 @@ impl ProxyState {
 
         to_unload.extend(failed_to_remove);
         to_unload
+    }
+
+    /// Load a TTS backend (Kokoro-FastAPI) by spawning its uvicorn server.
+    ///
+    /// This method opens the backend registry, looks up the requested backend,
+    /// derives paths from its install directory, finds a free port, and spawns
+    /// the Kokoro-FastAPI uvicorn process with appropriate environment variables.
+    /// It then performs a health check (polling every 2s, timeout 60s) before
+    /// transitioning the model state to Ready.
+    pub async fn load_tts_backend(&self, backend_name: &str) -> Result<String> {
+        debug!("Loading TTS backend: {}", backend_name);
+
+        // Open registry and look up backend by name
+        let base_dir =
+            crate::config::Config::base_dir().with_context(|| "Failed to get config directory")?;
+        let registry =
+            BackendRegistry::open(&base_dir).with_context(|| "Failed to open backend registry")?;
+
+        let info = registry
+            .get(backend_name)
+            .with_context(|| format!("Backend '{}' not found in registry", backend_name))?
+            .ok_or_else(|| anyhow::anyhow!("Backend '{}' not installed", backend_name))?;
+
+        // Derive paths from BackendInfo.path (base_dir = backends/tts_kokoro/).
+        // The repo root is the kokoro-fastapi subdirectory, and venv is a sibling.
+        let base_path = info.path.as_path();
+        let repo_root = base_path.join("kokoro-fastapi");
+        let venv_dir = base_path.join("venv");
+        let python_bin = venv_dir.join("bin").join("python");
+
+        // Atomically check if already loaded and reserve if not
+        {
+            let mut models = self.models.write().await;
+            if let Some(state) = models.get(backend_name) {
+                if state.is_ready() || matches!(state, ModelState::Starting { .. }) {
+                    debug!("TTS backend '{}' already loaded/starting", backend_name);
+                    return Ok(backend_name.to_string());
+                }
+            }
+
+            // Reserve with Starting state
+            models.insert(
+                backend_name.to_string(),
+                ModelState::Starting {
+                    model_name: backend_name.to_string(),
+                    backend: info.name.clone(),
+                    backend_url: String::new(),
+                    last_accessed: Instant::now(),
+                    consecutive_failures: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+                    failure_timestamp: None,
+                },
+            );
+        }
+
+        // Find a free port
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
+        drop(listener);
+
+        let backend_url = format!("http://127.0.0.1:{}", port);
+        let health_url = format!("http://127.0.0.1:{}/health", port);
+
+        info!("Starting Kokoro-FastAPI TTS backend on port {}", port);
+
+        // Spawn the uvicorn server process
+        let mut child = tokio::process::Command::new(&python_bin);
+        child
+            .args([
+                "-m",
+                "uvicorn",
+                "api.src.main:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                &port.to_string(),
+            ])
+            .current_dir(&repo_root)
+            .env("PYTHONPATH", &repo_root)
+            .env("MODEL_DIR", "api/src/models")
+            .env("VOICES_DIR", "api/src/voices/v1_0");
+
+        let mut child = child.spawn().with_context(|| {
+            format!(
+                "Failed to spawn Kokoro-FastAPI process: {}",
+                python_bin.display()
+            )
+        })?;
+
+        let pid = child
+            .id()
+            .ok_or_else(|| anyhow::anyhow!("Failed to get PID for Kokoro-FastAPI"))?;
+        info!("Kokoro-FastAPI started (pid: {:?})", pid);
+
+        // Spawn a reaper task so the child process is waited on
+        let reaper_backend = backend_name.to_string();
+        tokio::spawn(async move {
+            match child.wait().await {
+                Ok(status) => {
+                    debug!(
+                        "Kokoro-FastAPI process {} for backend '{}' exited with {}",
+                        pid, reaper_backend, status
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to wait on Kokoro-FastAPI process {} for backend '{}': {}",
+                        pid, reaper_backend, e
+                    );
+                }
+            }
+        });
+
+        // Health check: poll every 2s, timeout 60s (longer than LLM default)
+        let timeout = Duration::from_secs(60);
+        let start = Instant::now();
+        let mut health_ok = false;
+
+        loop {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            if start.elapsed() >= timeout {
+                let _ = kill_process(pid).await;
+                break;
+            }
+
+            if let Ok(response) = super::process::check_health(&health_url, Some(30)).await {
+                if response.status().is_success() {
+                    debug!("Health check passed for TTS backend: {}", backend_name);
+                    health_ok = true;
+                    break;
+                }
+            }
+        }
+
+        if !health_ok {
+            let mut models = self.models.write().await;
+            models.remove(backend_name);
+            return Err(anyhow::anyhow!(
+                "Kokoro-FastAPI failed to start for backend '{}' (timeout after {}s)",
+                backend_name,
+                timeout.as_secs()
+            ));
+        }
+
+        // Update to Ready state
+        {
+            let mut models = self.models.write().await;
+            if let Some(state) = models.get_mut(backend_name) {
+                if let ModelState::Starting {
+                    consecutive_failures,
+                    failure_timestamp,
+                    model_name,
+                    ..
+                } = state
+                {
+                    consecutive_failures.store(0, std::sync::atomic::Ordering::Relaxed);
+                    let cf = Arc::clone(consecutive_failures);
+                    let ft = *failure_timestamp;
+                    *state = ModelState::Ready {
+                        model_name: model_name.clone(),
+                        backend: info.name.clone(),
+                        backend_pid: pid,
+                        backend_url: backend_url.clone(),
+                        load_time: std::time::SystemTime::now(),
+                        last_accessed: Instant::now(),
+                        consecutive_failures: cf,
+                        failure_timestamp: ft,
+                    };
+                }
+            }
+        }
+
+        info!("TTS backend '{}' loaded successfully", backend_name);
+        self.metrics
+            .models_loaded
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Ok(backend_name.to_string())
+    }
+
+    /// Unload a TTS backend by stopping its subprocess.
+    ///
+    /// Sends SIGTERM for graceful shutdown, waits up to 5s, then SIGKILL if needed.
+    pub async fn unload_tts_backend(&self, backend_name: &str) -> Result<()> {
+        debug!("Unloading TTS backend: {}", backend_name);
+
+        let state = self
+            .get_model_state(backend_name)
+            .await
+            .with_context(|| format!("TTS backend '{}' not loaded", backend_name))?;
+
+        if !matches!(
+            state,
+            ModelState::Ready { .. } | ModelState::Unloading { .. }
+        ) {
+            return Err(anyhow::anyhow!(
+                "TTS backend '{}' is not ready (state: {:?})",
+                backend_name,
+                state
+            ));
+        }
+
+        let pid = match &state {
+            ModelState::Ready { backend_pid, .. } => *backend_pid,
+            ModelState::Unloading { backend_pid, .. } => *backend_pid,
+            _ => unreachable!("already checked above"),
+        };
+
+        info!("Stopping Kokoro-FastAPI (pid: {})", pid);
+
+        // Send SIGTERM for graceful shutdown
+        let _ = kill_process(pid).await;
+
+        // Wait up to 5 seconds for the process to exit, polling every 250ms
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            if !is_process_alive(pid) {
+                debug!("Kokoro-FastAPI exited gracefully");
+                break;
+            }
+            if Instant::now() >= deadline {
+                warn!("Kokoro-FastAPI did not exit after SIGTERM, sending SIGKILL",);
+                let _ = force_kill_process(pid).await;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                break;
+            }
+        }
+
+        // Remove from models
+        self.models.write().await.remove(backend_name);
+
+        info!("TTS backend '{}' unloaded", backend_name);
+        self.metrics
+            .models_unloaded
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Check if a TTS backend is loaded and ready.
+    ///
+    /// Returns the backend name if found in Ready state, None otherwise.
+    pub async fn get_tts_server(&self, backend_name: &str) -> Option<String> {
+        let models = self.models.read().await;
+        if let Some(state) = models.get(backend_name) {
+            if state.is_ready() {
+                return Some(backend_name.to_string());
+            }
+        }
+        None
     }
 }
 
@@ -952,6 +1234,44 @@ mod tests {
             !state.models.read().await.contains_key(&name_b),
             "Evicted model '{}' should be removed",
             name_b
+        );
+    }
+
+    /// Test that TTS backends are excluded from LRU eviction count.
+    #[tokio::test]
+    async fn test_evict_lru_excludes_tts_backends() {
+        use crate::config::ModelConfig;
+
+        let mut config = Config::default();
+        config.proxy.max_loaded_models = 1;
+        let state = ProxyState::new(config, None);
+
+        // Register the TTS server in model_configs with a tts_ backend
+        // so it's excluded from the LLM count.
+        state.model_configs.write().await.insert(
+            "tts-server".to_string(),
+            ModelConfig {
+                backend: "tts_kokoro".to_string(),
+                ..Default::default()
+            },
+        );
+
+        // Add a TTS backend (tts_kokoro) — should NOT count toward limit
+        let tts_state = make_ready_state("model.gguf", "tts_kokoro");
+        state
+            .models
+            .write()
+            .await
+            .insert("tts-server".to_string(), tts_state);
+
+        // Verify no eviction happens (TTS doesn't count)
+        let result = state.evict_lru_if_needed().await.unwrap();
+        assert_eq!(result, None, "TTS backends should not trigger eviction");
+
+        // Verify the TTS model is still in the map
+        assert!(
+            state.models.read().await.contains_key("tts-server"),
+            "TTS backend should remain loaded"
         );
     }
 }

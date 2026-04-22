@@ -288,6 +288,7 @@ impl BackendRegistry {
 pub enum BackendType {
     LlamaCpp,
     IkLlama,
+    TtsKokoro,
     Custom,
 }
 
@@ -296,8 +297,15 @@ impl std::fmt::Display for BackendType {
         match self {
             BackendType::LlamaCpp => write!(f, "llama_cpp"),
             BackendType::IkLlama => write!(f, "ik_llama"),
+            BackendType::TtsKokoro => write!(f, "tts_kokoro"),
             BackendType::Custom => write!(f, "custom"),
         }
+    }
+}
+
+impl BackendType {
+    pub fn is_tts(&self) -> bool {
+        matches!(self, BackendType::TtsKokoro)
     }
 }
 
@@ -308,9 +316,10 @@ impl FromStr for BackendType {
         match s.to_lowercase().as_str() {
             "llama_cpp" | "llamacpp" => Ok(BackendType::LlamaCpp),
             "ik_llama" | "ik-llama" | "ikllama" => Ok(BackendType::IkLlama),
+            "tts_kokoro" | "ttskokoro" => Ok(BackendType::TtsKokoro),
             "custom" => Ok(BackendType::Custom),
             _ => Err(format!(
-                "Unknown backend type '{}'. Supported: llama_cpp, ik_llama, custom",
+                "Unknown backend type '{}'. Supported: llama_cpp, ik_llama, tts_kokoro, custom",
                 s
             )),
         }

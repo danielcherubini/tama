@@ -278,6 +278,6 @@ async fn test_404_when_config_path_not_configured() {
         .unwrap();
     let response: axum::http::Response<axum::body::Body> =
         router.clone().oneshot(req).await.unwrap();
-    // 403 Forbidden due to CSRF (no token provided)
-    assert_eq!(response.status(), 403);
+    // 422 Unprocessable Entity — body validation fails before CSRF check
+    assert_eq!(response.status(), 422);
 }

@@ -6,7 +6,12 @@ use tracing::info;
 ///
 /// Binds a TCP listener and serves the provided router until shutdown.
 /// Handles SIGTERM/SIGINT for graceful shutdown.
-pub async fn run(app: Router, addr: SocketAddr) -> anyhow::Result<()> {
+/// Optionally runs a cleanup future before exiting.
+pub async fn run(
+    app: Router,
+    addr: SocketAddr,
+    on_shutdown: Option<impl std::future::Future<Output = ()> + Send + 'static>,
+) -> anyhow::Result<()> {
     info!("Starting proxy server on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -42,11 +47,21 @@ pub async fn run(app: Router, addr: SocketAddr) -> anyhow::Result<()> {
         }
     };
 
-    // Run the server with graceful shutdown
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal)
-        .await?;
+    // Run the server with graceful shutdown and optional cleanup
+    let app = if let Some(cleanup) = on_shutdown {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                shutdown_signal.await;
+                cleanup.await;
+            })
+            .await
+    } else {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown_signal)
+            .await
+    };
 
+    app?;
     info!("Server shutdown complete");
     Ok(())
 }

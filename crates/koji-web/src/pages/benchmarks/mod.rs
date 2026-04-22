@@ -12,6 +12,7 @@ use wasm_bindgen::JsCast;
 use self::types::{BenchmarkPreset, HistoryEntry};
 use self::utils::{format_relative, format_timestamp};
 use crate::components::job_log_panel::JobLogPanel;
+use crate::utils::{extract_and_store_csrf_token, post_request};
 
 /// Render "mean ± stddev" with one decimal place, or a single value when
 /// stddev rounds to zero.
@@ -199,6 +200,7 @@ pub fn Benchmarks() -> impl IntoView {
         let _ = model_refresh.get();
         spawn_local(async move {
             if let Ok(resp) = gloo_net::http::Request::get("/koji/v1/models").send().await {
+                extract_and_store_csrf_token(&resp);
                 if let Ok(root) = resp.json::<serde_json::Value>().await {
                     if let Some(models_arr) = root.get("models").and_then(|v| v.as_array()) {
                         let model_list: Vec<(String, String, String)> =
@@ -217,6 +219,7 @@ pub fn Benchmarks() -> impl IntoView {
                 .send()
                 .await
             {
+                extract_and_store_csrf_token(&resp);
                 if let Ok(root) = resp.json::<serde_json::Value>().await {
                     if let Some(backends_arr) = root.get("backends").and_then(|v| v.as_array()) {
                         let backend_list: Vec<(String, String)> = backends_arr
@@ -249,6 +252,7 @@ pub fn Benchmarks() -> impl IntoView {
                 .send()
                 .await
             {
+                extract_and_store_csrf_token(&resp);
                 if let Ok(entries) = resp.json::<Vec<HistoryEntry>>().await {
                     history.set(entries);
                 }
@@ -368,11 +372,11 @@ pub fn Benchmarks() -> impl IntoView {
             });
 
             let submitted = async {
-                let builder = gloo_net::http::Request::post("/koji/v1/benchmarks/run")
+                let resp = post_request("/koji/v1/benchmarks/run")
                     .header("Content-Type", "application/json")
                     .body(body.to_string())
                     .ok()?;
-                let resp = builder.send().await.ok()?;
+                let resp = resp.send().await.ok()?;
                 let body = resp.json::<serde_json::Value>().await.ok()?;
                 body.get("job_id")
                     .and_then(|v| v.as_str())
