@@ -10,8 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use base64::Engine;
-use futures::StreamExt;
+
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -331,25 +330,17 @@ pub async fn handle_audio_stream(
     let url = format!("{}/v1/audio/speech", server_url);
     match state.client.post(&url).json(&speech_req).send().await {
         Ok(response) => {
-            use axum::response::sse::Event;
-            use axum::response::{IntoResponse, Sse};
-
-            let stream = response.bytes_stream().map(move |chunk_result| {
-                match chunk_result {
-                    Ok(chunk) => {
-                        let encoded = base64::engine::general_purpose::STANDARD.encode(&chunk);
-                        // Simple framing: each SSE event contains one audio chunk
-                        Ok::<Event, anyhow::Error>(Event::default().event("audio").data(encoded))
-                    }
-                    Err(e) => {
-                        let encoded = base64::engine::general_purpose::STANDARD
-                            .encode(e.to_string().as_bytes());
-                        Ok(Event::default().event("error").data(encoded))
-                    }
-                }
-            });
-
-            Sse::new(stream).into_response()
+            let status = response.status();
+            let content_type = content_type_for_format(&req.response_format);
+            // Forward raw binary audio stream as-is (no base64 encoding)
+            let body = axum::body::Body::from_stream(response.bytes_stream());
+            Response::builder()
+                .status(status)
+                .header("Content-Type", content_type)
+                .body(body)
+                .unwrap_or_else(|_| {
+                    (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
+                })
         }
         Err(e) => (
             StatusCode::BAD_GATEWAY,
