@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 pub const MODEL_VERSION: &str = "kokoro-v1_0";
 
 /// The pinned git tag for the Kokoro-FastAPI repository.
-pub const KOKORO_FASTAPI_TAG: &str = "v0.3.0";
+pub const KOKORO_FASTAPI_TAG: &str = "v0.2.4";
 
 /// The GitHub URL for the Kokoro-FastAPI repository.
 pub const KOKORO_FASTAPI_URL: &str = "https://github.com/remsky/Kokoro-FastAPI.git";
