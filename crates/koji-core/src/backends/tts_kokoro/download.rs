@@ -191,7 +191,7 @@ fn ensure_openblas(progress: &Arc<dyn ProgressSink>) -> Result<()> {
     let pc_path = Path::new(pc_dir).join("openblas.pc");
     if !pc_path.exists() {
         progress.log("Creating openblas.pc symlink for scipy build...");
-        std::fs::symlink("blas.pc", &pc_path)
+        std::os::unix::fs::symlink("blas.pc", &pc_path)
             .with_context(|| "Failed to create openblas.pc symlink")?;
     }
 
