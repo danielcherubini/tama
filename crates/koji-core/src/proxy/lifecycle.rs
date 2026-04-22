@@ -410,6 +410,12 @@ impl ProxyState {
                 continue;
             }
 
+            // Skip TTS backends — they're singleton, managed separately via
+            // load_tts_backend/unload_tts_backend lifecycle.
+            if state.is_tts_backend() {
+                continue;
+            }
+
             // Failed models have no last_accessed; always mark them for cleanup
             let last = match state.last_accessed() {
                 Some(t) => t,

@@ -7,8 +7,10 @@ use std::sync::Arc;
 /// The proxy server, owning shared state and background tasks.
 pub struct ProxyServer {
     state: Arc<ProxyState>,
+    /// Handle for the idle timeout checker task. Kept to prevent task cancellation.
     #[allow(dead_code)]
     idle_timeout_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Handle for the system metrics collection task. Kept to prevent task cancellation.
     #[allow(dead_code)]
     metrics_handle: Option<tokio::task::JoinHandle<()>>,
 }
@@ -249,7 +251,7 @@ impl ProxyServer {
             let models = cleanup_state.models.read().await;
             let tts_backends: Vec<String> = models
                 .iter()
-                .filter(|(name, _)| name.starts_with("tts_"))
+                .filter(|(_, ms)| ms.is_tts_backend())
                 .map(|(name, _)| name.clone())
                 .collect();
             drop(models);

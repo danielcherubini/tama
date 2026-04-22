@@ -148,9 +148,8 @@ async fn cmd_say(
             .with_context(|| format!("Failed to write to {}", path.display()))?;
         println!("Audio saved to: {}", path.display());
     } else {
-        // Write to stdout
+        // Write to stdout (no trailing newline — would corrupt binary data)
         std::io::stdout().write_all(&audio_data)?;
-        println!(); // newline after audio data
     }
 
     Ok(())

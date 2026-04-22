@@ -56,12 +56,27 @@ fn default_speed() -> f32 {
     1.0
 }
 
+/// Resolve a model name to the backend-specific model identifier.
+/// "kokoro" and "tts_kokoro" both map to "kokoro" for the backend.
+fn resolve_model_name(model: &str) -> &str {
+    if model.to_lowercase() == "kokoro" || model.to_lowercase() == "tts_kokoro" {
+        "kokoro"
+    } else {
+        model
+    }
+}
+
 /// Ensure a TTS backend is loaded and return its server URL.
 async fn ensure_tts_server(state: &ProxyState, model_name: &str) -> anyhow::Result<String> {
-    // Resolve backend name
+    // Resolve backend name from model name
     let backend_name = match model_name.to_lowercase().as_str() {
         "kokoro" | "tts_kokoro" => "tts_kokoro",
-        _ => "tts_kokoro", // default to kokoro
+        other => {
+            return Err(anyhow::anyhow!(
+                "Unknown TTS engine '{}'. Supported: kokoro, tts_kokoro",
+                other
+            ))
+        }
     };
 
     // Check if already loaded and get the actual URL from ModelState
@@ -171,17 +186,16 @@ pub async fn handle_audio_models(State(state): State<Arc<ProxyState>>) -> impl I
                 || err_msg.contains("config directory")
                 || err_msg.contains("backend registry")
             {
-                // No backend installed — return static list.
-                // NOTE: This only lists kokoro. When other TTS engines are supported,
-                // this should be expanded or removed in favor of the backend's model list.
-                let models = vec![serde_json::json!({
-                    "id": "kokoro",
-                    "object": "model",
-                    "created": 0,
-                    "owned_by": "kokoro",
-                    "ready": false
-                })];
-                return Json(serde_json::json!({"object": "list", "data": models})).into_response();
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({
+                        "error": {
+                            "message": err_msg,
+                            "type": "NotFoundError"
+                        }
+                    })),
+                )
+                    .into_response();
             }
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -282,12 +296,7 @@ pub async fn handle_audio_speech(
 
     // Build the request body for Kokoro-FastAPI (OpenAI-compatible format)
     let voice = req.voice.unwrap_or_default();
-    let model_name =
-        if req.model.to_lowercase() == "kokoro" || req.model.to_lowercase() == "tts_kokoro" {
-            "kokoro"
-        } else {
-            &req.model
-        };
+    let model_name = resolve_model_name(&req.model);
 
     let speech_req = serde_json::json!({
         "model": model_name,
@@ -302,7 +311,21 @@ pub async fn handle_audio_speech(
         Ok(response) => {
             let status = response.status();
             let content_type = content_type_for_format(&req.response_format);
-            let bytes = response.bytes().await.unwrap_or_default();
+            let bytes = match response.bytes().await {
+                Ok(b) => b,
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        Json(serde_json::json!({
+                            "error": {
+                                "message": format!("Failed to read backend response: {}", e),
+                                "type": "ServerError"
+                            }
+                        })),
+                    )
+                        .into_response();
+                }
+            };
             Response::builder()
                 .status(status)
                 .header("Content-Type", content_type)
@@ -362,12 +385,7 @@ pub async fn handle_audio_stream(
     };
 
     let voice = req.voice.unwrap_or_default();
-    let model_name =
-        if req.model.to_lowercase() == "kokoro" || req.model.to_lowercase() == "tts_kokoro" {
-            "kokoro"
-        } else {
-            &req.model
-        };
+    let model_name = resolve_model_name(&req.model);
 
     let speech_req = serde_json::json!({
         "model": model_name,

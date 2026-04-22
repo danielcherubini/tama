@@ -108,10 +108,12 @@ pub async fn enforce_same_origin(
             // include the matching header, indicating a potential attack.
             (Some(_), None) => Err((StatusCode::FORBIDDEN, "CSRF token validation failed")),
             // Neither present — allow through.
-            // This covers localhost development, race conditions where the
-            // initial GET hasn't completed yet, and environments where
-            // cookies are blocked. The X-CSRF-Token header (when present)
-            // provides defense-in-depth since an attacker can't guess it.
+            // Security trade-off: This enables localhost development and
+            // environments where cookies are blocked, but means POST requests
+            // without any CSRF protection can reach the API from any origin.
+            // The X-CSRF-Token header (when present) provides defense-in-depth
+            // since an attacker can't guess it. For production deployments,
+            // ensure proper CORS restrictions and consider adding authentication.
             _ => Ok(next.run(req).await),
         }
     } else if matches!(method, axum::http::Method::DELETE) {

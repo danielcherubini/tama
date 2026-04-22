@@ -6,6 +6,8 @@ use super::paths::*;
 use crate::backends::{backends_dir, ProgressSink};
 
 /// Minimum free disk space warning threshold (10 GB in bytes).
+/// Kokoro-FastAPI + PyTorch CPU needs ~4-6 GB, ROCm needs more.
+/// We use 10 GB to provide a comfortable buffer for model files, venv, and dependencies.
 const DISK_SPACE_WARNING_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 
 /// Check available disk space and warn if below threshold.
