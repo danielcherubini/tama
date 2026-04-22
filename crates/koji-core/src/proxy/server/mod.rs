@@ -242,8 +242,24 @@ impl ProxyServer {
     ///
     /// Builds the router and delegates to the listener module.
     pub async fn run(self, addr: std::net::SocketAddr) -> anyhow::Result<()> {
+        // Clone state for shutdown cleanup (unloads TTS backends)
+        let cleanup_state = Arc::clone(&self.state);
         let app = self.into_router();
-        listener::run(app, addr).await
+        let on_shutdown = async move {
+            let models = cleanup_state.models.read().await;
+            let tts_backends: Vec<String> = models
+                .iter()
+                .filter(|(name, _)| name.starts_with("tts_"))
+                .map(|(name, _)| name.clone())
+                .collect();
+            drop(models);
+            for name in tts_backends {
+                if let Err(e) = cleanup_state.unload_tts_backend(&name).await {
+                    tracing::warn!("Failed to unload TTS backend '{}': {}", name, e);
+                }
+            }
+        };
+        listener::run(app, addr, Some(on_shutdown)).await
     }
 }
 
