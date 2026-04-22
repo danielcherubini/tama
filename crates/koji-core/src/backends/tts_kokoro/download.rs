@@ -132,12 +132,13 @@ fn ensure_openblas(progress: &Arc<dyn ProgressSink>) -> Result<()> {
             } else {
                 ""
             };
+            let args = if mgr == "apt-get" {
+                vec!["-y", "install", pkg]
+            } else {
+                vec!["install", "-y", pkg]
+            };
             let status = std::process::Command::new(format!("{sudo}{mgr}"))
-                .args(if mgr == "apt-get" {
-                    &["-y", "install", pkg]
-                } else {
-                    &["install", "-y", pkg]
-                })
+                .args(&args)
                 .status()
                 .with_context(|| format!("Failed to run {mgr} install"))?;
 
