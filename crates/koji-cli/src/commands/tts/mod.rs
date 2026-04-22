@@ -4,8 +4,11 @@
 
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
+use std::env;
 use std::io::Write;
 use std::path::PathBuf;
+
+use koji_core::config::Config;
 
 pub mod config;
 
@@ -107,7 +110,8 @@ async fn cmd_say(
 
     // Call the proxy server's TTS endpoint
     let client = reqwest::Client::new();
-    let base_url = "http://127.0.0.1:11434";
+    let config = Config::load().unwrap_or_default();
+    let base_url = env::var("KOJI_PROXY_URL").unwrap_or_else(|_| config.proxy_url());
 
     let url = format!("{}/v1/audio/speech", base_url);
 
@@ -154,7 +158,9 @@ async fn cmd_say(
 
 async fn cmd_voices(engine: &str) -> Result<()> {
     let client = reqwest::Client::new();
-    let url = "http://127.0.0.1:11434/v1/audio/voices";
+    let config = Config::load().unwrap_or_default();
+    let base_url = env::var("KOJI_PROXY_URL").unwrap_or_else(|_| config.proxy_url());
+    let url = format!("{}/v1/audio/voices", base_url);
 
     let response = client
         .get(url)
