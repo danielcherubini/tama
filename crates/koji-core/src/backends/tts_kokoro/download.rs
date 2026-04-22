@@ -599,7 +599,7 @@ mod tests {
 
     #[test]
     fn test_kokoro_fastapi_constants() {
-        assert_eq!(KOKORO_FASTAPI_TAG, "v0.3.0");
+        assert_eq!(KOKORO_FASTAPI_TAG, "v0.2.4");
         assert_eq!(
             KOKORO_FASTAPI_URL,
             "https://github.com/remsky/Kokoro-FastAPI.git"

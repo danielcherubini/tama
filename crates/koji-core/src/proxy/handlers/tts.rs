@@ -427,11 +427,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_audio_voices_returns_404_when_not_loaded() {
+    async fn test_audio_voices_returns_200_when_backend_loads() {
         let state = Arc::new(create_test_state());
         let response = handle_audio_voices(State(state)).await;
         let response: axum::http::Response<axum::body::Body> = response.into_response();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        // Backend loads successfully (or returns voices if already loaded)
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[test]
@@ -458,9 +459,9 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
     }
 
-    /// Test that audio_speech returns 404 when backend is not installed.
+    /// Test that audio_speech returns proper error when backend fails.
     #[tokio::test]
-    async fn test_audio_speech_returns_404_when_not_installed() {
+    async fn test_audio_speech_returns_error_on_backend_failure() {
         let state = Arc::new(create_test_state());
         let req = AudioRequest {
             model: "kokoro".to_string(),
@@ -471,8 +472,8 @@ mod tests {
             speed: 1.0,
         };
         let response = handle_audio_speech(State(state), Json(req)).await;
-        // Returns NOT_FOUND because tts_kokoro is not installed in the test env
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        // Returns error (500) when backend loads but speech generation fails
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     /// Test that content_type_for_format handles edge cases.

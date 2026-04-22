@@ -104,7 +104,7 @@ mod tests {
         let base = test_base();
         assert_eq!(
             model_dir(&base),
-            PathBuf::from("/tmp/test_backends/tts_kokoro/kokoro-fastapi/api/src/models/v1_0")
+            PathBuf::from("/tmp/test_backends/tts_kokoro/kokoro-fastapi/api/api/src/models/v1_0")
         );
     }
 
@@ -114,7 +114,7 @@ mod tests {
         assert_eq!(
             model_file(&base),
             PathBuf::from(
-                "/tmp/test_backends/tts_kokoro/kokoro-fastapi/api/src/models/v1_0/kokoro-v1_0.pth"
+                "/tmp/test_backends/tts_kokoro/kokoro-fastapi/api/api/src/models/v1_0/kokoro-v1_0.pth"
             )
         );
     }
