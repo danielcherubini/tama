@@ -109,7 +109,7 @@ async fn install_dependencies(
     if has_rocm {
         // Kokoro-FastAPI v0.2.4 doesn't have a [rocm] extra.
         // Install PyTorch ROCm first, then install the package without
-        #  torch extras so it doesn't override our ROCm build.
+        // torch extras so it doesn't override our ROCm build.
         progress.log("Detected ROCm — installing PyTorch ROCm...");
         let status = tokio::process::Command::new(python_bin)
             .args([
@@ -135,10 +135,11 @@ async fn install_dependencies(
 
     // Install the package (with CPU extras if no ROCm, or bare install if ROCm)
     let extra = if has_rocm { "" } else { "[cpu]" };
-    progress.log(format!(
+    let msg = format!(
         "Installing Kokoro-FastAPI{}...",
         if has_rocm { " (using system PyTorch)" } else { " CPU dependencies" }
-    ));
+    );
+    progress.log(&msg);
     let status = tokio::process::Command::new(python_bin)
         .args(["-m", "pip", "install", "-e", &format!("\".{extra}\"")])
         .current_dir(install_path)
