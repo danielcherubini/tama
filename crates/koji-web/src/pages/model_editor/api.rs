@@ -2,7 +2,7 @@ use super::types::*;
 
 use super::types::{ModelDetail, ModelListResponse, RefreshResponse, VerifyResponse};
 
-use crate::utils::{post_request, put_request};
+use crate::utils::{extract_and_store_csrf_token, post_request, put_request};
 
 pub async fn fetch_model(id: String) -> Option<ModelDetail> {
     if id == "new" {
@@ -10,6 +10,7 @@ pub async fn fetch_model(id: String) -> Option<ModelDetail> {
             .send()
             .await
             .ok()?;
+        extract_and_store_csrf_token(&resp);
         let list: ModelListResponse = resp.json().await.ok()?;
         return Some(ModelDetail {
             id: 0,
@@ -38,7 +39,10 @@ pub async fn fetch_model(id: String) -> Option<ModelDetail> {
         .send()
         .await;
     match resp {
-        Ok(r) if r.status() == 200 => r.json::<ModelDetail>().await.ok(),
+        Ok(r) if r.status() == 200 => {
+            extract_and_store_csrf_token(&r);
+            r.json::<ModelDetail>().await.ok()
+        }
         _ => None,
     }
 }
@@ -241,6 +245,7 @@ pub async fn fetch_sampling_templates(
         .send()
         .await
         .ok()?;
+    extract_and_store_csrf_token(&resp);
     let list: ModelListResponse = resp.json().await.ok()?;
     let templates = list.sampling_templates?;
     Some(templates)

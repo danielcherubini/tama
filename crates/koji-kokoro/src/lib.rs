@@ -49,6 +49,7 @@ const MODEL_URL: &str = "https://github.com/8b-is/kokoro-tiny/raw/main/models/0.
 const VOICES_URL: &str = "https://github.com/8b-is/kokoro-tiny/raw/main/models/0.bin";
 const SAMPLE_RATE: u32 = 24000; // Kokoro model sample rate
 const DEFAULT_VOICE: &str = "af_sky";
+#[allow(dead_code)]
 const DEFAULT_SPEED: f32 = 1.0; // User-facing normal speed (maps to model 0.65)
 const DEFAULT_LANG: &str = "en";
 const SPEED_SCALE: f32 = 0.65; // Model speed = user speed * this scale factor
@@ -57,6 +58,7 @@ const MAX_CHARS_PER_CHUNK: usize = 180;
 const CHUNK_CROSSFADE_MS: usize = 45;
 const MIN_ENGINE_SPEED: f32 = 0.35;
 const MAX_ENGINE_SPEED: f32 = 2.2;
+#[allow(dead_code)]
 const PAD_TOKEN: char = '$'; // Padding token for beginning/end of phonemes
 
 // Fallback audio message - "Excuse me, I lost my voice. Give me time to get it back."

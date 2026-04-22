@@ -38,7 +38,7 @@ impl PiperEngine {
         // Search for .onnx file in the model directory
         let mut onnx_files: Vec<_> = std::fs::read_dir(&base)?
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map_or(false, |ext| ext == "onnx"))
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "onnx"))
             .collect();
 
         if onnx_files.is_empty() {

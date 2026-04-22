@@ -92,7 +92,7 @@ pub async fn handle_audio_voices(State(state): State<Arc<ProxyState>>) -> impl I
 }
 
 /// GET /v1/audio/models - List available audio models.
-pub async fn handle_audio_models(State(state): State<Arc<ProxyState>>) -> impl IntoResponse {
+pub async fn handle_audio_models(State(_state): State<Arc<ProxyState>>) -> impl IntoResponse {
     // Check if any TTS engine is installed in the registry
     let base_dir = match crate::config::Config::base_dir() {
         Ok(d) => d,

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 use crate::components::sparkline::SparklineChart;
+use crate::utils::{extract_and_store_csrf_token, post_request};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct MetricSample {
@@ -192,6 +193,7 @@ pub fn Dashboard() -> impl IntoView {
                     .send()
                     .await
             {
+                extract_and_store_csrf_token(&resp);
                 if let Ok(entries) = resp.json::<Vec<MetricsHistoryEntry>>().await {
                     let samples: Vec<MetricSample> = entries.into_iter().map(Into::into).collect();
                     if !samples.is_empty() {
@@ -254,9 +256,7 @@ pub fn Dashboard() -> impl IntoView {
     };
 
     let restart: Action<(), (), LocalStorage> = Action::new_unsync(|_: &()| async move {
-        let _ = gloo_net::http::Request::post("/koji/v1/system/restart")
-            .send()
-            .await;
+        let _ = post_request("/koji/v1/system/restart").send().await;
     });
 
     // Per-model load/unload actions wired to the same REST endpoints used by
@@ -268,7 +268,7 @@ pub fn Dashboard() -> impl IntoView {
     let load_action: Action<String, (), LocalStorage> = Action::new_unsync(|id: &String| {
         let id = id.clone();
         async move {
-            let _ = gloo_net::http::Request::post(&format!("/koji/v1/models/{}/load", id))
+            let _ = post_request(&format!("/koji/v1/models/{}/load", id))
                 .send()
                 .await;
         }
@@ -276,7 +276,7 @@ pub fn Dashboard() -> impl IntoView {
     let unload_action: Action<String, (), LocalStorage> = Action::new_unsync(|id: &String| {
         let id = id.clone();
         async move {
-            let _ = gloo_net::http::Request::post(&format!("/koji/v1/models/{}/unload", id))
+            let _ = post_request(&format!("/koji/v1/models/{}/unload", id))
                 .send()
                 .await;
         }

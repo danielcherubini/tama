@@ -3,6 +3,7 @@ use serde::Deserialize;
 use std::sync::LazyLock;
 
 pub use crate::utils::format_size;
+use crate::utils::{extract_and_store_csrf_token, post_request};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DownloadQueueItemDto {
@@ -82,6 +83,7 @@ pub fn Downloads() -> impl IntoView {
             .send()
             .await
         {
+            extract_and_store_csrf_token(&resp);
             if let Ok(data) = resp.json::<DownloadsActiveResponse>().await {
                 active_downloads_init.set(data.items);
             }
@@ -108,6 +110,7 @@ pub fn Downloads() -> impl IntoView {
                 .send()
                 .await
                 {
+                    extract_and_store_csrf_token(&resp);
                     if let Ok(data) = resp.json::<DownloadsHistoryResponse>().await {
                         items_c.set(data.items);
                         total_c.set(data.total);
@@ -325,13 +328,14 @@ fn render_history_item(item: DownloadQueueItemDto) -> impl IntoView {
 
 pub async fn cancel_download(job_id: &str) {
     let url = format!("/koji/v1/downloads/{}/cancel", job_id);
-    if let Ok(resp) = gloo_net::http::Request::post(&url).send().await {
+    if let Ok(resp) = post_request(&url).send().await {
         if resp.status() >= 200 && resp.status() < 300 {
             // Refresh active list
             if let Ok(resp2) = gloo_net::http::Request::get("/koji/v1/downloads/active")
                 .send()
                 .await
             {
+                extract_and_store_csrf_token(&resp2);
                 if let Ok(data) = resp2.json::<DownloadsActiveResponse>().await {
                     ACTIVE_DOWNLOADS.set(data.items);
                 }
