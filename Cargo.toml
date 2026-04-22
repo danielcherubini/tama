@@ -2,9 +2,7 @@
 members = [
     "crates/koji-core",
     "crates/koji-cli",
-    "crates/koji-kokoro",
     "crates/koji-mock",
-    "crates/koji-tts",
     "crates/koji-web",
 ]
 resolver = "2"
