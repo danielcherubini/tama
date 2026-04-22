@@ -114,12 +114,35 @@ pub async fn handle_audio_voices(State(state): State<Arc<ProxyState>>) -> impl I
     let url = format!("{}/v1/audio/voices", server_url);
     match state.client.get(&url).send().await {
         Ok(response) => {
-            let body = response.text().await.unwrap_or_default();
-            Json(
-                serde_json::from_str::<serde_json::Value>(&body)
-                    .unwrap_or_else(|_| serde_json::json!({"data": []})),
-            )
-            .into_response()
+            let body = match response.text().await {
+                Ok(text) => text,
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        Json(serde_json::json!({
+                            "error": {
+                                "message": format!("Failed to read backend response: {}", e),
+                                "type": "ServerError"
+                            }
+                        })),
+                    )
+                        .into_response();
+                }
+            };
+
+            match serde_json::from_str::<serde_json::Value>(&body) {
+                Ok(parsed) => Json(parsed).into_response(),
+                Err(e) => (
+                    StatusCode::BAD_GATEWAY,
+                    Json(serde_json::json!({
+                        "error": {
+                            "message": format!("Backend returned invalid JSON: {}", e),
+                            "type": "ServerError"
+                        }
+                    })),
+                )
+                    .into_response(),
+            }
         }
         Err(e) => (
             StatusCode::BAD_GATEWAY,
@@ -172,12 +195,35 @@ pub async fn handle_audio_models(State(state): State<Arc<ProxyState>>) -> impl I
     let url = format!("{}/v1/audio/models", server_url);
     match state.client.get(&url).send().await {
         Ok(response) => {
-            let body = response.text().await.unwrap_or_default();
-            Json(
-                serde_json::from_str::<serde_json::Value>(&body)
-                    .unwrap_or_else(|_| serde_json::json!({"object": "list", "data": []})),
-            )
-            .into_response()
+            let body = match response.text().await {
+                Ok(text) => text,
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        Json(serde_json::json!({
+                            "error": {
+                                "message": format!("Failed to read backend response: {}", e),
+                                "type": "ServerError"
+                            }
+                        })),
+                    )
+                        .into_response();
+                }
+            };
+
+            match serde_json::from_str::<serde_json::Value>(&body) {
+                Ok(parsed) => Json(parsed).into_response(),
+                Err(e) => (
+                    StatusCode::BAD_GATEWAY,
+                    Json(serde_json::json!({
+                        "error": {
+                            "message": format!("Backend returned invalid JSON: {}", e),
+                            "type": "ServerError"
+                        }
+                    })),
+                )
+                    .into_response(),
+            }
         }
         Err(e) => (
             StatusCode::BAD_GATEWAY,
