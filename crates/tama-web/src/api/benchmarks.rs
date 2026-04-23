@@ -956,8 +956,9 @@ pub async fn list_benchmark_history(State(_state): State<Arc<AppState>>) -> impl
                             summary.insert("ngram_m".to_string(), serde_json::json!(m));
                         }
                         if delta_pct != 0.0 {
+                            summary.insert("delta_pct".to_string(), serde_json::json!(delta_pct));
                             summary.insert(
-                                "delta_pct".to_string(),
+                                "delta_pct_display".to_string(),
                                 serde_json::json!(format!("{:+.1}%", delta_pct)),
                             );
                         }
