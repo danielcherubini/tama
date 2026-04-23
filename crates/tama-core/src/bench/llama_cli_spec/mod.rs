@@ -497,6 +497,8 @@ pub async fn run_spec_bench(
     }
 
     // Step 3: Build sweep matrix.
+    // Drop the baseline server now so GPU memory is available for spec-type servers.
+    drop(baseline_handle);
     let sweep_matrix = build_sweep_matrix(config).context("Failed to build sweep matrix")?;
     progress.log(&format!(
         "Sweep matrix: {} configurations across {} spec-types",
