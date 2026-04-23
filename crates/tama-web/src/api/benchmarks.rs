@@ -554,8 +554,11 @@ async fn run_spec_benchmark_inner(
     };
 
     // Discover llama-cli binary
-    tracing::info!(job_id = %job.id, backend_path = %backend_path.display(), "Resolving llama-cli for benchmark");
-    let cli_binary = llama_cli_spec::find_llama_cli(&backend_path).context(format!(
+    // The resolved path may be a file (llama-server) rather than the backend directory.
+    // Use its parent as the search base for llama-cli.
+    let backend_dir = backend_path.parent().unwrap_or(&backend_path);
+    tracing::info!(job_id = %job.id, backend_dir = %backend_dir.display(), "Resolving llama-cli for benchmark");
+    let cli_binary = llama_cli_spec::find_llama_cli(backend_dir).context(format!(
         "llama-cli not found for backend '{}'. Install llama.cpp from source or set LLAMA_CLI_PATH",
         target_backend
     ))?;
