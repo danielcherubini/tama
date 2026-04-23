@@ -1,34 +1,29 @@
-//! llama-cli speculative decoding benchmark module.
+//! llama-server speculative decoding benchmark module.
 //!
-//! Wraps the `llama-cli` binary from llama.cpp's tools/ directory to run
-//! benchmarks with speculative decoding flags (`--spec-type`, `--draft-max`,
-//! etc.). Unlike `llama-bench`, `llama-cli` supports these experimental
-//! inference acceleration techniques.
+//! Spawns a `llama-server` process with the appropriate speculative decoding
+//! flags (`--spec-type`, `--draft-max`, `--spec-ngram-size-*`) and makes
+//! HTTP completion requests to the running server to measure throughput.
 //!
 //! Split into:
-//! - [`args`] — CLI-argument construction from [`SpecBenchConfig`].
+//! - [`server`] — llama-server process lifecycle and HTTP API client.
 //! - [`discovery`] — binary lookup (pure filesystem logic).
-//! - [`parse`] — timing extraction from llama-cli stderr output.
 //!
 //! This module's `mod.rs` keeps the public types ([`SpecType`],
 //! [`SpecBenchConfig`], [`SpecEntry`], [`SpecBenchResult`]) and the async
 //! orchestrator [`run_spec_bench`].
 
-mod args;
 mod discovery;
-mod parse;
+mod server;
 
 pub use discovery::find_llama_cli;
 
 use crate::backends::ProgressSink;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::process::Stdio;
-use tokio::process::Command;
+use std::path::{Path, PathBuf};
 
 /// Speculative decoding type (maps to --spec-type CLI flag).
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum SpecType {
     NgramSimple,
@@ -231,78 +226,23 @@ fn compute_mean_stddev(values: &[f64]) -> (f64, f64) {
     (mean, stddev)
 }
 
-/// Outcome of a single llama-cli execution.
-#[derive(Debug)]
-enum RunOutcome {
-    /// Success with parsed timing and captured stderr.
-    Success(f64, String),
-    /// Process exited with error. Contains (exit_code_display, stderr).
-    Failed(String, String),
+/// Find an available port by binding to port 0.
+async fn find_available_port() -> Result<u16> {
+    use std::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let addr = listener.local_addr()?;
+    Ok(addr.port())
 }
 
-/// Run a single llama-cli command and return the outcome.
+/// Execute benchmark runs against a running llama-server.
 ///
-/// Does NOT bail on non-success exit — returns `Failed` with stderr so the
-/// caller can classify the error (OOM vs other failures).
-async fn run_llama_cli_once(binary: &PathBuf, args: &[String]) -> Result<RunOutcome> {
-    use std::time::Duration;
-
-    // Parse timeout from env, default to 5 minutes
-    let timeout_secs = std::env::var("LLAMA_CLI_TIMEOUT_SECS")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(300);
-
-    let mut child = Command::new(binary)
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .stdin(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .context("Failed to execute llama-cli")?;
-    // Drop stdin explicitly before waiting — prevents the child from
-    // hanging if it tries to read prompt input that we'll never send.
-    drop(child.stdin.take());
-
-    match tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait_with_output()).await {
-        Ok(Ok(output)) => {
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-
-
-            if !output.status.success() {
-                return Ok(RunOutcome::Failed(format!("{:?}", output.status), stderr));
-            }
-
-            // Try parsing stderr first, then stdout.
-            let timing = parse::parse_timing(&stderr).or_else(|_| parse::parse_timing(&stdout))?;
-
-
-            Ok(RunOutcome::Success(timing, stderr))
-        }
-        Ok(Err(e)) => anyhow::bail!("wait_with_output failed: {e}"),
-        Err(_) => anyhow::bail!(
-            "llama-cli timed out after {timeout_secs}s. Args: {:?}",
-            args
-        ),
-    }
-}
-
-/// Execute a benchmark run with retry logic and OOM detection.
-async fn execute_config_run(
-    binary: &PathBuf,
+/// Makes `config.runs` completion requests and returns timing stats.
+async fn execute_server_runs(
+    handle: &server::ServerHandle,
     sweep_cfg: &SweepConfig,
     bench_cfg: &SpecBenchConfig,
     progress: &dyn ProgressSink,
 ) -> SpecEntry {
-    let args = args::build_args(
-        bench_cfg,
-        sweep_cfg.spec_type,
-        sweep_cfg.draft_max,
-        sweep_cfg.ngram_n,
-        sweep_cfg.ngram_m,
-    );
     let label = format!(
         "{} draft_max={} n={:?} m={:?}",
         sweep_cfg.spec_type.as_str(),
@@ -310,102 +250,29 @@ async fn execute_config_run(
         sweep_cfg.ngram_n,
         sweep_cfg.ngram_m,
     );
-
+    let prompt = crate::bench::build_prompt(512);
     let mut timings = Vec::new();
 
     for run in 1..=bench_cfg.runs {
         progress.log(&format!("[{}] run {}/{}", label, run, bench_cfg.runs));
 
-        let result = match run_llama_cli_once(binary, &args).await {
-            Ok(o) => o,
-            Err(e) => RunOutcome::Failed("spawn failed".to_string(), e.to_string()),
-        };
-
-        match result {
-            RunOutcome::Success(timing, _stderr) => {
-                timings.push(timing);
+        match handle.complete(&prompt, bench_cfg.gen_tokens).await {
+            Ok(tokens_per_sec) => {
+                timings.push(tokens_per_sec);
             }
-            RunOutcome::Failed(code, stderr) => {
-                // Check for OOM in stderr
-                if stderr.to_lowercase().contains("oom")
-                    || stderr.to_lowercase().contains("out of memory")
-                {
-                    progress.log(&format!("[{}] OOM detected on run {}", label, run));
-                    return SpecEntry {
-                        spec_type: sweep_cfg.spec_type.as_str().to_string(),
-                        draft_max: sweep_cfg.draft_max,
-                        ngram_n: sweep_cfg.ngram_n,
-                        ngram_m: sweep_cfg.ngram_m,
-                        tg_ts_mean: 0.0,
-                        tg_ts_stddev: 0.0,
-                        delta_pct: 0.0,
-                        status: "skipped_oom".to_string(),
-                        error: Some(format!(
-                            "OOM detected: {}",
-                            stderr
-                                .lines()
-                                .find(|l| l.to_lowercase().contains("oom")
-                                    || l.to_lowercase().contains("out of memory"))
-                                .unwrap_or("unknown")
-                        )),
-                    };
-                }
-
-                // Retry once (2 total attempts)
-                progress.log(&format!(
-                    "[{}] run {} failed ({}): {}",
-                    label,
-                    run,
-                    code,
-                    stderr.lines().take(3).collect::<Vec<_>>().join(" ")
-                ));
-                let retry_result = match run_llama_cli_once(binary, &args).await {
-                    Ok(o) => o,
-                    Err(e) => RunOutcome::Failed("spawn failed".to_string(), e.to_string()),
+            Err(e) => {
+                progress.log(&format!("[{}] run {} failed: {}", label, run, e));
+                return SpecEntry {
+                    spec_type: sweep_cfg.spec_type.as_str().to_string(),
+                    draft_max: sweep_cfg.draft_max,
+                    ngram_n: sweep_cfg.ngram_n,
+                    ngram_m: sweep_cfg.ngram_m,
+                    tg_ts_mean: 0.0,
+                    tg_ts_stddev: 0.0,
+                    delta_pct: 0.0,
+                    status: "failed".to_string(),
+                    error: Some(e.to_string()),
                 };
-
-                match retry_result {
-                    RunOutcome::Success(timing, _stderr) => {
-                        timings.push(timing);
-                    }
-                    RunOutcome::Failed(retry_code, retry_stderr) => {
-                        if retry_stderr.to_lowercase().contains("oom")
-                            || retry_stderr.to_lowercase().contains("out of memory")
-                        {
-                            progress.log(&format!("[{}] OOM detected on retry", label));
-                            return SpecEntry {
-                                spec_type: sweep_cfg.spec_type.as_str().to_string(),
-                                draft_max: sweep_cfg.draft_max,
-                                ngram_n: sweep_cfg.ngram_n,
-                                ngram_m: sweep_cfg.ngram_m,
-                                tg_ts_mean: 0.0,
-                                tg_ts_stddev: 0.0,
-                                delta_pct: 0.0,
-                                status: "skipped_oom".to_string(),
-                                error: Some("OOM detected during retry".to_string()),
-                            };
-                        }
-                        let err_msg = format!(
-                            "exit={} stderr={} | retry: exit={} stderr={}",
-                            code,
-                            stderr.lines().take(2).collect::<Vec<_>>().join(" "),
-                            retry_code,
-                            retry_stderr.lines().take(2).collect::<Vec<_>>().join(" ")
-                        );
-                        progress.log(&format!("[{}] failed after retry: {}", label, err_msg));
-                        return SpecEntry {
-                            spec_type: sweep_cfg.spec_type.as_str().to_string(),
-                            draft_max: sweep_cfg.draft_max,
-                            ngram_n: sweep_cfg.ngram_n,
-                            ngram_m: sweep_cfg.ngram_m,
-                            tg_ts_mean: 0.0,
-                            tg_ts_stddev: 0.0,
-                            delta_pct: 0.0,
-                            status: "failed".to_string(),
-                            error: Some(err_msg),
-                        };
-                    }
-                }
             }
         }
     }
@@ -423,43 +290,148 @@ async fn execute_config_run(
         ngram_m: sweep_cfg.ngram_m,
         tg_ts_mean: mean,
         tg_ts_stddev: stddev,
-        delta_pct: 0.0, // will be filled in by caller
+        delta_pct: 0.0,
         status: "success".to_string(),
         error: None,
     }
 }
 
-/// Run a speculative decoding benchmark sweep.
+/// Spawn a server for the given spec type and execute all configs sharing it.
+async fn run_spec_type_group(
+    binary: &Path,
+    spec_type: SpecType,
+    configs: &[SweepConfig],
+    bench_cfg: &SpecBenchConfig,
+    progress: &dyn ProgressSink,
+) -> Vec<SpecEntry> {
+    let port = match find_available_port().await {
+        Ok(p) => p,
+        Err(e) => {
+            progress.log(&format!("Failed to find available port: {}", e));
+            return configs
+                .iter()
+                .map(|cfg| SpecEntry {
+                    spec_type: cfg.spec_type.as_str().to_string(),
+                    draft_max: cfg.draft_max,
+                    ngram_n: cfg.ngram_n,
+                    ngram_m: cfg.ngram_m,
+                    tg_ts_mean: 0.0,
+                    tg_ts_stddev: 0.0,
+                    delta_pct: 0.0,
+                    status: "failed".to_string(),
+                    error: Some(format!("Port allocation failed: {}", e)),
+                })
+                .collect();
+        }
+    };
+
+    let first = configs.first().expect("config group is empty");
+    let draft_min = (first.draft_max / 2).max(1);
+    let spec_ngram_n = configs.iter().find_map(|c| c.ngram_n);
+    let spec_ngram_m = configs.iter().find_map(|c| c.ngram_m);
+
+    let server_args = server::ServerArgs {
+        binary: binary.to_path_buf(),
+        model_path: bench_cfg.model_path.clone(),
+        port,
+        ngl: bench_cfg.ngl,
+        flash_attn: bench_cfg.flash_attn,
+        spec_type: Some(spec_type),
+        spec_ngram_n,
+        spec_ngram_m,
+        spec_ngram_min_hits: (bench_cfg.ngram_min_hits > 1).then_some(bench_cfg.ngram_min_hits),
+        draft_max: Some(first.draft_max),
+        draft_min: Some(draft_min),
+    };
+
+    progress.log(&format!(
+        "Starting llama-server on port {} (spec_type={})",
+        port,
+        spec_type.as_str()
+    ));
+
+    let timeout_secs = std::env::var("LLAMA_SERVER_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(300);
+
+    let handle = match server::spawn_server(&server_args, timeout_secs).await {
+        Ok(h) => h,
+        Err(e) => {
+            progress.log(&format!(
+                "Failed to start llama-server for {}: {}",
+                spec_type.as_str(),
+                e
+            ));
+            return configs
+                .iter()
+                .map(|cfg| SpecEntry {
+                    spec_type: cfg.spec_type.as_str().to_string(),
+                    draft_max: cfg.draft_max,
+                    ngram_n: cfg.ngram_n,
+                    ngram_m: cfg.ngram_m,
+                    tg_ts_mean: 0.0,
+                    tg_ts_stddev: 0.0,
+                    delta_pct: 0.0,
+                    status: "failed".to_string(),
+                    error: Some(format!("Server start failed: {}", e)),
+                })
+                .collect();
+        }
+    };
+
+    progress.log(&format!(
+        "llama-server ready on port {} ({})",
+        port,
+        spec_type.as_str()
+    ));
+
+    let mut entries = Vec::with_capacity(configs.len());
+    for cfg in configs {
+        let entry = execute_server_runs(&handle, cfg, bench_cfg, progress).await;
+        entries.push(entry);
+    }
+
+    entries
+}
+
+/// Run a speculative decoding benchmark sweep using llama-server.
+///
+/// Spawns one `llama-server` per spec-type group (since spec-type is a server
+/// startup flag). Each server handles all draft-max variants for its type.
 ///
 /// # Arguments
-/// - `config`: the benchmark configuration specifying model, spec types, and sweep dimensions.
-/// - `binary_path`: optional override for the llama-cli binary path. If `None`, uses discovery.
+/// - `config`: benchmark configuration specifying model, spec types, sweep dimensions.
+/// - `binary_override`: optional path to the `llama-server` binary. If `None`, uses
+///   discovery to find it alongside the backend's `llama-server` binary.
 /// - `progress`: progress sink for streaming status updates.
 ///
 /// # Returns
 /// A [`SpecBenchResult`] with baseline timing and one entry per sweep configuration.
 pub async fn run_spec_bench(
     config: &SpecBenchConfig,
-    binary_path: Option<PathBuf>,
+    binary_override: Option<PathBuf>,
     progress: &dyn ProgressSink,
 ) -> Result<SpecBenchResult> {
-    // Step 1: Discover or use provided llama-cli binary
-    let binary = if let Some(bp) = binary_path {
+    // Step 1: Discover or use provided llama-server binary.
+    let backend_dir = config
+        .model_path
+        .parent()
+        .unwrap_or(std::path::Path::new(""));
+    let binary = if let Some(bp) = binary_override {
         if !bp.exists() {
-            bail!("Provided llama-cli path does not exist: {}", bp.display());
+            bail!(
+                "Provided llama-server path does not exist: {}",
+                bp.display()
+            );
         }
         bp
     } else {
-        discovery::find_llama_cli(
-            config
-                .model_path
-                .parent()
-                .unwrap_or(std::path::Path::new("")),
-        )
-        .context("llama-cli not found. Set LLAMA_CLI_PATH or install llama.cpp from source.")?
+        discovery::find_llama_cli(backend_dir)
+            .context("llama-server not found. Set LLAMA_SERVER_PATH or ensure llama-server is in the backend directory.")?
     };
 
-    progress.log(&format!("Using llama-cli: {}", binary.display()));
+    progress.log(&format!("Using llama-server: {}", binary.display()));
     progress.log(&format!(
         "Model: {} (gen_tokens={}, runs={})",
         config.model_path.display(),
@@ -467,47 +439,49 @@ pub async fn run_spec_bench(
         config.runs,
     ));
 
-    // Step 2: Run baseline (no spec-decoding flags)
-    progress.log("Running baseline (no speculative decoding)...");
-    let baseline_args = args::build_baseline_args(config);
+    // Step 2: Run baseline (no spec-decoding) on a dedicated server.
+    progress.log("Starting baseline server (no speculative decoding)...");
+    let baseline_port = find_available_port().await?;
+    let baseline_args = server::ServerArgs {
+        binary: binary.clone(),
+        model_path: config.model_path.clone(),
+        port: baseline_port,
+        ngl: config.ngl,
+        flash_attn: config.flash_attn,
+        spec_type: None,
+        spec_ngram_n: None,
+        spec_ngram_m: None,
+        spec_ngram_min_hits: None,
+        draft_max: None,
+        draft_min: None,
+    };
+
+    let timeout_secs = std::env::var("LLAMA_SERVER_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(300);
+
+    let baseline_handle = server::spawn_server(&baseline_args, timeout_secs)
+        .await
+        .with_context(|| "Failed to start baseline llama-server")?;
+
+    progress.log(&format!("Baseline server ready on port {}", baseline_port));
+
     let mut baseline_timings = Vec::new();
+    let prompt = crate::bench::build_prompt(512);
 
     for run in 1..=config.runs {
         progress.log(&format!("[baseline] run {}/{}", run, config.runs));
-        let outcome = match run_llama_cli_once(&binary, &baseline_args).await {
-            Ok(o) => o,
-            Err(e) => RunOutcome::Failed("spawn failed".to_string(), e.to_string()),
-        };
-        match outcome {
-            RunOutcome::Success(timing, _stderr) => {
-                baseline_timings.push(timing);
+        match baseline_handle.complete(&prompt, config.gen_tokens).await {
+            Ok(ts) => {
+                baseline_timings.push(ts);
             }
-            RunOutcome::Failed(code, stderr) => {
-                progress.log(&format!(
-                    "[baseline] run {} failed ({}): {}",
+            Err(e) => {
+                bail!(
+                    "Baseline run {} failed: {}. Cannot continue without baseline.",
                     run,
-                    code,
-                    stderr.lines().take(2).collect::<Vec<_>>().join(" ")
-                ));
-                // Retry once
-                let retry_outcome = match run_llama_cli_once(&binary, &baseline_args).await {
-                    Ok(o) => o,
-                    Err(e) => RunOutcome::Failed("spawn failed".to_string(), e.to_string()),
-                };
-                match retry_outcome {
-                    RunOutcome::Success(timing, _stderr) => {
-                        baseline_timings.push(timing);
-                    }
-                    RunOutcome::Failed(retry_code, retry_stderr) => {
-                        bail!(
-                            "Baseline failed after retry: exit={} stderr={} | retry: exit={} stderr={}. Cannot continue sweep without baseline.",
-                            code,
-                            stderr.lines().take(2).collect::<Vec<_>>().join(" "),
-                            retry_code,
-                            retry_stderr.lines().take(2).collect::<Vec<_>>().join(" ")
-                        );
-                    }
-                }
+                    e
+                );
             }
         }
     }
@@ -522,69 +496,65 @@ pub async fn run_spec_bench(
         bail!("Baseline mean is 0.0 — benchmark data may be invalid.");
     }
 
-    // Step 3: Build sweep matrix
+    // Step 3: Build sweep matrix.
     let sweep_matrix = build_sweep_matrix(config).context("Failed to build sweep matrix")?;
     progress.log(&format!(
-        "Sweep matrix: {} configurations to test",
-        sweep_matrix.len()
+        "Sweep matrix: {} configurations across {} spec-types",
+        sweep_matrix.len(),
+        config.spec_types.len()
     ));
 
-    // Step 4: Execute each config
-    let mut entries = Vec::new();
+    // Step 4: Group configs by spec_type (each group = one server).
+    use std::collections::HashMap;
+    let mut groups: HashMap<SpecType, Vec<SweepConfig>> = HashMap::new();
+    for cfg in sweep_matrix {
+        groups.entry(cfg.spec_type).or_default().push(cfg);
+    }
+
+    // Step 5: Execute each spec-type group.
+    let mut all_entries = Vec::new();
     let mut oom_detected = false;
 
-    for (i, sweep_cfg) in sweep_matrix.iter().enumerate() {
+    for (&spec_type, configs) in &groups {
         if oom_detected {
-            progress.log(&format!(
-                "[{}] skipping due to prior OOM",
-                sweep_cfg.spec_type.as_str()
-            ));
-            entries.push(SpecEntry {
-                spec_type: sweep_cfg.spec_type.as_str().to_string(),
-                draft_max: sweep_cfg.draft_max,
-                ngram_n: sweep_cfg.ngram_n,
-                ngram_m: sweep_cfg.ngram_m,
-                tg_ts_mean: 0.0,
-                tg_ts_stddev: 0.0,
-                delta_pct: 0.0,
-                status: "skipped_oom".to_string(),
-                error: Some("Skipped due to OOM in earlier config".to_string()),
-            });
+            for cfg in configs {
+                progress.log(&format!(
+                    "[{}] skipping due to prior OOM",
+                    spec_type.as_str()
+                ));
+                all_entries.push(SpecEntry {
+                    spec_type: cfg.spec_type.as_str().to_string(),
+                    draft_max: cfg.draft_max,
+                    ngram_n: cfg.ngram_n,
+                    ngram_m: cfg.ngram_m,
+                    tg_ts_mean: 0.0,
+                    tg_ts_stddev: 0.0,
+                    delta_pct: 0.0,
+                    status: "skipped_oom".to_string(),
+                    error: Some("Skipped due to OOM in earlier config".to_string()),
+                });
+            }
             continue;
         }
 
-        progress.log(&format!(
-            "[{}/{}] Testing {} draft_max={} n={:?} m={:?}",
-            i + 1,
-            sweep_matrix.len(),
-            sweep_cfg.spec_type.as_str(),
-            sweep_cfg.draft_max,
-            sweep_cfg.ngram_n,
-            sweep_cfg.ngram_m,
-        ));
+        let entries = run_spec_type_group(&binary, spec_type, configs, config, progress).await;
 
-        let entry = execute_config_run(&binary, sweep_cfg, config, progress).await;
-
-        if entry.status == "skipped_oom" {
-            oom_detected = true;
+        for mut entry in entries {
+            if entry.status == "skipped_oom" {
+                oom_detected = true;
+            }
+            // Compute delta vs baseline.
+            if entry.tg_ts_mean > 0.0 && baseline_mean > 0.0 {
+                entry.delta_pct = ((entry.tg_ts_mean - baseline_mean) / baseline_mean) * 100.0;
+            }
+            all_entries.push(entry);
         }
-
-        // Compute delta vs baseline
-        let delta_pct = if entry.tg_ts_mean > 0.0 && baseline_mean > 0.0 {
-            ((entry.tg_ts_mean - baseline_mean) / baseline_mean) * 100.0
-        } else {
-            0.0
-        };
-        let mut entry = entry;
-        entry.delta_pct = delta_pct;
-
-        entries.push(entry);
     }
 
     Ok(SpecBenchResult {
         baseline_tg_ts: baseline_mean,
         baseline_tg_stddev: baseline_stddev,
-        entries,
+        entries: all_entries,
     })
 }
 

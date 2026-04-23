@@ -5,24 +5,29 @@
 
 use super::{SpecBenchConfig, SpecType};
 
-/// Build the command-line arguments for a single llama-cli speculative decoding run.
+/// Build command-line arguments for a speculative decoding run.
 ///
-/// Each spec-type only gets the knobs it uses:
-/// - **ngram-simple**: `--spec-type ngram-simple --draft-max N`
-/// - **ngram-mod**: `--spec-type ngram-mod --spec-ngram-size-n N --draft-min M --draft-max MAX`
-///   (where M = draft_max / 2, clamped to ≥ 1)
-/// - **ngram-map-k**: `--spec-type ngram-map-k --spec-ngram-size-n N --spec-ngram-size-m M --draft-max MAX`
-/// - **ngram-map-k4v**: same as ngram-map-k but with `--spec-type ngram-map-k4v`
+/// Uses `--spec-default` (llama.cpp's built-in n-gram spec decoding) plus
+/// `--draft-max` / `--draft-min` to tune draft behavior. `--single-turn` makes
+/// llama-cli exit after one generation instead of entering interactive mode.
 ///
-/// Always included: `-m <model_path>`, `-n <gen_tokens>`, `-ngl <ngl>` (if Some), `-fa 1|0`
+/// Note: llama.cpp b8893+ removed the old `--spec-type`, `--spec-ngram-size-*`,
+/// and `--draft-modalism` flags. All spec decoding is now configured via
+/// `--spec-default` combined with `--draft-max` / `--draft-min`. The spec_type,
+/// ngram_n, and ngram_m parameters are accepted for API compatibility but have
+/// no effect on the generated args.
+///
+/// Always included: `-m`, `-p`, `-n`, `--n-gpu-layers` (if set), `-fa`,
+/// `--single-turn`, `--no-display-prompt`, `--spec-default`, `--draft-min`,
+/// `--draft-max`.
 ///
 /// The prompt is generated via `crate::bench::build_prompt(512)`.
 pub(super) fn build_args(
     config: &SpecBenchConfig,
-    spec_type: SpecType,
+    _spec_type: SpecType,
     draft_max: u32,
-    ngram_n: Option<u32>,
-    ngram_m: Option<u32>,
+    _ngram_n: Option<u32>,
+    _ngram_m: Option<u32>,
 ) -> Vec<String> {
     let mut args = Vec::new();
 
@@ -49,55 +54,28 @@ pub(super) fn build_args(
     args.push("-fa".to_string());
     args.push(if config.flash_attn { "1" } else { "0" }.to_string());
 
-    // Suppress conversation mode and prompt echoing
-    args.push("-no-cnv".to_string());
+    // Non-interactive: exit after single generation.
+    args.push("--single-turn".to_string());
+    // Suppress prompt echoing.
     args.push("--no-display-prompt".to_string());
 
-    // Spec-decoding flags — only for the knobs each type uses
-    match spec_type {
-        SpecType::NgramSimple => {
-            args.push("--spec-type".to_string());
-            args.push("ngram-simple".to_string());
-            args.push("--draft-max".to_string());
-            args.push(draft_max.to_string());
-        }
-        SpecType::NgramMod => {
-            let n = ngram_n.expect("ngram_n required for ngram-mod");
-            let draft_min = (draft_max / 2).max(1);
-
-            args.push("--spec-type".to_string());
-            args.push("ngram-mod".to_string());
-            args.push("--spec-ngram-size-n".to_string());
-            args.push(n.to_string());
-            args.push("--draft-min".to_string());
-            args.push(draft_min.to_string());
-            args.push("--draft-max".to_string());
-            args.push(draft_max.to_string());
-        }
-        SpecType::NgramMapK | SpecType::NgramMapK4v => {
-            let n = ngram_n.expect("ngram_n required for ngram-map-*");
-            let m = ngram_m.expect("ngram_m required for ngram-map-*");
-
-            args.push("--spec-type".to_string());
-            args.push(spec_type.as_str().to_string());
-            args.push("--spec-ngram-size-n".to_string());
-            args.push(n.to_string());
-            args.push("--spec-ngram-size-m".to_string());
-            args.push(m.to_string());
-            args.push("--spec-ngram-min-hits".to_string());
-            args.push(config.ngram_min_hits.to_string());
-            args.push("--draft-max".to_string());
-            args.push(draft_max.to_string());
-        }
-    }
+    // Spec-decoding flags — llama.cpp b8893+ uses --spec-default for all n-gram
+    // variants, tuned via --draft-max / --draft-min.
+    let draft_min = (draft_max / 2).max(1);
+    args.push("--spec-default".to_string());
+    args.push("--draft-min".to_string());
+    args.push(draft_min.to_string());
+    args.push("--draft-max".to_string());
+    args.push(draft_max.to_string());
 
     args
 }
 
 /// Build command-line arguments for a baseline run (no speculative decoding).
 ///
-/// Omits all `--spec-*` and `--draft-*` flags entirely. Still includes model,
-/// prompt, generation length, GPU layers, and flash attention settings.
+/// Includes `--single-turn` and `--no-display-prompt` for non-interactive batch
+/// mode. Omits all `--spec-*` and `--draft-*` flags entirely. Still includes
+/// model, prompt, generation length, GPU layers, and flash attention settings.
 pub(super) fn build_baseline_args(config: &SpecBenchConfig) -> Vec<String> {
     let mut args = Vec::new();
 
@@ -124,8 +102,9 @@ pub(super) fn build_baseline_args(config: &SpecBenchConfig) -> Vec<String> {
     args.push("-fa".to_string());
     args.push(if config.flash_attn { "1" } else { "0" }.to_string());
 
-    // Suppress conversation mode and prompt echoing
-    args.push("-no-cnv".to_string());
+    // Non-interactive: exit after single generation.
+    args.push("--single-turn".to_string());
+    // Suppress prompt echoing.
     args.push("--no-display-prompt".to_string());
 
     args
@@ -164,152 +143,152 @@ mod tests {
         }
     }
 
-    /// Verifies that `build_args` for ngram-simple emits only the correct flags.
     #[test]
-    fn test_build_args_ngram_simple() {
-        let config = make_config();
-        let args = build_args(&config, SpecType::NgramSimple, 32, None, None);
-
-        assert!(has_flag(&args, "-m"));
-        assert_eq!(find_arg(&args, "-m"), Some("/test/model.gguf"));
-        assert!(has_flag(&args, "-n"));
-        assert_eq!(find_arg(&args, "-n"), Some("256"));
-        assert!(has_flag(&args, "-fa"));
-        assert_eq!(find_arg(&args, "-fa"), Some("1"));
-        assert!(has_flag(&args, "--spec-type"));
-        assert_eq!(find_arg(&args, "--spec-type"), Some("ngram-simple"));
-        assert!(has_flag(&args, "--draft-max"));
-        assert_eq!(find_arg(&args, "--draft-max"), Some("32"));
-
-        // ngram-simple should NOT have ngram flags
-        assert!(!has_flag(&args, "--spec-ngram-size-n"));
-        assert!(!has_flag(&args, "--spec-ngram-size-m"));
-        assert!(!has_flag(&args, "--draft-min"));
-    }
-
-    /// Verifies that `build_args` for ngram-mod emits correct flags with computed draft-min.
-    #[test]
-    fn test_build_args_ngram_mod() {
-        let config = make_config();
-        let args = build_args(&config, SpecType::NgramMod, 32, Some(5), None);
-
-        assert!(has_flag(&args, "--spec-type"));
-        assert_eq!(find_arg(&args, "--spec-type"), Some("ngram-mod"));
-        assert!(has_flag(&args, "--spec-ngram-size-n"));
-        assert_eq!(find_arg(&args, "--spec-ngram-size-n"), Some("5"));
-        assert!(has_flag(&args, "--draft-min"));
-        // draft_min = 32 / 2 = 16
-        assert_eq!(find_arg(&args, "--draft-min"), Some("16"));
-        assert!(has_flag(&args, "--draft-max"));
-        assert_eq!(find_arg(&args, "--draft-max"), Some("32"));
-
-        // ngram-mod should NOT have size-m flag
-        assert!(!has_flag(&args, "--spec-ngram-size-m"));
-    }
-
-    /// Verifies that `build_args` for ngram-mod clamps draft-min to 1 when draft_max is 1.
-    #[test]
-    fn test_build_args_ngram_mod_draft_min_clamped() {
-        let config = make_config();
-        let args = build_args(&config, SpecType::NgramMod, 1, Some(3), None);
-
-        assert_eq!(find_arg(&args, "--draft-min"), Some("1")); // (1 / 2).max(1) = 1
-    }
-
-    /// Verifies that `build_args` for ngram-map-k emits correct flags.
-    #[test]
-    fn test_build_args_ngram_map_k() {
-        let config = make_config();
-        let args = build_args(&config, SpecType::NgramMapK, 64, Some(7), Some(3));
-
-        assert!(has_flag(&args, "--spec-type"));
-        assert_eq!(find_arg(&args, "--spec-type"), Some("ngram-map-k"));
-        assert!(has_flag(&args, "--spec-ngram-size-n"));
-        assert_eq!(find_arg(&args, "--spec-ngram-size-n"), Some("7"));
-        assert!(has_flag(&args, "--spec-ngram-size-m"));
-        assert_eq!(find_arg(&args, "--spec-ngram-size-m"), Some("3"));
-        assert!(has_flag(&args, "--draft-max"));
-        assert_eq!(find_arg(&args, "--draft-max"), Some("64"));
-    }
-
-    /// Verifies that `build_args` for ngram-map-k4v emits correct flags.
-    #[test]
-    fn test_build_args_ngram_map_k4v() {
-        let config = make_config();
-        let args = build_args(&config, SpecType::NgramMapK4v, 64, Some(7), Some(3));
-
-        assert!(has_flag(&args, "--spec-type"));
-        assert_eq!(find_arg(&args, "--spec-type"), Some("ngram-map-k4v"));
-        assert!(has_flag(&args, "--spec-ngram-size-n"));
-        assert_eq!(find_arg(&args, "--spec-ngram-size-n"), Some("7"));
-        assert!(has_flag(&args, "--spec-ngram-size-m"));
-        assert_eq!(find_arg(&args, "--spec-ngram-size-m"), Some("3"));
-        assert!(has_flag(&args, "--draft-max"));
-        assert_eq!(find_arg(&args, "--draft-max"), Some("64"));
-    }
-
-    /// Verifies that `build_baseline_args` returns args WITHOUT any spec or draft flags.
-    #[test]
-    fn test_build_baseline_args_no_spec_flags() {
+    fn test_baseline_args_model() {
         let config = make_config();
         let args = build_baseline_args(&config);
-
-        assert!(has_flag(&args, "-m"));
         assert_eq!(find_arg(&args, "-m"), Some("/test/model.gguf"));
-        assert!(has_flag(&args, "-n"));
-        assert_eq!(find_arg(&args, "-n"), Some("256"));
-        assert!(has_flag(&args, "-fa"));
-        assert_eq!(find_arg(&args, "-fa"), Some("1"));
-
-        // Must NOT contain any spec or draft flags
-        assert!(!has_flag(&args, "--spec-type"));
-        assert!(!has_flag(&args, "--draft-max"));
-        assert!(!has_flag(&args, "--draft-min"));
-        assert!(!has_flag(&args, "--spec-ngram-size-n"));
-        assert!(!has_flag(&args, "--spec-ngram-size-m"));
     }
 
-    /// Verifies that `build_baseline_args` includes GPU layers when configured.
     #[test]
-    fn test_build_baseline_args_with_ngl() {
+    fn test_baseline_args_generation_length() {
+        let config = make_config();
+        let args = build_baseline_args(&config);
+        assert_eq!(find_arg(&args, "-n"), Some("256"));
+    }
+
+    #[test]
+    fn test_baseline_args_gpu_layers() {
         let mut config = make_config();
         config.ngl = Some(99);
         let args = build_baseline_args(&config);
-
-        assert!(has_flag(&args, "--n-gpu-layers"));
         assert_eq!(find_arg(&args, "--n-gpu-layers"), Some("99"));
     }
 
-    /// Verifies that `build_args` includes GPU layers when configured.
     #[test]
-    fn test_build_args_with_ngl() {
+    fn test_baseline_args_flash_attn_enabled() {
         let mut config = make_config();
-        config.ngl = Some(45);
-        let args = build_args(&config, SpecType::NgramSimple, 16, None, None);
-
-        assert!(has_flag(&args, "--n-gpu-layers"));
-        assert_eq!(find_arg(&args, "--n-gpu-layers"), Some("45"));
+        config.flash_attn = true;
+        let args = build_baseline_args(&config);
+        assert_eq!(find_arg(&args, "-fa"), Some("1"));
     }
 
-    /// Verifies that flash_attn=false emits `-fa 0`.
     #[test]
-    fn test_build_args_flash_attn_off() {
+    fn test_baseline_args_flash_attn_disabled() {
         let mut config = make_config();
         config.flash_attn = false;
-        let args = build_args(&config, SpecType::NgramSimple, 16, None, None);
-
+        let args = build_baseline_args(&config);
         assert_eq!(find_arg(&args, "-fa"), Some("0"));
     }
 
-    /// Verifies that `build_args` includes the prompt argument.
     #[test]
-    fn test_build_args_includes_prompt() {
+    fn test_baseline_args_single_turn() {
+        let config = make_config();
+        let args = build_baseline_args(&config);
+        assert!(has_flag(&args, "--single-turn"));
+    }
+
+    #[test]
+    fn test_baseline_args_no_display_prompt() {
+        let config = make_config();
+        let args = build_baseline_args(&config);
+        assert!(has_flag(&args, "--no-display-prompt"));
+    }
+
+    #[test]
+    fn test_baseline_args_no_spec_flags() {
+        let config = make_config();
+        let args = build_baseline_args(&config);
+        assert!(!has_flag(&args, "--spec-default"));
+        assert!(!has_flag(&args, "--draft-max"));
+        assert!(!has_flag(&args, "--spec-type"));
+    }
+
+    #[test]
+    fn test_baseline_args_has_prompt() {
+        let config = make_config();
+        let args = build_baseline_args(&config);
+        let prompt_arg = find_arg(&args, "-p").unwrap();
+        assert!(!prompt_arg.is_empty(), "Prompt should not be empty");
+    }
+
+    #[test]
+    fn test_spec_args_spec_default() {
         let config = make_config();
         let args = build_args(&config, SpecType::NgramSimple, 16, None, None);
+        assert!(has_flag(&args, "--spec-default"));
+    }
 
-        assert!(has_flag(&args, "-p"));
-        let prompt = find_arg(&args, "-p").expect("prompt should be present");
-        // Prompt should be approximately 512 * 4 = 2048 chars
-        assert!(prompt.len() >= 1500 && prompt.len() <= 2500);
+    #[test]
+    fn test_spec_args_draft_max() {
+        let config = make_config();
+        let args = build_args(&config, SpecType::NgramSimple, 32, None, None);
+        assert_eq!(find_arg(&args, "--draft-max"), Some("32"));
+    }
+
+    #[test]
+    fn test_spec_args_draft_min() {
+        let config = make_config();
+        // draft_min = draft_max / 2
+        let args = build_args(&config, SpecType::NgramSimple, 32, None, None);
+        assert_eq!(find_arg(&args, "--draft-min"), Some("16"));
+    }
+
+    #[test]
+    fn test_spec_args_draft_min_minimum_one() {
+        let config = make_config();
+        // draft_min = max(draft_max / 2, 1) = max(2, 1) = 2
+        let args = build_args(&config, SpecType::NgramSimple, 4, None, None);
+        assert_eq!(find_arg(&args, "--draft-min"), Some("2"));
+    }
+
+    #[test]
+    fn test_spec_args_single_turn() {
+        let config = make_config();
+        let args = build_args(&config, SpecType::NgramSimple, 16, None, None);
+        assert!(has_flag(&args, "--single-turn"));
+    }
+
+    #[test]
+    fn test_spec_args_no_spec_type() {
+        let config = make_config();
+        let args = build_args(&config, SpecType::NgramSimple, 16, None, None);
+        // --spec-type is removed in b8893+
+        assert!(!has_flag(&args, "--spec-type"));
+    }
+
+    #[test]
+    fn test_spec_args_no_old_flags() {
+        let config = make_config();
+        let args = build_args(&config, SpecType::NgramMod, 16, Some(12), Some(48));
+        // Old flags should not be present in b8893+
+        assert!(!has_flag(&args, "--spec-type"));
+        assert!(!has_flag(&args, "--spec-ngram-size-n"));
+        assert!(!has_flag(&args, "--spec-ngram-size-m"));
+        assert!(!has_flag(&args, "--draft-modalism"));
+    }
+
+    #[test]
+    fn test_spec_args_gpu_layers() {
+        let mut config = make_config();
+        config.ngl = Some(99);
+        let args = build_args(&config, SpecType::NgramSimple, 16, None, None);
+        assert_eq!(find_arg(&args, "--n-gpu-layers"), Some("99"));
+    }
+
+    #[test]
+    fn test_spec_args_flash_attn() {
+        let mut config = make_config();
+        config.flash_attn = true;
+        let args = build_args(&config, SpecType::NgramSimple, 16, None, None);
+        assert_eq!(find_arg(&args, "-fa"), Some("1"));
+    }
+
+    #[test]
+    fn test_spec_args_has_prompt() {
+        let config = make_config();
+        let args = build_args(&config, SpecType::NgramSimple, 16, None, None);
+        let prompt_arg = find_arg(&args, "-p").unwrap();
+        assert!(!prompt_arg.is_empty(), "Prompt should not be empty");
     }
 }
