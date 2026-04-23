@@ -334,6 +334,8 @@ pub fn SpecBench() -> impl IntoView {
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&results_json) {
             benchmark_results.set(Some(parsed));
         }
+        // Receiving a result event means the job is done — mark not running.
+        is_running.set(false);
     });
     let on_status_cb = Callback::new(move |status: String| {
         if status != "running" {
