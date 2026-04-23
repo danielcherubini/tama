@@ -57,6 +57,13 @@ pub fn find_llama_cli(backend_path: &std::path::Path) -> Result<PathBuf> {
         return Ok(release_path);
     }
 
+    // 4b. <backend_path>/llama-cli (binary directly in backend dir)
+    let root_cli_path = backend_path.join(cli_name);
+    searched.push(root_cli_path.clone());
+    if root_cli_path.exists() {
+        return Ok(root_cli_path);
+    }
+
     // 5. Grandparent-relative: <backend_path>/../tools/llama-cli/llama-cli
     let grandparent = backend_path.parent().and_then(|p| p.parent());
     if let Some(gp) = grandparent {
@@ -149,6 +156,23 @@ mod tests {
         let release_dir = backend_path.join("bin").join("release");
         fs::create_dir_all(&release_dir).unwrap();
         let cli_path = release_dir.join(if cfg!(target_os = "windows") {
+            "llama-cli.exe"
+        } else {
+            "llama-cli"
+        });
+        fs::write(&cli_path, "#!/bin/sh\necho mock").unwrap();
+
+        let result = find_llama_cli(backend_path);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), cli_path);
+    }
+
+    /// Verifies that `find_llama_cli` finds the binary directly in <backend_path>/llama-cli.
+    #[test]
+    fn test_find_llama_cli_root_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let backend_path = tmp.path();
+        let cli_path = backend_path.join(if cfg!(target_os = "windows") {
             "llama-cli.exe"
         } else {
             "llama-cli"
