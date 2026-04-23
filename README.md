@@ -91,16 +91,14 @@ Open [http://localhost:11435](http://localhost:11435) to access the dashboard.
 
 ### Pages
 
-| Page | Description |
-|------|-------------|
-| **Dashboard** — Resource monitoring tiles (CPU, memory, GPU, VRAM) with sparkline charts, active models list with status and quick-load buttons |
-| **Models** — View installed models, pull new ones from HuggingFace, edit model configurations, manage sampling profiles |
-| **Backends** — Manage llama.cpp and ik_llama installations, switch between versions, update to latest |
-| **Logs** — Real-time log streaming with filtering |
-| **Updates** — Check for model/backend updates, track per-quant update status, apply updates in queue |
-| **Downloads** — Persistent download queue with progress tracking, history, and toast notifications |
-| **Benchmarks** — Run llama-bench or speculative decoding benchmarks, select backends and presets, view results table (tokens, PP/TG speed) |
-| **Config Editor** — Edit the full configuration directly from the browser with validation |
+- **Dashboard** — Resource monitoring tiles (CPU, memory, GPU, VRAM) with sparkline charts, active models list with status and quick-load buttons
+- **Models** — View installed models, pull new ones from HuggingFace, edit model configurations, manage sampling profiles
+- **Backends** — Manage llama.cpp and ik_llama installations, switch between versions, update to latest
+- **Logs** — Real-time log streaming with filtering
+- **Updates** — Check for model/backend updates, track per-quant update status, apply updates in queue
+- **Downloads** — Persistent download queue with progress tracking, history, and toast notifications
+- **Benchmarks** — Run llama-bench or speculative decoding benchmarks, select backends and presets, view results table (tokens, PP/TG speed)
+- **Config Editor** — Edit the full configuration directly from the browser with validation
 
 ### Components
 
