@@ -291,6 +291,21 @@ impl Config {
             }
         }
 
+        // Inject -np (number of parallel slots) only if set and > 1.
+        if let Some(slots) = server.num_parallel {
+            if slots > 1 {
+                let already_has_np = grouped.iter().any(|e| {
+                    matches!(
+                        crate::config::flag_name(e),
+                        Some("-np") | Some("--parallel")
+                    )
+                });
+                if !already_has_np {
+                    grouped.push(format!("-np {}", slots));
+                }
+            }
+        }
+
         // Inject -ngl only if not already present.
         if let Some(ngl) = server.gpu_layers {
             let already_has_ngl = grouped.iter().any(|e| {
