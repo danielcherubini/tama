@@ -51,8 +51,7 @@ pub(super) fn build_args(
 
     // Suppress conversation mode and prompt echoing
     args.push("-no-cnv".to_string());
-    args.push("-sp".to_string());
-    args.push("0".to_string());
+    args.push("--no-display-prompt".to_string());
 
     // Spec-decoding flags — only for the knobs each type uses
     match spec_type {
@@ -127,8 +126,7 @@ pub(super) fn build_baseline_args(config: &SpecBenchConfig) -> Vec<String> {
 
     // Suppress conversation mode and prompt echoing
     args.push("-no-cnv".to_string());
-    args.push("-sp".to_string());
-    args.push("0".to_string());
+    args.push("--no-display-prompt".to_string());
 
     args
 }
