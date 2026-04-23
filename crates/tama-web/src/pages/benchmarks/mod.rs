@@ -11,7 +11,7 @@ use leptos::task::spawn_local;
 use wasm_bindgen::JsCast;
 
 use self::spec_bench::SpecBench;
-use self::types::{BenchmarkPreset, HistoryEntry, BENCHMARK_TYPES, LLAMA_BENCH_PRESETS};
+use self::types::{HistoryEntry, BENCHMARK_TYPES, LLAMA_BENCH_PRESETS};
 use self::utils::{format_relative, format_timestamp};
 use crate::components::job_log_panel::JobLogPanel;
 use crate::utils::{extract_and_store_csrf_token, post_request};
@@ -153,8 +153,8 @@ pub fn Benchmarks() -> impl IntoView {
     // resolved id (db_id as a string) is what we actually submit.
     let selected_display_name = RwSignal::new(String::new());
     let selected_model = RwSignal::new(String::new());
-    // Raw (id, display_name, quant) entries from /tama/v1/models.
-    let available_models = RwSignal::new(Vec::<(String, String, String)>::new());
+    // Raw (id, display_name, vec_of_quants) entries from /tama/v1/models.
+    let available_models = RwSignal::new(Vec::<(String, String, Vec<String>)>::new());
 
     // Backend selection — which backend's llama-bench to use
     let selected_backend = RwSignal::new(String::new());
@@ -208,8 +208,17 @@ pub fn Benchmarks() -> impl IntoView {
                 extract_and_store_csrf_token(&resp);
                 if let Ok(root) = resp.json::<serde_json::Value>().await {
                     if let Some(models_arr) = root.get("models").and_then(|v| v.as_array()) {
-                        let model_list: Vec<(String, String, String)> =
-                            models_arr.iter().filter_map(types::parse_model).collect();
+                        // Flatten parse_model results (one tuple per quant) and deduplicate
+                        // by (display_name, quant) keeping the first id for each unique pair.
+                        let mut seen: std::collections::HashSet<(String, String)> =
+                            std::collections::HashSet::new();
+                        let model_list: Vec<(String, String, Vec<String>)> = models_arr
+                            .iter()
+                            .filter_map(types::parse_model)
+                            .flatten()
+                            .filter(|(_, name, quant)| seen.insert((name.clone(), quant.clone())))
+                            .map(|(id, name, quant)| (id, name, vec![quant]))
+                            .collect();
                         available_models.update(|list| *list = model_list);
                     }
                 }
@@ -300,37 +309,6 @@ pub fn Benchmarks() -> impl IntoView {
             ubatch_sizes_str.set(preset.ubatch_sizes.to_string());
             kv_cache_type.set(preset.kv_cache_type.to_string());
             depth_str.set(preset.depth.to_string());
-        }
-    };
-
-    // Apply preset handler — writes every methodology knob (not just the
-    // core sizes) so loading a preset fully reproduces the phase it maps to.
-    let apply_preset_handler = move |preset: BenchmarkPreset| {
-        let join_u32 = |xs: &[u32]| {
-            xs.iter()
-                .map(|v| v.to_string())
-                .collect::<Vec<_>>()
-                .join(",")
-        };
-
-        pp_sizes_str.set(join_u32(preset.pp_sizes));
-        tg_sizes_str.set(join_u32(preset.tg_sizes));
-        runs.set(preset.runs);
-        threads_str.set(
-            preset
-                .threads
-                .as_ref()
-                .map(|t| join_u32(t))
-                .unwrap_or_else(|| "auto".to_string()),
-        );
-        ngl_range.set(preset.ngl_range.unwrap_or("").to_string());
-
-        batch_sizes_str.set(join_u32(preset.batch_sizes));
-        ubatch_sizes_str.set(join_u32(preset.ubatch_sizes));
-        kv_cache_type.set(preset.kv_cache_type.unwrap_or("default").to_string());
-        depth_str.set(join_u32(preset.depth));
-        if let Some(fa) = preset.flash_attn {
-            flash_attn.set(fa);
         }
     };
 
@@ -557,14 +535,16 @@ pub fn Benchmarks() -> impl IntoView {
                             let models = available_models_sig.get();
                             let dn = selected_display_sig.get();
                             let selected_id = selected_model_sig.get();
+                            // Flatten all quants from matching model entries into individual options.
                             models.iter()
                                 .filter(|(_, name, _)| name == &dn)
-                                .map(|(id, _, quant)| {
-                                    let id_clone = id.clone();
-                                    let is_selected = id == &selected_id;
-                                    let label = if quant.is_empty() { "—".to_string() } else { quant.clone() };
+                                .flat_map(|(id, _, quants)| {
+                                    quants.iter().map(move |quant| (id.clone(), quant.clone()))
+                                })
+                                .map(|(id_clone, quant)| {
+                                    let is_selected = id_clone == selected_id;
                                     view! {
-                                        <option value=id_clone selected=is_selected>{label}</option>
+                                        <option value=id_clone selected=is_selected>{quant}</option>
                                     }.into_any()
                                 }).collect::<Vec<_>>()
                         }}
@@ -750,30 +730,6 @@ pub fn Benchmarks() -> impl IntoView {
                     </div>
                     <small class="text-muted">"Default on. Disable to measure attention-kernel impact."</small>
                 </div>
-            </div>
-        </section>
-
-        // Presets — each preset maps to a phase of the tuning methodology.
-        // Run them in order; re-run the KV-quant preset once per candidate
-        // (q8_0, then q4_0) so you can read the delta at depth.
-        <section class="card">
-            <h3>"Methodology Presets"</h3>
-            <small class="bench-hint">
-                "Each preset loads the flags for one phase of the LLM tuning methodology. Run top-to-bottom, comparing results against the baseline."
-            </small>
-            <div class="preset-buttons">
-                {BenchmarkPreset::all().into_iter().map(|preset| {
-                    let desc = preset.description;
-                    view! {
-                        <button
-                            class="btn btn-outline-secondary btn-sm"
-                            title=desc
-                            on:click=move |_| apply_preset_handler(preset.clone())
-                        >
-                            {preset.label}
-                        </button>
-                    }.into_any()
-                }).collect::<Vec<_>>()}
             </div>
         </section>
 

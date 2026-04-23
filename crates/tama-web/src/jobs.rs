@@ -283,14 +283,11 @@ impl JobManager {
             state.error = error;
         }
 
-        // Broadcast status event directly. send() may block if channel is full,
-        // but this is the final event so ordering is guaranteed.
-        if let Err(e) = job.log_tx.send(JobEvent::Status(status)) {
-            tracing::error!(
-                "CRITICAL: Failed to broadcast status for job {}: {}. SSE subscribers may miss final state.",
-                job.id, e
-            );
-        }
+        // Note: we intentionally do NOT broadcast the final status here.
+        // The SSE stream already delivers it to live subscribers before closing,
+        // and late-connecting clients get it from the snapshot replay in
+        // `job_events_sse()`. Broadcasting here races with stream teardown
+        // and always fails when subscribers exist (they've already dropped).
 
         // Release active slot
         *self.active.lock().await = None;

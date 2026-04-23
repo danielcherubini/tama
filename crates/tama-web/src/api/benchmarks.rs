@@ -246,6 +246,16 @@ async fn run_benchmark_inner(
         flash_attn: req.flash_attn,
     };
 
+    tracing::info!(
+        job_id = %job.id,
+        model_id = %req.model_id,
+        backend = ?req.backend_name,
+        pp_sizes = ?req.pp_sizes,
+        tg_sizes = ?req.tg_sizes,
+        runs = req.runs,
+        "Starting llama-bench benchmark",
+    );
+
     // Run benchmark
     let report = llama_bench::run_llama_bench(
         &config,
@@ -324,6 +334,14 @@ async fn run_benchmark_inner(
         },
     )?;
 
+    tracing::info!(
+        job_id = %job.id,
+        display_name = ?display_name,
+        backend = %report.model_info.backend,
+        entries = report.summaries.len(),
+        "llama-bench benchmark completed",
+    );
+
     Ok(())
 }
 
@@ -401,6 +419,7 @@ pub async fn run_spec_benchmark(
     tokio::spawn(async move {
         if let Err(e) = run_spec_benchmark_inner(jobs.clone(), &job, &req_clone, config_path).await
         {
+            tracing::error!(job_id = %job.id, error = %e, "Spec benchmark failed");
             jobs.finish(&job, JobStatus::Failed, Some(e.to_string()))
                 .await;
         } else {
@@ -539,6 +558,19 @@ async fn run_spec_benchmark_inner(
         "llama-cli not found for backend '{}'. Install llama.cpp from source or set LLAMA_CLI_PATH",
         target_backend
     ))?;
+    tracing::info!(
+        job_id = %job.id,
+        model = %resolved_id,
+        backend = %target_backend,
+        spec_types = ?req.spec_types,
+        draft_max = ?req.draft_max_values,
+        ngram_n = ?req.ngram_n_values,
+        ngram_m = ?req.ngram_m_values,
+        gen_tokens = gen_tokens,
+        runs = runs,
+        "Starting speculative decoding benchmark",
+    );
+    tracing::info!(job_id = %job.id, llama_cli = %cli_binary.display(), "Using llama-cli binary");
 
     // Run spec benchmark
     let result = llama_cli_spec::run_spec_bench(&spec_config, Some(cli_binary), &sink).await?;
@@ -581,6 +613,13 @@ async fn run_spec_benchmark_inner(
             benchmark_type: req.benchmark_type.as_deref(),
         },
     )?;
+
+    tracing::info!(
+        job_id = %job.id,
+        entries = result.entries.len(),
+        baseline_tg_ts = result.baseline_tg_ts,
+        "Speculative decoding benchmark completed",
+    );
 
     Ok(())
 }

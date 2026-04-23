@@ -131,7 +131,7 @@ pub fn SpecBench() -> impl IntoView {
     // ── Model selection ────────────────────────────────────────────────
     let selected_display_name = RwSignal::new(String::new());
     let selected_model = RwSignal::new(String::new());
-    let available_models = RwSignal::new(Vec::<(String, String, String)>::new());
+    let available_models = RwSignal::new(Vec::<(String, String, Vec<String>)>::new());
 
     // Test Type dropdown — selects a preset benchmark type that auto-fills form fields.
     let selected_bench_type = RwSignal::new("spec_scan".to_string());
@@ -170,8 +170,17 @@ pub fn SpecBench() -> impl IntoView {
                 extract_and_store_csrf_token(&resp);
                 if let Ok(root) = resp.json::<serde_json::Value>().await {
                     if let Some(models_arr) = root.get("models").and_then(|v| v.as_array()) {
-                        let model_list: Vec<(String, String, String)> =
-                            models_arr.iter().filter_map(parse_model).collect();
+                        // Flatten parse_model results (one tuple per quant) and deduplicate
+                        // by (display_name, quant) keeping the first id for each unique pair.
+                        let mut seen: std::collections::HashSet<(String, String)> =
+                            std::collections::HashSet::new();
+                        let model_list: Vec<(String, String, Vec<String>)> = models_arr
+                            .iter()
+                            .filter_map(parse_model)
+                            .flatten()
+                            .filter(|(_, name, quant)| seen.insert((name.clone(), quant.clone())))
+                            .map(|(id, name, quant)| (id, name, vec![quant]))
+                            .collect();
                         available_models.update(|list| *list = model_list);
                     }
                 }
@@ -419,12 +428,13 @@ pub fn SpecBench() -> impl IntoView {
                                 let selected_id = selected_model_sig.get();
                                 models.iter()
                                     .filter(|(_, name, _)| name == &dn)
-                                    .map(|(id, _, quant)| {
-                                        let id_clone = id.clone();
-                                        let is_selected = id == &selected_id;
-                                        let label = if quant.is_empty() { "—".to_string() } else { quant.clone() };
+                                    .flat_map(|(id, _, quants)| {
+                                        quants.iter().map(move |quant| (id.clone(), quant.clone()))
+                                    })
+                                    .map(|(id_clone, quant)| {
+                                        let is_selected = id_clone == selected_id;
                                         view! {
-                                            <option value=id_clone selected=is_selected>{label}</option>
+                                            <option value=id_clone selected=is_selected>{quant}</option>
                                         }.into_any()
                                     }).collect::<Vec<_>>()
                             }}

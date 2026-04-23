@@ -15,7 +15,10 @@ pub const BENCHMARK_TYPES: &[(&str, &str)] = &[
 
 /// Parse a model JSON value into (id, display_name, quant).
 /// The API returns `id` as an integer (db_id), not a string.
-pub fn parse_model(m: &serde_json::Value) -> Option<(String, String, String)> {
+/// Parse a model entry from the API response.
+/// Returns one (id, display_name, quant) tuple per quant in the "quants" map,
+/// plus one for any standalone "quant" field not already in the map.
+pub fn parse_model(m: &serde_json::Value) -> Option<Vec<(String, String, String)>> {
     let id = m.get("id").map(|v| v.to_string()).unwrap_or_default();
     let name = m
         .get("display_name")
@@ -23,12 +26,31 @@ pub fn parse_model(m: &serde_json::Value) -> Option<(String, String, String)> {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .unwrap_or_else(|| id.clone());
-    let quant = m
-        .get("quant")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    Some((id, name, quant))
+    let mut quants = Vec::new();
+
+    // Extract quants from the "quants" map (preferred — contains all available quants)
+    if let Some(quants_map) = m.get("quants").and_then(|v| v.as_object()) {
+        for quant_key in quants_map.keys() {
+            quants.push(quant_key.clone());
+        }
+    } else {
+        // Fallback: single "quant" field (legacy / no quants map)
+        if let Some(q) = m.get("quant").and_then(|v| v.as_str()) {
+            quants.push(q.to_string());
+        }
+    }
+
+    if quants.is_empty() {
+        return None;
+    }
+
+    // Flatten: one tuple per quant, each with the same id and display_name.
+    Some(
+        quants
+            .into_iter()
+            .map(|q| (id.clone(), name.clone(), q))
+            .collect(),
+    )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
