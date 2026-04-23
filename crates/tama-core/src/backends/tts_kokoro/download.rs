@@ -203,31 +203,56 @@ fn ensure_openblas(progress: &Arc<dyn ProgressSink>) -> Result<()> {
         }
     }
 
-    // Create openblas.pc symlink if it doesn't exist.
-    // Many distros ship blas.pc but not openblas.pc, and scipy's meson build
-    // specifically looks for "openblas" via pkg-config.
-    let pc_path = Path::new("/usr/lib64/pkgconfig/openblas.pc");
-    if !pc_path.exists() {
-        progress.log("Creating openblas.pc symlink for scipy build...");
-        let sudo = if std::env::var("SUDO_USER").is_ok() {
-            "sudo "
-        } else {
-            ""
-        };
-        let status = std::process::Command::new(format!("{sudo}ln"))
-            .args([
-                "-sf",
-                "/usr/lib64/pkgconfig/blas.pc",
-                "/usr/lib64/pkgconfig/openblas.pc",
-            ])
-            .status()
-            .with_context(|| "Failed to create openblas.pc symlink")?;
+    // Only create the openblas.pc symlink if pkg-config still can't find it.
+    // Some distros ship blas.pc but not openblas.pc, and scipy's meson build
+    // specifically looks for "openblas" via pkg-config. Ubuntu/Fedora already
+    // provide openblas.pc via libopenblas-dev, so only create the symlink when
+    // actually needed (i.e., when pkg-config --exists openblas fails).
+    let check = std::process::Command::new("pkg-config")
+        .args(["--exists", "openblas"])
+        .output()
+        .is_ok_and(|o| o.status.success());
 
-        if !status.success() {
+    if !check {
+        progress.log("Creating openblas.pc symlink for scipy build...");
+
+        // Find where blas.pc lives on this system.
+        let find_blas = std::process::Command::new("find")
+            .args(["/usr", "-name", "blas.pc"])
+            .output()
+            .with_context(|| "Failed to search for blas.pc")?;
+
+        let blas_stdout = String::from_utf8_lossy(&find_blas.stdout);
+        let blas_path = blas_stdout.trim().lines().next();
+
+        if let Some(blas) = blas_path {
+            // Determine the pkg-config directory from the blas.pc location.
+            let pc_dir = Path::new(blas).parent().unwrap_or(Path::new("/usr/lib64/pkgconfig"));
+            let dst = pc_dir.join("openblas.pc");
+
+            let sudo = if std::env::var("SUDO_USER").is_ok() {
+                "sudo "
+            } else {
+                ""
+            };
+
+            let status = std::process::Command::new(format!("{sudo}ln"))
+                .args(["-sf", blas, &dst.to_string_lossy()])
+                .status()
+                .with_context(|| format!("Failed to create openblas.pc symlink at {}", dst.display()))?;
+
+            if !status.success() {
+                return Err(anyhow!(
+                    "Failed to create openblas.pc symlink. \
+                     Please create it manually: sudo ln -sf {blas} {}",
+                    dst.display()
+                ));
+            }
+        } else {
             return Err(anyhow!(
-                "Failed to create openblas.pc symlink. \
-                 Please create it manually: sudo ln -sf /usr/lib64/pkgconfig/blas.pc \
-                 /usr/lib64/pkgconfig/openblas.pc"
+                "Could not find blas.pc on this system. \
+                 OpenBLAS development libraries may not be installed correctly. \
+                 Please install them manually and ensure openblas.pc is available via pkg-config."
             ));
         }
     }
