@@ -38,15 +38,28 @@ pub async fn get_backend_logs(
     axum::extract::Path(backend): axum::extract::Path<String>,
     axum::extract::Query(query): axum::extract::Query<BackendLogsQuery>,
 ) -> impl IntoResponse {
-    // 1. Check logs_dir is configured
+    // 1. Resolve logs directory:
+    //    - Use explicitly configured logs_dir if provided
+    //    - Fall back to <config_dir>/logs/ derived from config_path
+    //    - Return 404 if neither is available
     let dir = match &state.logs_dir {
         Some(d) => d.clone(),
         None => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({"error": "logs_dir not configured"})),
-            )
-                .into_response()
+            // Try to derive logs dir from the config file's parent directory
+            let config_dir = match &state.config_path {
+                Some(p) => p.parent().map(|d| d.to_path_buf()),
+                None => None,
+            };
+            match config_dir {
+                Some(dir) => dir.join("logs"),
+                None => {
+                    return (
+                        StatusCode::NOT_FOUND,
+                        Json(serde_json::json!({"error": "logs_dir not configured"})),
+                    )
+                        .into_response()
+                }
+            }
         }
     };
 
