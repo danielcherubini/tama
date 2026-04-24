@@ -42,25 +42,44 @@ pub async fn handle_all_logs(
 ) -> impl IntoResponse {
     let n = query.lines.min(10_000);
 
-    // Get logs_dir from config
-    let logs_dir = match state.config.read().await.logs_dir() {
-        Ok(d) => d,
-        Err(_) => {
-            return Json(serde_json::json!({ "sources": Vec::<SourceLogs>::new() }));
+    // Get logs_dir from config, with fallback to base_dir/logs if configured path
+    // doesn't exist or contains no log files.
+    let mut logs_dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(d) = state.config.read().await.logs_dir() {
+        logs_dirs.push(d.clone());
+        // Also try base_dir/logs as fallback (handles cases where config is at
+        // /etc/tama/config.toml but logs are at ~/.config/tama/logs/)
+        if let Ok(base) = crate::config::Config::base_dir() {
+            let fallback = base.join("logs");
+            if fallback != d && !logs_dirs.contains(&fallback) {
+                logs_dirs.push(fallback);
+            }
         }
-    };
+    } else if let Ok(base) = crate::config::Config::base_dir() {
+        logs_dirs.push(base.join("logs"));
+    }
 
-    // Collect tama.log
+    // Collect logs from each candidate directory
     let mut sources = Vec::new();
-    {
-        let tama_path = logs_dir.join("tama.log");
-        if tama_path.exists() {
-            let lines =
-                match tokio::task::spawn_blocking(move || logging::tail_lines(&tama_path, n)).await
-                {
-                    Ok(Ok(l)) => l,
-                    _ => Vec::new(),
-                };
+    let mut seen_sources = std::collections::HashSet::new();
+    for dir in &logs_dirs {
+        if !dir.exists() {
+            continue;
+        }
+
+        // Collect tama.log
+        let tama_path = dir.join("tama.log");
+        if tama_path.exists()
+            && seen_sources.insert("tama".to_string())
+        {
+            let lines = match tokio::task::spawn_blocking(move || {
+                logging::tail_lines(&tama_path, n)
+            })
+            .await
+            {
+                Ok(Ok(l)) => l,
+                _ => Vec::new(),
+            };
             if !lines.is_empty() {
                 sources.push(SourceLogs {
                     name: "tama".to_string(),
@@ -70,7 +89,7 @@ pub async fn handle_all_logs(
         }
 
         // Collect backend logs (named {backend}_{server_name}.log)
-        let mut entries = match std::fs::read_dir(logs_dir) {
+        let mut entries = match std::fs::read_dir(dir) {
             Ok(rd) => rd.filter_map(|e| e.ok()).collect::<Vec<_>>(),
             Err(_) => Vec::new(),
         };
@@ -86,18 +105,22 @@ pub async fn handle_all_logs(
             let fname_str = fname.to_string_lossy();
             if fname_str.ends_with(".log") && fname_str != "tama.log" {
                 let source_name = fname_str[..fname_str.len() - 4].to_string();
-                let path = entry.path();
-                let lines = match tokio::task::spawn_blocking(move || logging::tail_lines(&path, n))
+                if seen_sources.insert(source_name.clone()) {
+                    let path = entry.path();
+                    let lines = match tokio::task::spawn_blocking(move || {
+                        logging::tail_lines(&path, n)
+                    })
                     .await
-                {
-                    Ok(Ok(l)) => l,
-                    _ => Vec::new(),
-                };
-                if !lines.is_empty() {
-                    sources.push(SourceLogs {
-                        name: source_name,
-                        lines,
-                    });
+                    {
+                        Ok(Ok(l)) => l,
+                        _ => Vec::new(),
+                    };
+                    if !lines.is_empty() {
+                        sources.push(SourceLogs {
+                            name: source_name,
+                            lines,
+                        });
+                    }
                 }
             }
         }
