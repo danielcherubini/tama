@@ -1,8 +1,7 @@
-//! Backend log file reading endpoint: GET /tama/v1/logs/:backend
+//! Backend log file reading endpoints.
 //!
-//! Note: SSE streaming (GET /tama/v1/logs/:backend/events) is handled by the
-//! tama-core proxy, not this web UI server. The web UI proxies those requests
-//! to the proxy via the catch-all handler.
+//! - GET /tama/v1/logs — returns grouped logs (proxied from tama-core)
+//! - GET /tama/v1/logs/:backend — returns last N lines of a backend's log file
 
 use axum::{
     extract::{Path, Query, State},
@@ -103,4 +102,12 @@ pub async fn get_backend_logs(
             Json(serde_json::json!({ "lines": Vec::<String>::new() })).into_response()
         }
     }
+}
+
+/// GET /tama/v1/logs — return grouped logs from all configured sources.
+///
+/// This is a local fallback that returns empty sources. The actual implementation
+/// is in tama-core and proxied through the catch-all handler.
+pub async fn get_all_logs() -> impl IntoResponse {
+    Json(serde_json::json!({ "sources": Vec::<serde_json::Value>::new() }))
 }

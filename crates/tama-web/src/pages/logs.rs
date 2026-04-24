@@ -53,7 +53,7 @@ pub fn Logs() -> impl IntoView {
                 Ok(resp) => {
                     extract_and_store_csrf_token(&resp);
                     let status = resp.status();
-                    if status >= 200 && status < 300 {
+                    if (200..300).contains(&status) {
                         match resp.text().await {
                             Ok(text) => match serde_json::from_str::<AllLogsResponse>(&text) {
                                 Ok(data) => sources.set(data.sources),

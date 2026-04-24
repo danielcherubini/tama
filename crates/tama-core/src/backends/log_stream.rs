@@ -23,6 +23,12 @@ pub struct BackendLogStream {
     tx: broadcast::Sender<String>,
 }
 
+impl Default for BackendLogStream {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BackendLogStream {
     pub fn new() -> Self {
         let (tx, _rx) = broadcast::channel(LOG_BROADCAST_CAP);
