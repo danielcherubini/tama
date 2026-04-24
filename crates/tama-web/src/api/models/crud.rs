@@ -788,6 +788,7 @@ mod tests {
             gpu_layers: None,
             quants: Some(quants),
             modalities: None,
+            kv_unified: None,
         }
     }
 
@@ -820,6 +821,7 @@ mod tests {
             quants,
             modalities: None,
             display_name: None,
+            kv_unified: false,
             db_id: None,
         }
     }
@@ -965,6 +967,7 @@ mod tests {
             quants: None,
             modalities: None,
             display_name: None,
+            kv_unified: None,
         };
 
         let result = apply_model_body(body, None);
@@ -989,6 +992,7 @@ mod tests {
             quants: None,
             modalities: None,
             display_name: None,
+            kv_unified: None,
         };
 
         let result = apply_model_body(body, None);
@@ -1014,6 +1018,7 @@ mod tests {
             quants: None,
             modalities: None,
             display_name: None,
+            kv_unified: None,
         };
 
         let result = apply_model_body(body, None);
@@ -1038,6 +1043,7 @@ mod tests {
             quants: None,
             modalities: None,
             display_name: None,
+            kv_unified: None,
         };
 
         let result = apply_model_body(body, None);
@@ -1062,6 +1068,7 @@ mod tests {
             quants: None,
             modalities: None,
             display_name: Some("My Model".to_string()),
+            kv_unified: None,
         };
 
         let result = apply_model_body(body, None);
@@ -1086,6 +1093,7 @@ mod tests {
             quants: None,
             modalities: None,
             display_name: None,
+            kv_unified: None,
         };
 
         let result = apply_model_body(body, None);
@@ -1111,6 +1119,7 @@ mod tests {
             modalities: None,
             display_name: None,
             num_parallel: Some(4),
+            kv_unified: None,
         };
 
         let result = apply_model_body(body, None);
@@ -1135,6 +1144,7 @@ mod tests {
             modalities: None,
             display_name: None,
             num_parallel: None,
+            kv_unified: None,
         };
 
         let result = apply_model_body(body, None);
@@ -1159,6 +1169,7 @@ mod tests {
             quants: Some(BTreeMap::new()), // empty map
             modalities: None,
             display_name: None,
+            kv_unified: None,
         };
 
         let result = apply_model_body(body, None);

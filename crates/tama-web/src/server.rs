@@ -362,6 +362,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         )
         // API documentation (OpenAPI 3.1.0 spec)
         .route("/tama/v1/docs", get(api::openapi::serve_spec))
+        // Logs routes — local fallback when proxy is unavailable
+        .route("/tama/v1/logs", get(api::logs::get_all_logs))
+        .route("/tama/v1/logs/:backend", get(api::logs::get_backend_logs))
         .merge(csrf_routes)
         .merge(backend_routes)
         .route("/tama/v1/*path", any(proxy_tama))
