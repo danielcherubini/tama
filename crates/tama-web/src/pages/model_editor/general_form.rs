@@ -168,6 +168,30 @@ pub fn ModelEditorGeneralForm(
                 }
             />
 
+            <label class="form-label" for="field-kv-unified">
+                "Unified KV cache"
+                <div class="form-hint">All parallel slots share a single context pool. Better for agent+subagent workflows.</div>
+            </label>
+            <div class="form-check">
+                <input
+                    id="field-kv-unified"
+                    type="checkbox"
+                    prop:checked=move || form.get().as_ref().map(|f| f.kv_unified).unwrap_or(true)
+                    on:change=move |e| {
+                        let checked = e.target()
+                            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
+                            .map(|el| el.checked())
+                            .unwrap_or(false);
+                        form.update(|f| {
+                            if let Some(form) = f {
+                                form.kv_unified = checked;
+                            }
+                        });
+                    }
+                />
+                <label class="form-check-label" for="field-kv-unified">"Unified KV cache"</label>
+            </div>
+
             <label class="form-label" for="field-port">"Port override"</label>
             <input
                 id="field-port"

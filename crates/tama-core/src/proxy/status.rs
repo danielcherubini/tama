@@ -263,6 +263,7 @@ mod tests {
             enabled: true,
             context_length: None,
             num_parallel: Some(1),
+            kv_unified: false,
             profile: None,
             api_name: None,
             gpu_layers: None,

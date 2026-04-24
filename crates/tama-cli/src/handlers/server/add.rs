@@ -154,6 +154,7 @@ pub async fn cmd_server_add(
         modalities: None,
         display_name: None,
         num_parallel: None,
+        kv_unified: true,
         db_id: None,
     };
 

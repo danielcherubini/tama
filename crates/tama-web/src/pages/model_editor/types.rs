@@ -60,6 +60,8 @@ pub struct ModelDetail {
     pub port: Option<u16>,
     pub api_name: Option<String>,
     pub display_name: Option<String>,
+    #[serde(default = "default_kv_unified")]
+    pub kv_unified: bool,
     pub gpu_layers: Option<u32>,
     pub quants: BTreeMap<String, QuantInfo>,
     pub backends: Vec<String>,
@@ -99,10 +101,16 @@ pub struct ModelForm {
     pub port: Option<u16>,
     pub api_name: Option<String>,
     pub display_name: Option<String>,
+    #[serde(default = "default_kv_unified")]
+    pub kv_unified: bool,
     pub gpu_layers: Option<u32>,
     pub quants: BTreeMap<String, QuantInfo>,
     #[serde(default)]
     pub modalities: Option<ModelModalities>,
+}
+
+fn default_kv_unified() -> bool {
+    true
 }
 
 /// Response from POST /api/models/:id/refresh — surfaces the updated repo

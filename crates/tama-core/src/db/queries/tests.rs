@@ -186,6 +186,7 @@ fn test_upsert_and_get_model_config() {
         selected_mmproj: Some("mmproj-f16.gguf".to_string()),
         context_length: Some(4096),
         num_parallel: Some(1),
+        kv_unified: false,
         gpu_layers: Some(32),
         port: Some(8080),
         args: Some(r#"["--flash-attn"]"#.to_string()),
@@ -214,6 +215,7 @@ fn test_upsert_and_get_model_config() {
     assert_eq!(retrieved.selected_quant, record.selected_quant);
     assert_eq!(retrieved.selected_mmproj, record.selected_mmproj);
     assert_eq!(retrieved.context_length, record.context_length);
+    assert_eq!(retrieved.kv_unified, record.kv_unified);
     assert_eq!(retrieved.gpu_layers, record.gpu_layers);
     assert_eq!(retrieved.port, record.port);
     assert_eq!(retrieved.args, record.args);
@@ -239,6 +241,7 @@ fn test_get_all_model_configs() {
         selected_mmproj: None,
         context_length: None,
         num_parallel: Some(1),
+        kv_unified: false,
         gpu_layers: None,
         port: None,
         args: None,
@@ -260,6 +263,7 @@ fn test_get_all_model_configs() {
         selected_mmproj: None,
         context_length: None,
         num_parallel: Some(1),
+        kv_unified: false,
         gpu_layers: None,
         port: None,
         args: None,
@@ -292,6 +296,7 @@ fn test_delete_model_config() {
         selected_mmproj: None,
         context_length: None,
         num_parallel: Some(1),
+        kv_unified: false,
         gpu_layers: None,
         port: None,
         args: None,

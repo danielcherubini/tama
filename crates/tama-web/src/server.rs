@@ -362,6 +362,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         )
         // API documentation (OpenAPI 3.1.0 spec)
         .route("/tama/v1/docs", get(api::openapi::serve_spec))
+        // Logs: /tama/v1/logs falls through to proxy_tama catch-all (real handler in tama-core)
+        // Only /:backend has a local file-based fallback
+        .route("/tama/v1/logs/:backend", get(api::logs::get_backend_logs))
         .merge(csrf_routes)
         .merge(backend_routes)
         .route("/tama/v1/*path", any(proxy_tama))

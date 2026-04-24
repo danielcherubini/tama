@@ -208,6 +208,12 @@ pub struct ModelConfig {
     /// Default is Some(1). None at runtime is treated as 1.
     #[serde(default = "default_num_parallel")]
     pub num_parallel: Option<u32>,
+    /// Whether all parallel slots share a single unified KV cache pool.
+    /// When true, `-c` equals `context_length` regardless of `num_parallel`.
+    /// When false, `-c = context_length * num_parallel` (each slot gets dedicated region).
+    /// Default is false for backward compatibility. New models should use true.
+    #[serde(default)]
+    pub kv_unified: bool,
     /// DEPRECATED — kept for migration deserialization only.
     /// When present in an old config.toml, the migration reads this, resolves it to
     /// concrete SamplingParams, writes those into `sampling`, and clears this field.
@@ -252,6 +258,7 @@ impl ModelConfig {
             selected_mmproj: self.mmproj.clone(),
             context_length: self.context_length,
             num_parallel: self.num_parallel,
+            kv_unified: self.kv_unified,
             gpu_layers: self.gpu_layers,
             port: self.port,
             args: serde_json::to_string(&self.args).ok(),
@@ -289,6 +296,7 @@ impl ModelConfig {
             port: record.port,
             context_length: record.context_length,
             num_parallel: record.num_parallel,
+            kv_unified: record.kv_unified,
             gpu_layers: record.gpu_layers,
             model: Some(record.repo_id.clone()),
             quant: record.selected_quant.clone(),
@@ -582,6 +590,7 @@ host = "0.0.0.0"
                 output: vec!["text".to_string()],
             }),
             display_name: Some("My Custom Model".to_string()),
+            kv_unified: true,
             ..Default::default()
         };
 
@@ -603,6 +612,7 @@ host = "0.0.0.0"
         assert_eq!(round_trip.gpu_layers, mc.gpu_layers);
         assert_eq!(round_trip.modalities, mc.modalities);
         assert_eq!(round_trip.display_name, mc.display_name);
+        assert_eq!(round_trip.kv_unified, mc.kv_unified);
 
         // quants should be empty as it's not persisted
         assert!(round_trip.quants.is_empty());

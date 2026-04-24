@@ -81,6 +81,10 @@ pub fn find_llama_server(backend_path: &std::path::Path) -> Result<PathBuf> {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::Mutex;
+
+    // Protects tests that manipulate LLAMA_SERVER_PATH env var from running in parallel.
+    static ENV_VAR_MUTEX: Mutex<()> = Mutex::new(());
 
     fn server_name() -> &'static str {
         if cfg!(target_os = "windows") {
@@ -157,6 +161,9 @@ mod tests {
         let env_path = env_dir.join(server_name());
         fs::write(&env_path, "#!/bin/sh\necho from-env").unwrap();
 
+        // Acquire lock to prevent parallel env var manipulation
+        let _lock = ENV_VAR_MUTEX.lock().unwrap();
+
         // Save and restore previous env var state to avoid test interference
         let prev = std::env::var_os("LLAMA_SERVER_PATH");
         std::env::set_var("LLAMA_SERVER_PATH", env_path.to_str().unwrap());
@@ -173,6 +180,9 @@ mod tests {
     #[test]
     fn test_find_llama_server_error_lists_paths() {
         let nonexistent = PathBuf::from("/nonexistent/path/backend");
+
+        // Acquire lock to prevent parallel env var manipulation
+        let _lock = ENV_VAR_MUTEX.lock().unwrap();
 
         // Clear LLAMA_SERVER_PATH and temporarily blank PATH so step 5
         // (PATH lookup) never finds llama-server — otherwise this test is
