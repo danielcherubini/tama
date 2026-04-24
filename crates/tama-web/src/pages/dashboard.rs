@@ -178,6 +178,92 @@ fn model_display_name(m: &ModelStatus) -> String {
         .to_string()
 }
 
+/// Renders a single model row. Isolated component so only changed rows rebuild
+/// when metrics update — prevents the entire list from being destroyed/recreated.
+#[component]
+fn ModelRow(
+    id: String,
+    db_id: Option<i64>,
+    display_name: String,
+    quant_display: String,
+    context_display: String,
+    backend_name: String,
+    state: String,
+    load_pending: RwSignal<bool>,
+    unload_pending: RwSignal<bool>,
+    on_load: Callback<String>,
+    on_unload: Callback<String>,
+    on_logs: Callback<String>,
+) -> impl IntoView {
+    let badge_class = model_status_badge_class(&state);
+    let badge_label = model_status_badge_label(&state);
+    let button_class = model_action_button_class(&state);
+    let button_label = model_action_button_label(&state);
+    // Clone values needed in closures before they're consumed by the view!
+    let id_for_load = id.clone();
+    let id_for_edit = id.clone();
+    let id_for_unload = id.clone();
+    let backend_for_logs = backend_name.clone();
+
+    view! {
+        <div class="model-row card">
+            <span class="model-row__name">{display_name}</span>
+            <span class="model-row__meta">{quant_display}</span>
+            <span class="model-row__meta">{context_display}</span>
+            <span class="model-row__backend text-mono">{backend_name}</span>
+            <div class="model-row__actions">
+                <span class={badge_class}>{badge_label}</span>
+                {if matches!(state.as_str(), "ready") {
+                    view! {
+                        <button
+                            class={button_class}
+                            prop:disabled=move || unload_pending.get()
+                            on:click=move |_| { on_unload.run(id_for_unload.clone()); }
+                        >
+                            {button_label}
+                        </button>
+                    }.into_any()
+                } else if matches!(state.as_str(), "loading" | "unloading") {
+                    view! {
+                        <button
+                            class={button_class}
+                            prop:disabled=true
+                        >
+                            {button_label}
+                        </button>
+                    }.into_any()
+                } else {
+                    // idle, failed → Load or Retry
+                    view! {
+                        <button
+                            class={button_class}
+                            prop:disabled=move || load_pending.get()
+                            on:click=move |_| { on_load.run(id_for_load.clone()); }
+                        >
+                            {button_label}
+                        </button>
+                    }.into_any()
+                }}
+                <button
+                    class="btn btn-secondary btn-sm"
+                    title="View backend logs"
+                    on:click=move |_| {
+                        on_logs.run(backend_for_logs.clone());
+                    }
+                >
+                    "Logs"
+                </button>
+                <A
+                    href=format!("/models/{}/edit", db_id.map(|n| n.to_string()).unwrap_or_else(|| id_for_edit.clone()))
+                    attr:class="btn btn-secondary btn-sm"
+                >
+                    "Edit"
+                </A>
+            </div>
+        </div>
+    }
+}
+
 #[component]
 pub fn Dashboard() -> impl IntoView {
     let history = RwSignal::new(Vec::<MetricSample>::new());
@@ -479,15 +565,6 @@ pub fn Dashboard() -> impl IntoView {
                             view! {
                                 <div class="models-list">
                                     {sorted.into_iter().map(|m| {
-                                        let id_load = m.id.clone();
-                                        let id_unload = m.id.clone();
-                                        let id_edit = m.db_id
-                                            .map(|n| n.to_string())
-                                            .unwrap_or_else(|| m.id.clone());
-                                        let badge_class = model_status_badge_class(&m.state);
-                                        let badge_label = model_status_badge_label(&m.state);
-                                        let button_class = model_action_button_class(&m.state);
-                                        let button_label = model_action_button_label(&m.state);
                                         let display_name = model_display_name(&m);
                                         let quant_display: String = m
                                             .quant
@@ -503,65 +580,31 @@ pub fn Dashboard() -> impl IntoView {
                                                 n.to_string()
                                             }
                                         }).unwrap_or_else(|| "—".to_string());
-                                        // Construct the log file identifier: {backend}_{server_name}.log
-                                        // The server name is the config key, which matches m.id.
                                         let backend_name = format!("{}_{}", m.backend, m.id);
+                                        let id = m.id.clone();
+                                        let db_id = m.db_id;
+                                        let state = m.state.clone();
+                                        let on_load_cb = Callback::new(move |id: String| {
+                                            load_action.dispatch(id);
+                                        });
+                                        let on_unload_cb = Callback::new(move |id: String| {
+                                            unload_action.dispatch(id);
+                                        });
                                         view! {
-                                            <div class="model-row card">
-                                                <span class="model-row__name">{display_name}</span>
-                                                <span class="model-row__meta">{quant_display}</span>
-                                                <span class="model-row__meta">{context_display}</span>
-                                                <span class="model-row__backend text-mono">{backend_name.clone()}</span>
-                                                <div class="model-row__actions">
-                                                    <span class={badge_class}>{badge_label}</span>
-                                                    {if matches!(m.state.as_str(), "ready") {
-                                                        view! {
-                                                            <button
-                                                                class={button_class}
-                                                                prop:disabled=move || unload_busy.get()
-                                                                on:click=move |_| { unload_action.dispatch(id_unload.clone()); }
-                                                            >
-                                                                {button_label}
-                                                            </button>
-                                                        }.into_any()
-                                                    } else if matches!(m.state.as_str(), "loading" | "unloading") {
-                                                        view! {
-                                                            <button
-                                                                class={button_class}
-                                                                prop:disabled=true
-                                                            >
-                                                                {button_label}
-                                                            </button>
-                                                        }.into_any()
-                                                    } else {
-                                                        // idle, failed → Load or Retry
-                                                        view! {
-                                                            <button
-                                                                class={button_class}
-                                                                prop:disabled=move || load_busy.get()
-                                                                on:click=move |_| { load_action.dispatch(id_load.clone()); }
-                                                            >
-                                                                {button_label}
-                                                            </button>
-                                                        }.into_any()
-                                                    }}
-                                                    <button
-                                                        class="btn btn-secondary btn-sm"
-                                                        title="View backend logs"
-                                                        on:click=move |_| {
-                                                            on_log_click.run(backend_name.clone());
-                                                        }
-                                                    >
-                                                        "Logs"
-                                                    </button>
-                                                    <A
-                                                        href=format!("/models/{}/edit", id_edit)
-                                                        attr:class="btn btn-secondary btn-sm"
-                                                    >
-                                                        "Edit"
-                                                    </A>
-                                                </div>
-                                            </div>
+                                            <ModelRow
+                                                id=id
+                                                db_id=db_id
+                                                display_name=display_name
+                                                quant_display=quant_display
+                                                context_display=context_display
+                                                backend_name=backend_name
+                                                state=state
+                                                load_pending=load_busy
+                                                unload_pending=unload_busy
+                                                on_load=on_load_cb
+                                                on_unload=on_unload_cb
+                                                on_logs=on_log_click.clone()
+                                            />
                                         }
                                     }).collect::<Vec<_>>()}
                                 </div>
