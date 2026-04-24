@@ -370,6 +370,7 @@ pub(crate) fn cmd_scan(config: &Config) -> Result<()> {
                                 api_name: None,
                                 health_check: None,
                                 num_parallel: None,
+                                kv_unified: true,
                                 created_at: super::utils::manual_timestamp(),
                                 updated_at: super::utils::manual_timestamp(),
                             };
@@ -520,6 +521,7 @@ mod tests {
             api_name: None,
             health_check: None,
             num_parallel: None,
+            kv_unified: true,
             created_at: "now".to_string(),
             updated_at: "now".to_string(),
         };
@@ -569,6 +571,7 @@ mod tests {
             api_name: None,
             health_check: None,
             num_parallel: None,
+            kv_unified: true,
             created_at: "now".to_string(),
             updated_at: "now".to_string(),
         };
@@ -610,6 +613,7 @@ mod tests {
                 api_name: None,
                 health_check: None,
                 num_parallel: None,
+                kv_unified: true,
                 created_at: "now".to_string(),
                 updated_at: "now".to_string(),
             },
@@ -643,6 +647,7 @@ mod tests {
                 api_name: None,
                 health_check: None,
                 num_parallel: None,
+                kv_unified: true,
                 created_at: "now".to_string(),
                 updated_at: "now".to_string(),
             },
@@ -668,6 +673,7 @@ mod tests {
                 api_name: None,
                 health_check: None,
                 num_parallel: None,
+                kv_unified: true,
                 created_at: "now".to_string(),
                 updated_at: "now".to_string(),
             },

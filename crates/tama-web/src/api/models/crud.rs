@@ -50,6 +50,8 @@ pub struct ModelBody {
     pub quants: Option<std::collections::BTreeMap<String, tama_core::config::QuantEntry>>,
     #[serde(default)]
     pub modalities: Option<tama_core::config::ModelModalities>,
+    #[serde(default)]
+    pub kv_unified: Option<bool>,
 }
 
 fn apply_model_body(
@@ -74,6 +76,7 @@ fn apply_model_body(
         quants: std::collections::BTreeMap::new(),
         modalities: None,
         display_name: None,
+        kv_unified: true,
         db_id: None,
     });
 
@@ -125,6 +128,7 @@ fn apply_model_body(
                 )
             })
             .collect(),
+        kv_unified: body.kv_unified.unwrap_or(base.kv_unified),
         db_id: base.db_id,
     }
 }
