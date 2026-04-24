@@ -4,8 +4,15 @@ use gloo_net::http::Request;
 use leptos::prelude::*;
 use serde::Deserialize;
 use wasm_bindgen_futures::spawn_local;
+use web_sys::js_sys::Date;
 
 use crate::utils::extract_and_store_csrf_token;
+
+/// Get the current time in milliseconds since epoch (WASM-compatible).
+/// Uses `Date::now()` which works reliably in all WASM targets.
+fn now_ms() -> f64 {
+    Date::now()
+}
 
 /// Response structure from the backend logs API.
 #[derive(Debug, Clone, Deserialize)]
@@ -96,7 +103,8 @@ pub fn BackendLogPanel(
     let loading = RwSignal::new(true);
     let error = RwSignal::new(Option::<String>::None);
     let auto_refresh = RwSignal::new(true);
-    let last_fetch = RwSignal::new(std::time::Instant::now());
+    // Track last fetch time in milliseconds (WASM-compatible; Instant::now() panics in WASM).
+    let last_fetch = RwSignal::new(now_ms());
 
     // Cancel flag: flipped on component unmount. The spawned async tasks check
     // this each iteration and break out cleanly.
@@ -142,7 +150,7 @@ pub fn BackendLogPanel(
                 }
 
                 fetch_logs(&backend, lines_for_poll, loading_for_poll, error_for_poll).await;
-                last_fetch_for_poll.set(std::time::Instant::now());
+                last_fetch_for_poll.set(now_ms());
             }
         });
     });
@@ -165,7 +173,7 @@ pub fn BackendLogPanel(
         spawn_local(async move {
             if !cancel.get_untracked() {
                 fetch_logs(&backend, lines_ref, loading_ref, error_ref).await;
-                last_fetch_ref.set(std::time::Instant::now());
+                last_fetch_ref.set(now_ms());
             }
         });
     };

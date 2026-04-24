@@ -263,32 +263,39 @@ pub fn Dashboard() -> impl IntoView {
 
     // Per-model load/unload actions wired to the same REST endpoints used by
     // the `/models` page. Both actions are unsync because `gloo_net::Request`
-    // returns `!Send` futures in the WASM target. We deliberately do **not**
-    // refresh anything on completion: the dashboard's SSE stream pushes a new
-    // `MetricSample` every tick, so the freshly toggled `loaded` flag flows
-    // back into the UI without us having to manage cache invalidation here.
-    let load_action: Action<String, (), LocalStorage> = Action::new_unsync(|id: &String| {
+    // returns `!Send` futures in the WASM target.
+    //
+    // We use a manual "busy" signal instead of relying on Action::pending()
+    // because in some WASM error scenarios (e.g. proxy returns 500 with no
+    // backend configured), the pending flag can get stuck and never reset,
+    // leaving buttons permanently disabled with "Loading…" text.
+    let load_busy = RwSignal::new(false);
+    let unload_busy = RwSignal::new(false);
+
+    let load_action: Action<String, (), LocalStorage> = Action::new_unsync(move |id: &String| {
         let id = id.clone();
         async move {
+            load_busy.set(true);
+            // Ignore errors — the SSE stream will push updated model state.
+            // Even if the request fails (e.g. no backend configured), we set
+            // load_busy to false below so the button becomes clickable again.
             let _ = post_request(&format!("/tama/v1/models/{}/load", id))
                 .send()
                 .await;
+            load_busy.set(false);
         }
     });
-    let unload_action: Action<String, (), LocalStorage> = Action::new_unsync(|id: &String| {
+    let unload_action: Action<String, (), LocalStorage> = Action::new_unsync(move |id: &String| {
         let id = id.clone();
         async move {
+            unload_busy.set(true);
+            // Same as load — ignore errors, SSE will push the updated state.
             let _ = post_request(&format!("/tama/v1/models/{}/unload", id))
                 .send()
                 .await;
+            unload_busy.set(false);
         }
     });
-
-    // Capture the pending signals once so the per-card buttons can disable
-    // themselves while a load/unload request is in flight — this prevents
-    // double-clicks from queuing duplicate requests against the proxy.
-    let load_pending = load_action.pending();
-    let unload_pending = unload_action.pending();
 
     // Log panel state: controlled by clicking the "Logs" button on each model row.
     let log_panel_open = RwSignal::new(false);
@@ -509,7 +516,7 @@ pub fn Dashboard() -> impl IntoView {
                                                         view! {
                                                             <button
                                                                 class={button_class}
-                                                                prop:disabled=move || unload_pending.get()
+                                                                prop:disabled=move || unload_busy.get()
                                                                 on:click=move |_| { unload_action.dispatch(id_unload.clone()); }
                                                             >
                                                                 {button_label}
@@ -529,7 +536,7 @@ pub fn Dashboard() -> impl IntoView {
                                                         view! {
                                                             <button
                                                                 class={button_class}
-                                                                prop:disabled=move || load_pending.get()
+                                                                prop:disabled=move || load_busy.get()
                                                                 on:click=move |_| { load_action.dispatch(id_load.clone()); }
                                                             >
                                                                 {button_label}
