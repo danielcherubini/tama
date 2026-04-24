@@ -1,15 +1,16 @@
-//! Backend log streaming endpoints: GET /tama/v1/logs/:backend and SSE stream.
+//! Backend log file reading endpoint: GET /tama/v1/logs/:backend
+//!
+//! Note: SSE streaming (GET /tama/v1/logs/:backend/events) is handled by the
+//! tama-core proxy, not this web UI server. The web UI proxies those requests
+//! to the proxy via the catch-all handler.
 
-use async_stream::stream;
-use axum::response::{IntoResponse, Sse};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
+    response::IntoResponse,
     Json,
 };
-use futures_util::Stream;
 use serde::Deserialize;
-use serde_json::json;
 use std::sync::Arc;
 
 use crate::server::AppState;
@@ -100,61 +101,4 @@ pub async fn get_backend_logs(
             Json(serde_json::json!({ "lines": Vec::<String>::new() })).into_response()
         }
     }
-}
-
-/// GET /tama/v1/logs/:backend/events — SSE stream of backend log lines.
-pub async fn get_backend_logs_sse(
-    State(state): State<Arc<AppState>>,
-    Path(backend): Path<String>,
-) -> Result<Sse<impl Stream<Item = Result<axum::response::sse::Event, axum::Error>>>, StatusCode> {
-    let backend_logs = state
-        .backend_logs
-        .as_ref()
-        .ok_or(StatusCode::NOT_FOUND)?;
-
-    let stream = match backend_logs.get(&backend).await {
-        Some(log_stream) => log_stream,
-        None => {
-            return Ok(Sse::new(stream! {
-                yield Ok(axum::response::sse::Event::default()
-                    .event("log")
-                    .json_data(json!({ "line": "[No active backend logs for '{}'. Start the backend first.]", format!(backend) }))
-                    .unwrap());
-            }));
-        }
-    };
-
-    let mut rx = stream.subscribe();
-
-    // Snapshot + subscribe: replay buffered lines, then stream live updates.
-    let head = stream.snapshot().await;
-
-    Ok(Sse::new(stream! {
-        // Replay buffered lines
-        for line in &head {
-            yield Ok(axum::response::sse::Event::default()
-                .event("log")
-                .json_data(json!({ "line": line }))
-                .unwrap());
-        }
-
-        // Stream live updates
-        loop {
-            match rx.recv().await {
-                Ok(line) => {
-                    yield Ok(axum::response::sse::Event::default()
-                        .event("log")
-                        .json_data(json!({ "line": line }))
-                        .unwrap());
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::debug!("Backend log subscriber lagged by {} lines", n);
-                    // Skip lagged messages — client will get recent ones anyway.
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    break;
-                }
-            }
-        }
-    }))
 }
