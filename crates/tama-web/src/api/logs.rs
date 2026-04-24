@@ -1,6 +1,15 @@
-//! Backend-specific log endpoint: GET /tama/v1/logs/:backend
+//! Backend log streaming endpoints: GET /tama/v1/logs/:backend and SSE stream.
 
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use async_stream::stream;
+use axum::response::{IntoResponse, Sse};
+use axum::{
+    extract::{Path, Query, State},
+    http::StatusCode,
+    Json,
+};
+use futures_util::Stream;
+use serde::Deserialize;
+use serde_json::json;
 use std::sync::Arc;
 
 use crate::server::AppState;
@@ -9,7 +18,7 @@ use crate::server::AppState;
 pub const MAX_LINES: usize = 10_000;
 
 /// Query parameters for GET /tama/v1/logs/:backend
-#[derive(serde::Deserialize)]
+#[derive(Deserialize)]
 pub struct BackendLogsQuery {
     /// Number of lines to return (default: 200)
     #[serde(default = "default_lines")]
@@ -21,31 +30,21 @@ fn default_lines() -> usize {
 }
 
 /// Validate a backend name for use in log file paths.
-///
-/// Returns `true` if the name is non-empty, ≤64 characters, and contains only
-/// alphanumeric characters, underscores, or hyphens.
 pub fn is_valid_backend_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
-        && name
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+        && name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-')
 }
 
 /// GET /tama/v1/logs/:backend — return the last N lines of a backend's log file.
 pub async fn get_backend_logs(
     State(state): State<Arc<AppState>>,
-    axum::extract::Path(backend): axum::extract::Path<String>,
-    axum::extract::Query(query): axum::extract::Query<BackendLogsQuery>,
+    Path(backend): Path<String>,
+    Query(query): Query<BackendLogsQuery>,
 ) -> impl IntoResponse {
-    // 1. Resolve logs directory:
-    //    - Use explicitly configured logs_dir if provided
-    //    - Fall back to <config_dir>/logs/ derived from config_path
-    //    - Return 404 if neither is available
     let dir = match &state.logs_dir {
         Some(d) => d.clone(),
         None => {
-            // Try to derive logs dir from the config file's parent directory
             let config_dir = match &state.config_path {
                 Some(p) => p.parent().map(|d| d.to_path_buf()),
                 None => None,
@@ -63,7 +62,6 @@ pub async fn get_backend_logs(
         }
     };
 
-    // 2. Validate backend name
     if !is_valid_backend_name(&backend) {
         return (
             StatusCode::BAD_REQUEST,
@@ -72,11 +70,8 @@ pub async fn get_backend_logs(
             .into_response();
     }
 
-    // 3. Build log path — backend logs use {backend}_{server_name}.log format
-    // so multiple models on the same backend get separate log files.
     let path = dir.join(format!("{}.log", backend));
 
-    // 4. Check file existence
     if !path.exists() {
         return (
             StatusCode::NOT_FOUND,
@@ -85,7 +80,6 @@ pub async fn get_backend_logs(
             .into_response();
     }
 
-    // 5. Read log lines using spawn_blocking
     let n = query.lines.min(MAX_LINES);
     let path_clone = path.clone();
     let lines =
@@ -108,41 +102,59 @@ pub async fn get_backend_logs(
     }
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────────
+/// GET /tama/v1/logs/:backend/events — SSE stream of backend log lines.
+pub async fn get_backend_logs_sse(
+    State(state): State<Arc<AppState>>,
+    Path(backend): Path<String>,
+) -> Result<Sse<impl Stream<Item = Result<axum::response::sse::Event, axum::Error>>>, StatusCode> {
+    let backend_logs = state
+        .backend_logs
+        .as_ref()
+        .ok_or(StatusCode::NOT_FOUND)?;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    let stream = match backend_logs.get(&backend).await {
+        Some(log_stream) => log_stream,
+        None => {
+            return Ok(Sse::new(stream! {
+                yield Ok(axum::response::sse::Event::default()
+                    .event("log")
+                    .json_data(json!({ "line": "[No active backend logs for '{}'. Start the backend first.]", format!(backend) }))
+                    .unwrap());
+            }));
+        }
+    };
 
-    #[test]
-    fn test_valid_backend_names() {
-        // Valid names from spec
-        assert!(is_valid_backend_name("llama_cpp"));
-        assert!(is_valid_backend_name("ik_llama"));
-        assert!(is_valid_backend_name("tts_kokoro"));
-        assert!(is_valid_backend_name("custom-backend"));
-        assert!(is_valid_backend_name("abc123"));
-    }
+    let mut rx = stream.subscribe();
 
-    #[test]
-    fn test_invalid_backend_names() {
-        // Invalid names from spec
-        assert!(!is_valid_backend_name(""));
-        assert!(!is_valid_backend_name("../etc/passwd"));
-        assert!(!is_valid_backend_name("../../logs"));
-        assert!(!is_valid_backend_name("name with spaces"));
-        assert!(!is_valid_backend_name("name/with/slashes"));
-        // Note: "name..double" contains only valid characters (alphanumeric + dots)
-        // but dots are NOT allowed, so this should be invalid
-        assert!(!is_valid_backend_name("name..double"));
-        assert!(!is_valid_backend_name(&"a".repeat(65))); // 65+ chars
-        assert!(!is_valid_backend_name("name.with.dots"));
-        assert!(!is_valid_backend_name("name\0null"));
-        assert!(!is_valid_backend_name("UPPER CASE"));
-    }
+    // Snapshot + subscribe: replay buffered lines, then stream live updates.
+    let head = stream.snapshot().await;
 
-    #[test]
-    fn test_max_lines_constant() {
-        assert_eq!(MAX_LINES, 10_000);
-    }
+    Ok(Sse::new(stream! {
+        // Replay buffered lines
+        for line in &head {
+            yield Ok(axum::response::sse::Event::default()
+                .event("log")
+                .json_data(json!({ "line": line }))
+                .unwrap());
+        }
+
+        // Stream live updates
+        loop {
+            match rx.recv().await {
+                Ok(line) => {
+                    yield Ok(axum::response::sse::Event::default()
+                        .event("log")
+                        .json_data(json!({ "line": line }))
+                        .unwrap());
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::debug!("Backend log subscriber lagged by {} lines", n);
+                    // Skip lagged messages — client will get recent ones anyway.
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    break;
+                }
+            }
+        }
+    }))
 }

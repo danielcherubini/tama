@@ -190,6 +190,8 @@ pub struct ProxyState {
     /// Replaces the old global CONFIG_WRITE_LOCK to allow controlled
     /// parallelism (default capacity=4) instead of full serialization.
     pub config_write_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Backend log stream manager — broadcasts backend stdout/stderr via SSE.
+    pub backend_logs: crate::backends::log_stream::BackendLogManager,
 }
 
 impl ProxyState {

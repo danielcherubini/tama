@@ -122,6 +122,9 @@ impl ProxyState {
             server_config.backend, server_name, pid
         );
 
+        // Get the backend log stream for SSE broadcasting.
+        let log_stream = self.backend_logs.get_or_create(&server_name).await;
+
         // Open log file for this backend instance — include server name so
         // multiple models on the same backend get separate log files.
         let log_name = format!("{}_{}", server_config.backend, server_name);
@@ -130,34 +133,40 @@ impl ProxyState {
         });
         let log_file_arc = log_file.map(|f| Arc::new(Mutex::new(f)));
 
-        // Stream stdout to log file
+        // Helper to push a line: broadcast + write to file.
+        let push_line = Arc::new(move |line: String| {
+            let stream = log_stream.clone();
+            let file = log_file_arc.clone();
+            tokio::spawn(async move {
+                let _ = stream.push(line.clone()).await;
+                if let Some(ref f) = file {
+                    let _ = f.lock().map(|mut fw| {
+                        let _ = writeln!(fw, "{line}");
+                    });
+                }
+            });
+        });
+
+        // Stream stdout
         if let Some(stdout) = child.stdout.take() {
-            let log_file_out = log_file_arc.clone();
+            let push = push_line.clone();
             tokio::spawn(async move {
                 let reader = tokio::io::BufReader::new(stdout);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    if let Some(ref f) = log_file_out {
-                        let _ = f.lock().map(|mut fw| {
-                            let _ = writeln!(fw, "{line}");
-                        });
-                    }
+                    push(line);
                 }
             });
         }
 
-        // Stream stderr to log file
+        // Stream stderr
         if let Some(stderr) = child.stderr.take() {
-            let log_file_err = log_file_arc.clone();
+            let push = push_line.clone();
             tokio::spawn(async move {
                 let reader = tokio::io::BufReader::new(stderr);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    if let Some(ref f) = log_file_err {
-                        let _ = f.lock().map(|mut fw| {
-                            let _ = writeln!(fw, "{line}");
-                        });
-                    }
+                    push(line);
                 }
             });
         }
