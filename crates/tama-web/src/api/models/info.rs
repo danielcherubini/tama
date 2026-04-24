@@ -105,6 +105,7 @@ fn model_entry_json(
         "port": record.port,
         "api_name": record.api_name,
         "display_name": record.display_name,
+        "kv_unified": record.kv_unified,
         "gpu_layers": record.gpu_layers,
         "quants": quants_json,
         "modalities": m.modalities,
