@@ -1203,8 +1203,8 @@ mod tests {
         };
 
         let result = apply_model_body(body, Some(existing));
-        assert_eq!(
-            result.kv_unified, false,
+        assert!(
+            !result.kv_unified,
             "existing kv_unified=false must be preserved when body omits the field"
         );
     }
