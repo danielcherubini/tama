@@ -13,3 +13,4 @@ VP_VULKANINFO_*.json
 # Cache directories
 .ruff_cache/
 worktree/
+/crates/tama-web/dist
