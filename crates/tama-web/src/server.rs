@@ -326,6 +326,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         )
         // Logs endpoint (returns 404 when logs_dir not configured)
         .route("/tama/v1/logs", get(api::get_logs))
+        .route("/tama/v1/logs/:backend", get(api::logs::get_backend_logs))
         // Benchmark GET routes (no CSRF needed)
         .route("/tama/v1/benchmarks/jobs/:id", get(get_benchmark_result))
         .route("/tama/v1/benchmarks/jobs/:id/events", get(benchmark_events))
