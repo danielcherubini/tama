@@ -503,7 +503,9 @@ pub fn Dashboard() -> impl IntoView {
                                                 n.to_string()
                                             }
                                         }).unwrap_or_else(|| "—".to_string());
-                                        let backend_name = m.backend.clone();
+                                        // Construct the log file identifier: {backend}_{server_name}.log
+                                        // The server name is the config key, which matches m.id.
+                                        let backend_name = format!("{}_{}", m.backend, m.id);
                                         view! {
                                             <div class="model-row card">
                                                 <span class="model-row__name">{display_name}</span>
@@ -545,7 +547,7 @@ pub fn Dashboard() -> impl IntoView {
                                                     }}
                                                     <button
                                                         class="btn btn-secondary btn-sm"
-                                                        title=format!("View logs for {}", backend_name)
+                                                        title="View backend logs"
                                                         on:click=move |_| {
                                                             on_log_click.run(backend_name.clone());
                                                         }
