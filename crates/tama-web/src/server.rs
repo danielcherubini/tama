@@ -150,7 +150,25 @@ async fn proxy_tama(
             let mut response = Response::new(body);
             *response.status_mut() = status;
             for (k, v) in &resp_headers {
+                // Skip hop-by-hop headers that shouldn't be forwarded
+                if k.as_str().eq_ignore_ascii_case("connection")
+                    || k.as_str().eq_ignore_ascii_case("keep-alive")
+                    || k.as_str().eq_ignore_ascii_case("transfer-encoding")
+                {
+                    continue;
+                }
                 response.headers_mut().insert(k, v.clone());
+            }
+            // Ensure SSE connections stay open — tell browser not to cache
+            if is_sse {
+                response.headers_mut().insert(
+                    axum::http::header::CACHE_CONTROL,
+                    "no-cache".parse().unwrap(),
+                );
+                response.headers_mut().insert(
+                    axum::http::header::CONNECTION,
+                    "keep-alive".parse().unwrap(),
+                );
             }
             response
         }
@@ -324,8 +342,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/tama/v1/self-update/events",
             get(api::self_update::update_events),
         )
-        // Logs endpoint (returns 404 when logs_dir not configured)
-        .route("/tama/v1/logs", get(api::get_logs))
+        // Logs endpoint — returns grouped logs (proxied from tama-core)
+        .route("/tama/v1/logs", get(api::logs::get_all_logs))
         // Benchmark GET routes (no CSRF needed)
         .route("/tama/v1/benchmarks/jobs/:id", get(get_benchmark_result))
         .route("/tama/v1/benchmarks/jobs/:id/events", get(benchmark_events))

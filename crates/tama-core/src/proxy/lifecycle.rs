@@ -1,11 +1,14 @@
 use anyhow::{Context, Result};
-use std::sync::Arc;
+use std::io::Write;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tokio::io::AsyncBufReadExt;
 use tracing::{debug, info, warn};
 
 use super::process::{force_kill_process, is_process_alive, kill_process, override_arg};
 use super::types::{ModelState, ProxyState};
 use crate::backends::BackendRegistry;
+use crate::logging;
 
 impl ProxyState {
     /// Load a model by starting its backend process.
@@ -87,9 +90,16 @@ impl ProxyState {
             server_config.backend, server_name, model_name
         );
 
+        // Resolve logs directory for backend log file
+        let logs_dir = self.config.read().await.logs_dir().ok();
+
         let mut child = tokio::process::Command::new(&backend_path);
         crate::process::configure_backend_command(&mut child, &backend_path);
-        child.args(&args).env("MODEL_NAME", model_name);
+        child
+            .args(&args)
+            .env("MODEL_NAME", model_name)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
 
         info!(
             "Executing backend: {} {}",
@@ -111,6 +121,57 @@ impl ProxyState {
             "Backend '{}' started for server '{}' (pid: {:?})",
             server_config.backend, server_name, pid
         );
+
+        // Get the backend log stream for SSE broadcasting — use same key as
+        // the dashboard constructs: {backend}_{server_name}.
+        let log_key = format!("{}_{}", server_config.backend, server_name);
+        let log_stream = self.backend_logs.get_or_create(&log_key).await;
+
+        // Open log file for this backend instance — include server name so
+        // multiple models on the same backend get separate log files.
+        let log_name = format!("{}_{}", server_config.backend, server_name);
+        let log_file = logs_dir
+            .as_ref()
+            .and_then(|dir| logging::open_log(dir, &log_name).ok());
+        let log_file_arc = log_file.map(|f| Arc::new(Mutex::new(f)));
+
+        // Helper to push a line: broadcast + write to file.
+        let push_line = Arc::new(move |line: String| {
+            let stream = log_stream.clone();
+            let file = log_file_arc.clone();
+            tokio::spawn(async move {
+                let _ = stream.push(line.clone()).await;
+                if let Some(ref f) = file {
+                    let _ = f.lock().map(|mut fw| {
+                        let _ = writeln!(fw, "{line}");
+                    });
+                }
+            });
+        });
+
+        // Stream stdout
+        if let Some(stdout) = child.stdout.take() {
+            let push = push_line.clone();
+            tokio::spawn(async move {
+                let reader = tokio::io::BufReader::new(stdout);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    push(line);
+                }
+            });
+        }
+
+        // Stream stderr
+        if let Some(stderr) = child.stderr.take() {
+            let push = push_line.clone();
+            tokio::spawn(async move {
+                let reader = tokio::io::BufReader::new(stderr);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    push(line);
+                }
+            });
+        }
 
         // Spawn a reaper task so the child process is waited on and doesn't become a zombie
         let reaper_server = server_name.clone();
