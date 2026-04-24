@@ -1540,27 +1540,15 @@ fn test_build_full_args_unified_default() {
     config.general.models_dir = Some(models_dir.to_string_lossy().to_string());
     config.loaded_from = Some(temp_dir.path().to_path_buf());
 
-    // kv_unified defaults to false, num_parallel=2 → -c = 8192 * 2 = 16384
+    // kv_unified defaults to false via serde, num_parallel=2 → -c = 8192 * 2 = 16384
     let server = ModelConfig {
         backend: "llama_cpp".to_string(),
-        args: vec![],
-        sampling: None,
         model: Some("org/repo".to_string()),
         quant: Some("Q4_K_M".to_string()),
-        mmproj: None,
-        port: None,
-        health_check: None,
-        enabled: true,
         context_length: Some(8192),
         num_parallel: Some(2),
-        kv_unified: false, // Default (false)
-        profile: None,
-        api_name: None,
-        gpu_layers: None,
         quants,
-        modalities: None,
-        display_name: None,
-        db_id: None,
+        ..Default::default()
     };
 
     let backend = BackendConfig {

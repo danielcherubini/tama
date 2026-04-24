@@ -1179,7 +1179,7 @@ mod tests {
     /// When an existing model has `kv_unified: false` and the body omits the
     /// field, the existing value must be preserved (not overwritten to true).
     #[test]
-    fn apply_model_body_kv_unified_passthrough() {
+    fn test_apply_model_body_kv_unified_passthrough() {
         let existing = existing_with_size("Q4_K_M", "Model-Q4_K_M.gguf", None);
         assert!(!existing.kv_unified, "helper must create kv_unified=false");
 
@@ -1212,7 +1212,7 @@ mod tests {
     /// When creating a new model (no existing config) and the body omits
     /// `kv_unified`, the result must default to `true`.
     #[test]
-    fn apply_model_body_kv_unified_default_true_for_new() {
+    fn test_apply_model_body_kv_unified_default_true_for_new() {
         let body = ModelBody {
             backend: "llama".to_string(),
             model: Some("org/repo".to_string()),

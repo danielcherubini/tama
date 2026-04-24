@@ -280,13 +280,15 @@ impl Config {
                 .as_ref()
                 .and_then(|q| server.quants.get(q).and_then(|qe| qe.context_length))
         });
+        let is_llama_cpp_backend = backend_is_llama_cpp(&server.backend);
+
         if let Some(ctx) = ctx {
             let already_has_c = grouped
                 .iter()
                 .any(|e| matches!(crate::config::flag_name(e), Some("-c") | Some("--ctx-size")));
             if !already_has_c {
                 let slots = server.num_parallel.unwrap_or(1);
-                let total_ctx = if server.kv_unified {
+                let total_ctx = if is_llama_cpp_backend && server.kv_unified {
                     // Unified KV: all slots share one pool, -c = per-slot context
                     ctx
                 } else {
@@ -325,11 +327,11 @@ impl Config {
             }
         }
 
-        // Inject --kv-unified flag when enabled and not already present.
-        if server.kv_unified {
-            let already_has_kv_unified = grouped
-                .iter()
-                .any(|e| matches!(crate::config::flag_name(e), Some("--kv-unified")));
+        // Inject --kv-unified flag when enabled and backend supports it.
+        if is_llama_cpp_backend && server.kv_unified {
+            let already_has_kv_unified = grouped.iter().any(|e| {
+                matches!(crate::config::flag_name(e), Some("--kv-unified"))
+            });
             if !already_has_kv_unified {
                 grouped.push("--kv-unified".to_string());
             }
@@ -467,6 +469,12 @@ impl Config {
                 )
             })
     }
+}
+
+/// Check if a backend name refers to a llama.cpp-compatible backend.
+/// Used to gate llama.cpp-specific flags like `--kv-unified`.
+pub fn backend_is_llama_cpp(backend_name: &str) -> bool {
+    backend_name.starts_with("llama")
 }
 
 #[cfg(test)]
