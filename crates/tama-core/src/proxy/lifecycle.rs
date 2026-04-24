@@ -1,13 +1,14 @@
-use anyhow::{anyhow, Context, Result};
-use std::io::{BufRead, BufReader, Write};
+use anyhow::{Context, Result};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tokio::io::AsyncBufReadExt;
 use tracing::{debug, info, warn};
 
 use super::process::{force_kill_process, is_process_alive, kill_process, override_arg};
 use super::types::{ModelState, ProxyState};
 use crate::backends::BackendRegistry;
-use tama_core::logging;
+use crate::logging;
 
 impl ProxyState {
     /// Load a model by starting its backend process.
@@ -133,7 +134,7 @@ impl ProxyState {
         if let Some(stdout) = child.stdout.take() {
             let log_file_out = log_file_arc.clone();
             tokio::spawn(async move {
-                let reader = BufReader::new(stdout);
+                let reader = tokio::io::BufReader::new(stdout);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     if let Some(ref f) = log_file_out {
@@ -149,7 +150,7 @@ impl ProxyState {
         if let Some(stderr) = child.stderr.take() {
             let log_file_err = log_file_arc.clone();
             tokio::spawn(async move {
-                let reader = BufReader::new(stderr);
+                let reader = tokio::io::BufReader::new(stderr);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     if let Some(ref f) = log_file_err {
