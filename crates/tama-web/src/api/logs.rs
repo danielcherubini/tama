@@ -72,7 +72,8 @@ pub async fn get_backend_logs(
             .into_response();
     }
 
-    // 3. Build log path
+    // 3. Build log path — backend logs use {backend}_{server_name}.log format
+    // so multiple models on the same backend get separate log files.
     let path = dir.join(format!("{}.log", backend));
 
     // 4. Check file existence

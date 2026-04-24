@@ -1,11 +1,13 @@
-use anyhow::{Context, Result};
-use std::sync::Arc;
+use anyhow::{anyhow, Context, Result};
+use std::io::{BufRead, BufReader, Write};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 use super::process::{force_kill_process, is_process_alive, kill_process, override_arg};
 use super::types::{ModelState, ProxyState};
 use crate::backends::BackendRegistry;
+use tama_core::logging;
 
 impl ProxyState {
     /// Load a model by starting its backend process.
@@ -87,9 +89,16 @@ impl ProxyState {
             server_config.backend, server_name, model_name
         );
 
+        // Resolve logs directory for backend log file
+        let logs_dir = self.config.read().await.logs_dir().ok();
+
         let mut child = tokio::process::Command::new(&backend_path);
         crate::process::configure_backend_command(&mut child, &backend_path);
-        child.args(&args).env("MODEL_NAME", model_name);
+        child
+            .args(&args)
+            .env("MODEL_NAME", model_name)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
 
         info!(
             "Executing backend: {} {}",
@@ -111,6 +120,46 @@ impl ProxyState {
             "Backend '{}' started for server '{}' (pid: {:?})",
             server_config.backend, server_name, pid
         );
+
+        // Open log file for this backend instance — include server name so
+        // multiple models on the same backend get separate log files.
+        let log_name = format!("{}_{}", server_config.backend, server_name);
+        let log_file = logs_dir.as_ref().and_then(|dir| {
+            logging::open_log(dir, &log_name).ok()
+        });
+        let log_file_arc = log_file.map(|f| Arc::new(Mutex::new(f)));
+
+        // Stream stdout to log file
+        if let Some(stdout) = child.stdout.take() {
+            let log_file_out = log_file_arc.clone();
+            tokio::spawn(async move {
+                let reader = BufReader::new(stdout);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if let Some(ref f) = log_file_out {
+                        let _ = f.lock().map(|mut fw| {
+                            let _ = writeln!(fw, "{line}");
+                        });
+                    }
+                }
+            });
+        }
+
+        // Stream stderr to log file
+        if let Some(stderr) = child.stderr.take() {
+            let log_file_err = log_file_arc.clone();
+            tokio::spawn(async move {
+                let reader = BufReader::new(stderr);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if let Some(ref f) = log_file_err {
+                        let _ = f.lock().map(|mut fw| {
+                            let _ = writeln!(fw, "{line}");
+                        });
+                    }
+                }
+            });
+        }
 
         // Spawn a reaper task so the child process is waited on and doesn't become a zombie
         let reaper_server = server_name.clone();
