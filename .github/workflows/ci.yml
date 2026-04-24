@@ -50,15 +50,15 @@ jobs:
       - name: Format check
         run: cargo fmt --all --check
 
+      - name: Build Leptos WASM frontend
+        working-directory: crates/tama-web
+        run: trunk build
+
       - name: Clippy (workspace)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Clippy (tama-web SSR)
         run: cargo clippy --package tama-web --features ssr --all-targets -- -D warnings
-
-      - name: Build Leptos WASM frontend
-        working-directory: crates/tama-web
-        run: trunk build
 
       - name: Run tests (workspace)
         run: cargo test --workspace -- --nocapture
@@ -95,12 +95,12 @@ jobs:
       - name: Format check
         run: cargo fmt --all --check
 
-      - name: Clippy (workspace)
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
       - name: Build Leptos WASM frontend
         working-directory: crates/tama-web
         run: trunk build
+
+      - name: Clippy (workspace)
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run tests (workspace)
         run: cargo test --workspace -- --nocapture
