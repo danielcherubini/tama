@@ -832,10 +832,10 @@ mod tests {
         let config = Config::default();
         let state = ProxyState::new(config, None);
 
-        // Insert a stale ready model (idle for 1 hour) to prove it won't be unloaded
+        // Insert a stale ready model (idle for 10 minutes) to prove it won't be unloaded
         let mut ready = make_ready_state("stale-model.gguf", "llama-cpp");
         if let ModelState::Ready { last_accessed, .. } = &mut ready {
-            *last_accessed = Instant::now() - Duration::from_secs(3600);
+            *last_accessed = Instant::now() - Duration::from_secs(600);
         }
         state
             .models
