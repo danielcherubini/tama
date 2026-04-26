@@ -126,8 +126,9 @@ pub enum Commands {
         /// Port to bind to
         #[arg(long, default_value = "11434")]
         port: u16,
-        /// Enable automatic unloading of idle models (omit to use config file value)
-        #[arg(long)]
+        /// Enable automatic unloading of idle models
+        /// --auto-unload enables it, --auto-unload=false disables it, omit to use config value
+        #[arg(long, num_args = 0..=1, default_missing_value = "true")]
         auto_unload: Option<bool>,
         /// Idle timeout in seconds (models unload after this many seconds of inactivity; requires --auto-unload)
         #[arg(long, default_value = "300")]

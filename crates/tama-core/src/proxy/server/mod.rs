@@ -226,6 +226,9 @@ impl ProxyServer {
     /// Spawn the idle timeout checker task.
     /// Always spawns — the task reads config each iteration and respects runtime
     /// changes to auto_unload (e.g., via web UI) without requiring a restart.
+    /// check_idle_timeouts is always called so Failed backends get cleaned up
+    /// even when auto_unload is disabled; the idle-unload logic inside it is
+    /// gated on the auto_unload flag.
     fn start_idle_timeout_checker(state: Arc<ProxyState>) -> tokio::task::JoinHandle<()> {
         use std::time::Duration;
 
@@ -233,19 +236,14 @@ impl ProxyServer {
             loop {
                 // Re-read config each iteration so runtime changes (e.g., via web UI)
                 // take effect without a restart.
-                let (auto_unload, idle_timeout_secs) = {
-                    let cfg = state.config.read().await;
-                    (cfg.proxy.auto_unload, cfg.proxy.idle_timeout_secs)
+                let idle_timeout_secs = state.config.read().await.proxy.idle_timeout_secs;
+                let interval = if idle_timeout_secs > 0 {
+                    Duration::from_secs((idle_timeout_secs / 2).max(1))
+                } else {
+                    Duration::from_secs(30)
                 };
-
-                if !auto_unload {
-                    // Disabled — sleep 30s before re-checking.
-                    tokio::time::sleep(Duration::from_secs(30)).await;
-                    continue;
-                }
-
-                let interval = Duration::from_secs((idle_timeout_secs / 2).max(1));
                 tokio::time::sleep(interval).await;
+                // Always called — cleans up Failed backends even when auto_unload is off.
                 let _ = state.check_idle_timeouts().await;
             }
         })
