@@ -99,18 +99,17 @@ impl ProxyState {
                     let now = Instant::now();
                     let last_accessed_secs_ago = now.duration_since(*last_accessed).as_secs();
                     let elapsed = now.duration_since(*last_accessed);
-                    let idle_timeout_remaining_secs: serde_json::Value =
-                        if auto_unload && idle_timeout_secs > 0 {
-                            let timeout = Duration::from_secs(idle_timeout_secs);
-                            if elapsed < timeout {
-                                serde_json::json!((timeout - elapsed).as_secs())
-                            } else {
-                                serde_json::json!(0)
-                            }
+                    let idle_timeout_remaining_secs: serde_json::Value = if auto_unload {
+                        let timeout = Duration::from_secs(idle_timeout_secs);
+                        if elapsed < timeout {
+                            serde_json::json!((timeout - elapsed).as_secs())
                         } else {
-                            // Auto-unload disabled — no countdown
-                            serde_json::Value::Null
-                        };
+                            serde_json::json!(0)
+                        }
+                    } else {
+                        // Auto-unload disabled — no countdown
+                        serde_json::Value::Null
+                    };
                     let load_time_secs = load_time
                         .duration_since(UNIX_EPOCH)
                         .map(|d| d.as_secs())

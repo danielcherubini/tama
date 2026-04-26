@@ -831,11 +831,23 @@ mod tests {
     async fn test_auto_unload_disabled() {
         let config = Config::default();
         let state = ProxyState::new(config, None);
+
+        // Insert a stale ready model (idle for 1 hour) to prove it won't be unloaded
+        let mut ready = make_ready_state("stale-model.gguf", "llama-cpp");
+        if let ModelState::Ready { last_accessed, .. } = &mut ready {
+            *last_accessed = Instant::now() - Duration::from_secs(3600);
+        }
+        state
+            .models
+            .write()
+            .await
+            .insert("stale-server".to_string(), ready);
+
         // With default config, auto_unload is false (disabled)
         let result = state.check_idle_timeouts().await;
         assert!(
             result.is_empty(),
-            "auto_unload=false should disable auto-unload"
+            "auto_unload=false should disable auto-unload even for stale models"
         );
     }
 

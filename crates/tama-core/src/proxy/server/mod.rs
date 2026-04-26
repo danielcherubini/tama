@@ -60,7 +60,7 @@ impl ProxyServer {
         }
 
         Self::cleanup_stale_processes(&state).await;
-        let idle_timeout_handle = Self::start_idle_timeout_checker(&state).await;
+        let idle_timeout_handle = Self::start_idle_timeout_checker(state.clone());
 
         // Spawn background task to refresh system metrics every 2s.
         // Each tick: collect metrics, update the cached snapshot, persist to SQLite
@@ -144,7 +144,7 @@ impl ProxyServer {
 
         Self {
             state,
-            idle_timeout_handle,
+            idle_timeout_handle: Some(idle_timeout_handle),
             metrics_handle: Some(metrics_handle),
         }
     }
@@ -224,29 +224,31 @@ impl ProxyServer {
     }
 
     /// Spawn the idle timeout checker task.
-    /// Returns None if auto_unload is disabled — no background task, zero overhead.
-    async fn start_idle_timeout_checker(
-        state: &Arc<ProxyState>,
-    ) -> Option<tokio::task::JoinHandle<()>> {
+    /// Always spawns — the task reads config each iteration and respects runtime
+    /// changes to auto_unload (e.g., via web UI) without requiring a restart.
+    fn start_idle_timeout_checker(state: Arc<ProxyState>) -> tokio::task::JoinHandle<()> {
         use std::time::Duration;
 
-        // Check initial config — if disabled, don't spawn at all.
-        let auto_unload = state.config.read().await.proxy.auto_unload;
-        if !auto_unload {
-            return None;
-        }
-
-        let state = Arc::clone(state);
-        Some(tokio::spawn(async move {
+        tokio::spawn(async move {
             loop {
                 // Re-read config each iteration so runtime changes (e.g., via web UI)
                 // take effect without a restart.
-                let idle_timeout_secs = state.config.read().await.proxy.idle_timeout_secs;
+                let (auto_unload, idle_timeout_secs) = {
+                    let cfg = state.config.read().await;
+                    (cfg.proxy.auto_unload, cfg.proxy.idle_timeout_secs)
+                };
+
+                if !auto_unload {
+                    // Disabled — sleep 30s before re-checking.
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                    continue;
+                }
+
                 let interval = Duration::from_secs((idle_timeout_secs / 2).max(1));
                 tokio::time::sleep(interval).await;
                 let _ = state.check_idle_timeouts().await;
             }
-        }))
+        })
     }
 
     /// Consume the server and return a configured axum Router.

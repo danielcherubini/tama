@@ -112,7 +112,16 @@ pub async fn main() -> Result<()> {
             port,
             auto_unload,
             idle_timeout,
-        } => serve::cmd_serve(&config, host, port, auto_unload, idle_timeout).await,
+        } => {
+            serve::cmd_serve(
+                &config,
+                host,
+                port,
+                auto_unload.unwrap_or(config.proxy.auto_unload),
+                idle_timeout,
+            )
+            .await
+        }
         Commands::Logs {
             name,
             follow,

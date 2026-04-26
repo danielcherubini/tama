@@ -821,6 +821,8 @@ mod tests {
 
         assert_eq!(deserialized.host, "0.0.0.0");
         assert_eq!(deserialized.port, 8080);
+        assert!(!deserialized.auto_unload, "auto_unload should be false");
+        assert_eq!(deserialized.idle_timeout_secs, 300);
         assert_eq!(deserialized.circuit_breaker_threshold, 5);
     }
 
