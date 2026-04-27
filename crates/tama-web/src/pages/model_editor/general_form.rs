@@ -21,9 +21,14 @@ fn set_input_value(id: &str, value: &str) {
     if let Some(el) = web_sys::window()
         .and_then(|w| w.document())
         .and_then(|d| d.get_element_by_id(id))
-        .and_then(|e| e.dyn_into::<web_sys::HtmlInputElement>().ok())
     {
-        el.set_value(value);
+        if let Ok(input) = el.clone().dyn_into::<web_sys::HtmlInputElement>() {
+            input.set_value(value);
+            return;
+        }
+        if let Ok(select) = el.dyn_into::<web_sys::HtmlSelectElement>() {
+            select.set_value(value);
+        }
     }
 }
 
