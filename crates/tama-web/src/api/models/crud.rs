@@ -139,11 +139,11 @@ fn apply_model_body(
         cache_type_k: body
             .cache_type_k
             .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty()),
+            .filter(|s| !s.is_empty() && s != "__custom"),
         cache_type_v: body
             .cache_type_v
             .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty()),
+            .filter(|s| !s.is_empty() && s != "__custom"),
         db_id: base.db_id,
     }
 }
@@ -777,6 +777,9 @@ fn validate_model_body(body: &ModelBody) -> Result<(), String> {
     }
     if let Some(ref cache_type_k) = body.cache_type_k {
         let trimmed = cache_type_k.trim();
+        if trimmed == "__custom" {
+            return Err("cache_type_k cannot be the sentinel value __custom".to_string());
+        }
         if !trimmed.is_empty() && trimmed.len() > MAX_CACHE_TYPE {
             return Err(format!(
                 "cache_type_k must be at most {MAX_CACHE_TYPE} characters"
@@ -785,6 +788,9 @@ fn validate_model_body(body: &ModelBody) -> Result<(), String> {
     }
     if let Some(ref cache_type_v) = body.cache_type_v {
         let trimmed = cache_type_v.trim();
+        if trimmed == "__custom" {
+            return Err("cache_type_v cannot be the sentinel value __custom".to_string());
+        }
         if !trimmed.is_empty() && trimmed.len() > MAX_CACHE_TYPE {
             return Err(format!(
                 "cache_type_v must be at most {MAX_CACHE_TYPE} characters"

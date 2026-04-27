@@ -33,6 +33,7 @@ fn set_input_value(id: &str, value: &str) {
 }
 
 /// Custom KV quant text input that appears when the selected value is not in the known options.
+/// Shows when value is the "__custom" sentinel or any value not in KV_QUANT_OPTIONS.
 #[component]
 fn KvQuantCustomInput(form: RwSignal<Option<ModelForm>>, field: KvQuantField) -> impl IntoView {
     let is_custom = Signal::derive(move || {
@@ -41,7 +42,8 @@ fn KvQuantCustomInput(form: RwSignal<Option<ModelForm>>, field: KvQuantField) ->
             KvQuantField::K => f.cache_type_k.as_deref(),
             KvQuantField::V => f.cache_type_v.as_deref(),
         });
-        matches!(current, Some(val) if !KV_QUANT_OPTIONS.contains(&val))
+        matches!(current, Some("__custom"))
+            || matches!(current, Some(val) if !KV_QUANT_OPTIONS.contains(&val))
     });
     let current_value = Signal::derive(move || {
         let f = form.get();
@@ -239,6 +241,15 @@ pub fn ModelEditorGeneralForm(
                     let opt_str = *opt;
                     view! { <option value=opt_str selected=selected>{opt_str}</option> }
                 }).collect::<Vec<_>>()}
+                <option
+                    value="__custom"
+                    selected=move || form.get().as_ref()
+                        .and_then(|f| f.cache_type_k.as_deref())
+                        .map(|v| v == "__custom" || !KV_QUANT_OPTIONS.contains(&v))
+                        .unwrap_or(false)
+                >
+                    "Custom…"
+                </option>
             </select>
             <KvQuantCustomInput form=form field=KvQuantField::K />
 
@@ -266,6 +277,15 @@ pub fn ModelEditorGeneralForm(
                     let opt_str = *opt;
                     view! { <option value=opt_str selected=selected>{opt_str}</option> }
                 }).collect::<Vec<_>>()}
+                <option
+                    value="__custom"
+                    selected=move || form.get().as_ref()
+                        .and_then(|f| f.cache_type_v.as_deref())
+                        .map(|v| v == "__custom" || !KV_QUANT_OPTIONS.contains(&v))
+                        .unwrap_or(false)
+                >
+                    "Custom…"
+                </option>
             </select>
             <KvQuantCustomInput form=form field=KvQuantField::V />
 
