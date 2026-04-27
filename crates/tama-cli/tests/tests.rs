@@ -266,6 +266,8 @@ async fn test_cmd_server_edit_valid_profile_succeeds() {
             display_name: None,
             num_parallel: None,
             kv_unified: true,
+            cache_type_k: None,
+            cache_type_v: None,
             db_id: None,
         };
         tama_core::db::save_model_config(&conn, "test_server", &dummy_model)
