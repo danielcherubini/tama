@@ -129,6 +129,8 @@ pub async fn save_model(args: Vec<String>, form: ModelForm, is_new: bool) -> Res
         "display_name": form.display_name,
         "kv_unified": form.kv_unified,
         "gpu_layers": form.gpu_layers,
+        "cache_type_k": form.cache_type_k.clone(),
+        "cache_type_v": form.cache_type_v.clone(),
         "quants": form.quants,
         "modalities": form.modalities,
     });
