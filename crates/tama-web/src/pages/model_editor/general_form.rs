@@ -30,25 +30,25 @@ fn set_input_value(id: &str, value: &str) {
 /// Custom KV quant text input that appears when the selected value is not in the known options.
 #[component]
 fn KvQuantCustomInput(form: RwSignal<Option<ModelForm>>, field: KvQuantField) -> impl IntoView {
-    let is_custom = move || -> bool {
+    let is_custom = Signal::derive(move || {
         let f = form.get();
         let current = f.as_ref().and_then(|f| match field {
             KvQuantField::K => f.cache_type_k.as_deref(),
             KvQuantField::V => f.cache_type_v.as_deref(),
         });
         matches!(current, Some(val) if !KV_QUANT_OPTIONS.contains(&val))
-    };
-    let current_value = move || -> Option<String> {
+    });
+    let current_value = Signal::derive(move || {
         let f = form.get();
         f.as_ref().and_then(|f| match field {
             KvQuantField::K => f.cache_type_k.clone(),
             KvQuantField::V => f.cache_type_v.clone(),
         })
-    };
+    });
     view! {
-        <Show when=is_custom>
+        <Show when=move || is_custom.get()>
             {move || {
-                let val = current_value().expect("KV quant custom value should be present when is_custom is true");
+                let val = current_value.get().expect("KV quant custom value should be present when is_custom is true");
                 view! {
                     <input class="form-input" type="text" placeholder="Custom quant value..." prop:value=val on:input=move |ev| {
                         let v = target_value(&ev);
