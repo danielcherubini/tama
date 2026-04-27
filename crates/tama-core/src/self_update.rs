@@ -41,12 +41,21 @@ fn github_token() -> Option<String> {
 /// Accepts `current_version` as a parameter so the caller passes the correct
 /// binary version (e.g. from tama-cli), avoiding version mismatch with
 /// `env!("CARGO_PKG_VERSION")` which resolves to the crate's own version.
+/// Timeout for GitHub API requests during update checks.
+/// The self_update crate's internal HTTP client has no configurable timeout,
+/// so we wrap the blocking call with a tokio timeout to prevent indefinite hangs.
+const UPDATE_CHECK_TIMEOUT_SECS: u64 = 30;
+
 pub async fn check_for_update(current_version: &str) -> Result<UpdateInfo> {
     let current = current_version.to_string();
 
-    tokio::task::spawn_blocking(move || check_for_update_sync(&current))
-        .await
-        .context("spawn_blocking panicked")?
+    tokio::time::timeout(
+        std::time::Duration::from_secs(UPDATE_CHECK_TIMEOUT_SECS),
+        tokio::task::spawn_blocking(move || check_for_update_sync(&current)),
+    )
+    .await
+    .context("Update check timed out after {}s — check network connectivity and firewall rules")?
+    .context("spawn_blocking panicked")?
 }
 
 /// Synchronous implementation of update checking.
@@ -99,15 +108,23 @@ fn check_for_update_sync(current_version: &str) -> Result<UpdateInfo> {
 ///
 /// Accepts `current_version` as a parameter so the caller passes the correct
 /// binary version.
+/// Timeout for the full update process (download + extract + replace).
+/// Downloading a ~50MB binary should complete well within this window.
+const UPDATE_PERFORM_TIMEOUT_SECS: u64 = 300;
+
 pub async fn perform_update(
     current_version: &str,
     on_progress: impl Fn(String) + Send + 'static,
 ) -> Result<UpdateResult> {
     let current = current_version.to_string();
 
-    tokio::task::spawn_blocking(move || perform_update_sync(&current, on_progress))
-        .await
-        .context("spawn_blocking panicked")?
+    tokio::time::timeout(
+        std::time::Duration::from_secs(UPDATE_PERFORM_TIMEOUT_SECS),
+        tokio::task::spawn_blocking(move || perform_update_sync(&current, on_progress)),
+    )
+    .await
+    .context("Update timed out after {}s — check network connectivity")?
+    .context("spawn_blocking panicked")?
 }
 
 /// Synchronous implementation of the update process.
