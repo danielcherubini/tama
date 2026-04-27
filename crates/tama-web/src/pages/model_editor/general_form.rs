@@ -55,7 +55,7 @@ fn KvQuantCustomInput(form: RwSignal<Option<ModelForm>>, field: KvQuantField) ->
             {move || {
                 let val = current_value.get().expect("KV quant custom value should be present when is_custom is true");
                 view! {
-                    <input class="form-input" type="text" placeholder="Custom quant value..." prop:value=val on:input=move |ev| {
+                    <input class="form-input" type="text" maxlength="32" placeholder="Custom quant value..." prop:value=val on:input=move |ev| {
                         let v = target_value(&ev);
                         form.update(|f| {
                             if let Some(form) = f {
