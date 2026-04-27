@@ -34,7 +34,7 @@ impl Drop for FkGuard<'_> {
 pub type Migration = (i32, &'static str);
 
 /// Version number for the latest migration
-pub const LATEST_VERSION: i32 = 17;
+pub const LATEST_VERSION: i32 = 18;
 
 /// Migrations that rebuild a parent table via DROP + RENAME. SQLite with
 /// `foreign_keys=ON` performs an implicit DELETE on the dropped table which
@@ -451,6 +451,13 @@ pub(crate) fn run_up_to(conn: &Connection, target_version: i32) -> anyhow::Resul
                 UPDATE model_configs SET kv_unified = 1 WHERE num_parallel IS NULL OR num_parallel <= 1;
             "#,
         ),
+        (
+            18,
+            r#"
+                ALTER TABLE model_configs ADD COLUMN cache_type_k TEXT;
+                ALTER TABLE model_configs ADD COLUMN cache_type_v TEXT;
+            "#,
+        ),
     ];
 
     let current_version: i32 =
@@ -821,5 +828,30 @@ mod tests {
             .pragma_query_value(None, "foreign_keys", |row| row.get(0))
             .unwrap();
         assert_eq!(fk_after, 1);
+    }
+
+    /// Regression test: migration v18 must add cache_type_k and cache_type_v
+    /// columns to model_configs.
+    #[test]
+    fn test_migration_v18_adds_cache_type_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        run(&conn).unwrap();
+
+        let k_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('model_configs') WHERE name='cache_type_k'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let v_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('model_configs') WHERE name='cache_type_v'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(k_exists, 1);
+        assert_eq!(v_exists, 1);
     }
 }

@@ -13,14 +13,71 @@ const MODALITY_OPTIONS: &[(&str, &str)] = &[
     ("pdf", "PDF"),
 ];
 
+const KV_QUANT_OPTIONS: &[&str] = &[
+    "f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1",
+];
+
 fn set_input_value(id: &str, value: &str) {
     if let Some(el) = web_sys::window()
         .and_then(|w| w.document())
         .and_then(|d| d.get_element_by_id(id))
-        .and_then(|e| e.dyn_into::<web_sys::HtmlInputElement>().ok())
     {
-        el.set_value(value);
+        if let Ok(input) = el.clone().dyn_into::<web_sys::HtmlInputElement>() {
+            input.set_value(value);
+            return;
+        }
+        if let Ok(select) = el.dyn_into::<web_sys::HtmlSelectElement>() {
+            select.set_value(value);
+        }
     }
+}
+
+/// Custom KV quant text input that appears when the selected value is not in the known options.
+/// Shows when value is the "__custom" sentinel or any value not in KV_QUANT_OPTIONS.
+#[component]
+fn KvQuantCustomInput(form: RwSignal<Option<ModelForm>>, field: KvQuantField) -> impl IntoView {
+    let is_custom = Signal::derive(move || {
+        let f = form.get();
+        let current = f.as_ref().and_then(|f| match field {
+            KvQuantField::K => f.cache_type_k.as_deref(),
+            KvQuantField::V => f.cache_type_v.as_deref(),
+        });
+        matches!(current, Some("__custom"))
+            || matches!(current, Some(val) if !KV_QUANT_OPTIONS.contains(&val))
+    });
+    let current_value = Signal::derive(move || {
+        let f = form.get();
+        f.as_ref().and_then(|f| match field {
+            KvQuantField::K => f.cache_type_k.clone(),
+            KvQuantField::V => f.cache_type_v.clone(),
+        })
+    });
+    view! {
+        <Show when=move || is_custom.get()>
+            {move || {
+                let val = current_value.get().expect("KV quant custom value should be present when is_custom is true");
+                view! {
+                    <input class="form-input" type="text" maxlength="32" placeholder="Custom quant value..." prop:value=val on:input=move |ev| {
+                        let v = target_value(&ev);
+                        form.update(|f| {
+                            if let Some(form) = f {
+                                match field {
+                                    KvQuantField::K => form.cache_type_k = if v.is_empty() { None } else { Some(v) },
+                                    KvQuantField::V => form.cache_type_v = if v.is_empty() { None } else { Some(v) },
+                                }
+                            }
+                        });
+                    } />
+                }
+            }}
+        </Show>
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KvQuantField {
+    K,
+    V,
 }
 
 #[component]
@@ -55,6 +112,14 @@ pub fn ModelEditorGeneralForm(
                 set_input_value(
                     "field-num-parallel",
                     &f.num_parallel.map(|v| v.to_string()).unwrap_or_default(),
+                );
+                set_input_value(
+                    "field-kv-quant-k",
+                    f.cache_type_k.as_deref().unwrap_or_default(),
+                );
+                set_input_value(
+                    "field-kv-quant-v",
+                    f.cache_type_v.as_deref().unwrap_or_default(),
                 );
                 last_init_id.set_value(Some(f.id.clone()));
             }
@@ -151,6 +216,78 @@ pub fn ModelEditorGeneralForm(
                 })
                 reset_key=Signal::derive(move || form.get().map(|f| f.id.clone()).unwrap_or_default())
             />
+
+            <label class="form-label" for="field-kv-quant-k">
+                "KV cache type K"
+                <div class="form-hint">Quantize the K cache to reduce VRAM usage. Lower precision = less memory, slightly slower inference.</div>
+            </label>
+            <select
+                id="field-kv-quant-k"
+                class="form-select"
+                on:change=move |e| {
+                    let val = target_value(&e);
+                    form.update(|f| {
+                        if let Some(form) = f {
+                            form.cache_type_k = if val.is_empty() { None } else { Some(val) };
+                        }
+                    });
+                }
+            >
+                <option value="">"Default (f16)"</option>
+                {KV_QUANT_OPTIONS.iter().map(|opt| {
+                    let selected = form.get().as_ref()
+                        .and_then(|f| f.cache_type_k.as_deref())
+                        == Some(*opt);
+                    let opt_str = *opt;
+                    view! { <option value=opt_str selected=selected>{opt_str}</option> }
+                }).collect::<Vec<_>>()}
+                <option
+                    value="__custom"
+                    selected=move || form.get().as_ref()
+                        .and_then(|f| f.cache_type_k.as_deref())
+                        .map(|v| v == "__custom" || !KV_QUANT_OPTIONS.contains(&v))
+                        .unwrap_or(false)
+                >
+                    "Custom…"
+                </option>
+            </select>
+            <KvQuantCustomInput form=form field=KvQuantField::K />
+
+            <label class="form-label" for="field-kv-quant-v">
+                "KV cache type V"
+                <div class="form-hint">Quantize the V cache to reduce VRAM usage. Lower precision = less memory, slightly slower inference.</div>
+            </label>
+            <select
+                id="field-kv-quant-v"
+                class="form-select"
+                on:change=move |e| {
+                    let val = target_value(&e);
+                    form.update(|f| {
+                        if let Some(form) = f {
+                            form.cache_type_v = if val.is_empty() { None } else { Some(val) };
+                        }
+                    });
+                }
+            >
+                <option value="">"Default (f16)"</option>
+                {KV_QUANT_OPTIONS.iter().map(|opt| {
+                    let selected = form.get().as_ref()
+                        .and_then(|f| f.cache_type_v.as_deref())
+                        == Some(*opt);
+                    let opt_str = *opt;
+                    view! { <option value=opt_str selected=selected>{opt_str}</option> }
+                }).collect::<Vec<_>>()}
+                <option
+                    value="__custom"
+                    selected=move || form.get().as_ref()
+                        .and_then(|f| f.cache_type_v.as_deref())
+                        .map(|v| v == "__custom" || !KV_QUANT_OPTIONS.contains(&v))
+                        .unwrap_or(false)
+                >
+                    "Custom…"
+                </option>
+            </select>
+            <KvQuantCustomInput form=form field=KvQuantField::V />
 
             <label class="form-label" for="field-num-parallel">"Num parallel slots"</label>
             <input

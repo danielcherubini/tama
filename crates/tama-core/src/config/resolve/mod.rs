@@ -337,6 +337,42 @@ impl Config {
             }
         }
 
+        // Inject --cache-type-k only if set and backend supports it.
+        if is_llama_cpp_backend {
+            if let Some(ref ct_k) = server.cache_type_k {
+                let trimmed = ct_k.trim();
+                if !trimmed.is_empty() {
+                    let already_has_ctk = grouped.iter().any(|e| {
+                        matches!(
+                            crate::config::flag_name(e),
+                            Some("-ctk") | Some("--cache-type-k")
+                        )
+                    });
+                    if !already_has_ctk {
+                        grouped.push(format!("-ctk {}", crate::config::quote_value(trimmed)));
+                    }
+                }
+            }
+        }
+
+        // Inject --cache-type-v only if set and backend supports it.
+        if is_llama_cpp_backend {
+            if let Some(ref ct_v) = server.cache_type_v {
+                let trimmed = ct_v.trim();
+                if !trimmed.is_empty() {
+                    let already_has_ctv = grouped.iter().any(|e| {
+                        matches!(
+                            crate::config::flag_name(e),
+                            Some("-ctv") | Some("--cache-type-v")
+                        )
+                    });
+                    if !already_has_ctv {
+                        grouped.push(format!("-ctv {}", crate::config::quote_value(trimmed)));
+                    }
+                }
+            }
+        }
+
         // Sampling: each sampling flag fully replaces the same flag in
         // anything injected so far.
         if let Some(sampling) = &server.sampling {

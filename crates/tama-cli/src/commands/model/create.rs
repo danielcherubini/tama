@@ -75,6 +75,8 @@ pub(super) async fn cmd_create(
         display_name: None,
         num_parallel: None,
         kv_unified: true,
+        cache_type_k: None,
+        cache_type_v: None,
         db_id: None,
     };
 

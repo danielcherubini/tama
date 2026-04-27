@@ -17,6 +17,7 @@ const MAX_QUANT: usize = 128;
 const MAX_MMPROJ: usize = 128;
 const MAX_API_NAME: usize = 128;
 const MAX_DISPLAY_NAME: usize = 256;
+const MAX_CACHE_TYPE: usize = 32;
 
 /// Body for create/update model.
 #[derive(serde::Deserialize)]
@@ -52,6 +53,10 @@ pub struct ModelBody {
     pub modalities: Option<tama_core::config::ModelModalities>,
     #[serde(default)]
     pub kv_unified: Option<bool>,
+    #[serde(default)]
+    pub cache_type_k: Option<String>,
+    #[serde(default)]
+    pub cache_type_v: Option<String>,
 }
 
 fn apply_model_body(
@@ -77,6 +82,8 @@ fn apply_model_body(
         modalities: None,
         display_name: None,
         kv_unified: true,
+        cache_type_k: None,
+        cache_type_v: None,
         db_id: None,
     });
 
@@ -129,6 +136,14 @@ fn apply_model_body(
             })
             .collect(),
         kv_unified: body.kv_unified.unwrap_or(base.kv_unified),
+        cache_type_k: body
+            .cache_type_k
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty() && s != "__custom"),
+        cache_type_v: body
+            .cache_type_v
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty() && s != "__custom"),
         db_id: base.db_id,
     }
 }
@@ -760,6 +775,28 @@ fn validate_model_body(body: &ModelBody) -> Result<(), String> {
             ));
         }
     }
+    if let Some(ref cache_type_k) = body.cache_type_k {
+        let trimmed = cache_type_k.trim();
+        if trimmed == "__custom" {
+            return Err("cache_type_k cannot be the sentinel value __custom".to_string());
+        }
+        if !trimmed.is_empty() && trimmed.len() > MAX_CACHE_TYPE {
+            return Err(format!(
+                "cache_type_k must be at most {MAX_CACHE_TYPE} characters"
+            ));
+        }
+    }
+    if let Some(ref cache_type_v) = body.cache_type_v {
+        let trimmed = cache_type_v.trim();
+        if trimmed == "__custom" {
+            return Err("cache_type_v cannot be the sentinel value __custom".to_string());
+        }
+        if !trimmed.is_empty() && trimmed.len() > MAX_CACHE_TYPE {
+            return Err(format!(
+                "cache_type_v must be at most {MAX_CACHE_TYPE} characters"
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -789,6 +826,8 @@ mod tests {
             quants: Some(quants),
             modalities: None,
             kv_unified: None,
+            cache_type_k: None,
+            cache_type_v: None,
         }
     }
 
@@ -822,6 +861,8 @@ mod tests {
             modalities: None,
             display_name: None,
             kv_unified: false,
+            cache_type_k: None,
+            cache_type_v: None,
             db_id: None,
         }
     }
@@ -968,6 +1009,8 @@ mod tests {
             modalities: None,
             display_name: None,
             kv_unified: None,
+            cache_type_k: None,
+            cache_type_v: None,
         };
 
         let result = apply_model_body(body, None);
@@ -993,6 +1036,8 @@ mod tests {
             modalities: None,
             display_name: None,
             kv_unified: None,
+            cache_type_k: None,
+            cache_type_v: None,
         };
 
         let result = apply_model_body(body, None);
@@ -1019,6 +1064,8 @@ mod tests {
             modalities: None,
             display_name: None,
             kv_unified: None,
+            cache_type_k: None,
+            cache_type_v: None,
         };
 
         let result = apply_model_body(body, None);
@@ -1044,6 +1091,8 @@ mod tests {
             modalities: None,
             display_name: None,
             kv_unified: None,
+            cache_type_k: None,
+            cache_type_v: None,
         };
 
         let result = apply_model_body(body, None);
@@ -1069,6 +1118,8 @@ mod tests {
             modalities: None,
             display_name: Some("My Model".to_string()),
             kv_unified: None,
+            cache_type_k: None,
+            cache_type_v: None,
         };
 
         let result = apply_model_body(body, None);
@@ -1094,6 +1145,8 @@ mod tests {
             modalities: None,
             display_name: None,
             kv_unified: None,
+            cache_type_k: None,
+            cache_type_v: None,
         };
 
         let result = apply_model_body(body, None);
@@ -1120,6 +1173,8 @@ mod tests {
             display_name: None,
             num_parallel: Some(4),
             kv_unified: None,
+            cache_type_k: None,
+            cache_type_v: None,
         };
 
         let result = apply_model_body(body, None);
@@ -1145,6 +1200,8 @@ mod tests {
             display_name: None,
             num_parallel: None,
             kv_unified: None,
+            cache_type_k: None,
+            cache_type_v: None,
         };
 
         let result = apply_model_body(body, None);
@@ -1170,6 +1227,8 @@ mod tests {
             modalities: None,
             display_name: None,
             kv_unified: None,
+            cache_type_k: None,
+            cache_type_v: None,
         };
 
         let result = apply_model_body(body, None);
@@ -1200,6 +1259,8 @@ mod tests {
             quants: None,
             modalities: None,
             kv_unified: None, // omitted — should preserve existing
+            cache_type_k: None,
+            cache_type_v: None,
         };
 
         let result = apply_model_body(body, Some(existing));
@@ -1230,6 +1291,8 @@ mod tests {
             quants: None,
             modalities: None,
             kv_unified: None, // omitted — should default to true
+            cache_type_k: None,
+            cache_type_v: None,
         };
 
         let result = apply_model_body(body, None);
@@ -1237,5 +1300,209 @@ mod tests {
             result.kv_unified,
             "new model must default kv_unified to true when body omits the field"
         );
+    }
+
+    /// Verify that cache_type_k and cache_type_v flow from body through to ModelConfig.
+    #[test]
+    fn test_apply_model_body_cache_type_passthrough() {
+        let body = ModelBody {
+            backend: "llama-cpp".to_string(),
+            model: Some("model.gguf".to_string()),
+            quant: None,
+            mmproj: None,
+            args: vec![],
+            sampling: None,
+            enabled: None,
+            context_length: None,
+            num_parallel: None,
+            port: None,
+            api_name: None,
+            gpu_layers: None,
+            quants: None,
+            modalities: None,
+            display_name: None,
+            kv_unified: None,
+            cache_type_k: Some("q4_0".to_string()),
+            cache_type_v: Some("q8_0".to_string()),
+        };
+
+        let result = apply_model_body(body, None);
+        assert_eq!(result.cache_type_k, Some("q4_0".to_string()));
+        assert_eq!(result.cache_type_v, Some("q8_0".to_string()));
+    }
+
+    /// cache_type_k that exceeds MAX_CACHE_TYPE must be rejected.
+    #[test]
+    fn test_validate_cache_type_k_too_long() {
+        let body = ModelBody {
+            backend: "llama-cpp".to_string(),
+            model: Some("model.gguf".to_string()),
+            quant: None,
+            mmproj: None,
+            args: vec![],
+            sampling: None,
+            enabled: None,
+            context_length: None,
+            num_parallel: None,
+            port: None,
+            api_name: None,
+            display_name: None,
+            gpu_layers: None,
+            quants: None,
+            modalities: None,
+            kv_unified: None,
+            cache_type_k: Some("a".repeat(MAX_CACHE_TYPE + 1)),
+            cache_type_v: None,
+        };
+        let result = validate_model_body(&body);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cache_type_k"));
+    }
+
+    /// cache_type_v that exceeds MAX_CACHE_TYPE must be rejected.
+    #[test]
+    fn test_validate_cache_type_v_too_long() {
+        let body = ModelBody {
+            backend: "llama-cpp".to_string(),
+            model: Some("model.gguf".to_string()),
+            quant: None,
+            mmproj: None,
+            args: vec![],
+            sampling: None,
+            enabled: None,
+            context_length: None,
+            num_parallel: None,
+            port: None,
+            api_name: None,
+            display_name: None,
+            gpu_layers: None,
+            quants: None,
+            modalities: None,
+            kv_unified: None,
+            cache_type_k: None,
+            cache_type_v: Some("a".repeat(MAX_CACHE_TYPE + 1)),
+        };
+        let result = validate_model_body(&body);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cache_type_v"));
+    }
+
+    /// cache_type_k/v at exactly MAX_CACHE_TYPE must pass.
+    #[test]
+    fn test_validate_cache_type_at_limit() {
+        let body = ModelBody {
+            backend: "llama-cpp".to_string(),
+            model: Some("model.gguf".to_string()),
+            quant: None,
+            mmproj: None,
+            args: vec![],
+            sampling: None,
+            enabled: None,
+            context_length: None,
+            num_parallel: None,
+            port: None,
+            api_name: None,
+            display_name: None,
+            gpu_layers: None,
+            quants: None,
+            modalities: None,
+            kv_unified: None,
+            cache_type_k: Some("a".repeat(MAX_CACHE_TYPE)),
+            cache_type_v: Some("b".repeat(MAX_CACHE_TYPE)),
+        };
+        assert!(validate_model_body(&body).is_ok());
+    }
+
+    /// When cache_type_k/v are omitted in the body, they should be None.
+    #[test]
+    fn test_apply_model_body_cache_type_defaults_none() {
+        let body = ModelBody {
+            backend: "llama-cpp".to_string(),
+            model: Some("model.gguf".to_string()),
+            quant: None,
+            mmproj: None,
+            args: vec![],
+            sampling: None,
+            enabled: None,
+            context_length: None,
+            num_parallel: None,
+            port: None,
+            api_name: None,
+            gpu_layers: None,
+            quants: None,
+            modalities: None,
+            display_name: None,
+            kv_unified: None,
+            cache_type_k: None,
+            cache_type_v: None,
+        };
+
+        let result = apply_model_body(body, None);
+        assert_eq!(result.cache_type_k, None);
+        assert_eq!(result.cache_type_v, None);
+    }
+
+    /// Whitespace-only cache_type_k/v must be normalized to None.
+    #[test]
+    fn test_apply_model_body_cache_type_whitespace_only_becomes_none() {
+        let body = ModelBody {
+            backend: "llama-cpp".to_string(),
+            model: Some("model.gguf".to_string()),
+            quant: None,
+            mmproj: None,
+            args: vec![],
+            sampling: None,
+            enabled: None,
+            context_length: None,
+            num_parallel: None,
+            port: None,
+            api_name: None,
+            gpu_layers: None,
+            quants: None,
+            modalities: None,
+            display_name: None,
+            kv_unified: None,
+            cache_type_k: Some("   ".to_string()),
+            cache_type_v: Some("\t\n".to_string()),
+        };
+
+        let result = apply_model_body(body, None);
+        assert_eq!(
+            result.cache_type_k, None,
+            "whitespace-only cache_type_k must become None"
+        );
+        assert_eq!(
+            result.cache_type_v, None,
+            "whitespace-only cache_type_v must become None"
+        );
+    }
+
+    /// cache_type_k/v with leading/trailing whitespace must be trimmed.
+    #[test]
+    fn test_apply_model_body_cache_type_trims_whitespace() {
+        let body = ModelBody {
+            backend: "llama-cpp".to_string(),
+            model: Some("model.gguf".to_string()),
+            quant: None,
+            mmproj: None,
+            args: vec![],
+            sampling: None,
+            enabled: None,
+            context_length: None,
+            num_parallel: None,
+            port: None,
+            api_name: None,
+            gpu_layers: None,
+            quants: None,
+            modalities: None,
+            display_name: None,
+            kv_unified: None,
+            cache_type_k: Some("  q4_0  ".to_string()),
+            cache_type_v: Some(" q8_0 ".to_string()),
+        };
+
+        let result = apply_model_body(body, None);
+        assert_eq!(result.cache_type_k, Some("q4_0".to_string()));
+        assert_eq!(result.cache_type_v, Some("q8_0".to_string()));
     }
 }
