@@ -340,14 +340,17 @@ impl Config {
         // Inject --cache-type-k only if set and backend supports it.
         if is_llama_cpp_backend {
             if let Some(ref ct_k) = server.cache_type_k {
-                let already_has_ctk = grouped.iter().any(|e| {
-                    matches!(
-                        crate::config::flag_name(e),
-                        Some("-ctk") | Some("--cache-type-k")
-                    )
-                });
-                if !already_has_ctk && !ct_k.is_empty() {
-                    grouped.push(format!("-ctk {}", ct_k));
+                let trimmed = ct_k.trim();
+                if !trimmed.is_empty() {
+                    let already_has_ctk = grouped.iter().any(|e| {
+                        matches!(
+                            crate::config::flag_name(e),
+                            Some("-ctk") | Some("--cache-type-k")
+                        )
+                    });
+                    if !already_has_ctk {
+                        grouped.push(format!("-ctk {}", trimmed));
+                    }
                 }
             }
         }
@@ -355,14 +358,17 @@ impl Config {
         // Inject --cache-type-v only if set and backend supports it.
         if is_llama_cpp_backend {
             if let Some(ref ct_v) = server.cache_type_v {
-                let already_has_ctv = grouped.iter().any(|e| {
-                    matches!(
-                        crate::config::flag_name(e),
-                        Some("-ctv") | Some("--cache-type-v")
-                    )
-                });
-                if !already_has_ctv && !ct_v.is_empty() {
-                    grouped.push(format!("-ctv {}", ct_v));
+                let trimmed = ct_v.trim();
+                if !trimmed.is_empty() {
+                    let already_has_ctv = grouped.iter().any(|e| {
+                        matches!(
+                            crate::config::flag_name(e),
+                            Some("-ctv") | Some("--cache-type-v")
+                        )
+                    });
+                    if !already_has_ctv {
+                        grouped.push(format!("-ctv {}", trimmed));
+                    }
                 }
             }
         }

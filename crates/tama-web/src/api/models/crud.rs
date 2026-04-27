@@ -770,14 +770,16 @@ fn validate_model_body(body: &ModelBody) -> Result<(), String> {
         }
     }
     if let Some(ref cache_type_k) = body.cache_type_k {
-        if !cache_type_k.is_empty() && cache_type_k.len() > MAX_CACHE_TYPE {
+        let trimmed = cache_type_k.trim();
+        if !trimmed.is_empty() && trimmed.len() > MAX_CACHE_TYPE {
             return Err(format!(
                 "cache_type_k must be at most {MAX_CACHE_TYPE} characters"
             ));
         }
     }
     if let Some(ref cache_type_v) = body.cache_type_v {
-        if !cache_type_v.is_empty() && cache_type_v.len() > MAX_CACHE_TYPE {
+        let trimmed = cache_type_v.trim();
+        if !trimmed.is_empty() && trimmed.len() > MAX_CACHE_TYPE {
             return Err(format!(
                 "cache_type_v must be at most {MAX_CACHE_TYPE} characters"
             ));
