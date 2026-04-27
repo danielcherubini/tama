@@ -349,7 +349,7 @@ impl Config {
                         )
                     });
                     if !already_has_ctk {
-                        grouped.push(format!("-ctk {}", trimmed));
+                        grouped.push(format!("-ctk {}", crate::config::quote_value(trimmed)));
                     }
                 }
             }
@@ -367,7 +367,7 @@ impl Config {
                         )
                     });
                     if !already_has_ctv {
-                        grouped.push(format!("-ctv {}", trimmed));
+                        grouped.push(format!("-ctv {}", crate::config::quote_value(trimmed)));
                     }
                 }
             }
