@@ -17,6 +17,7 @@ const MAX_QUANT: usize = 128;
 const MAX_MMPROJ: usize = 128;
 const MAX_API_NAME: usize = 128;
 const MAX_DISPLAY_NAME: usize = 256;
+const MAX_CACHE_TYPE: usize = 32;
 
 /// Body for create/update model.
 #[derive(serde::Deserialize)]
@@ -768,6 +769,20 @@ fn validate_model_body(body: &ModelBody) -> Result<(), String> {
             ));
         }
     }
+    if let Some(ref cache_type_k) = body.cache_type_k {
+        if !cache_type_k.is_empty() && cache_type_k.len() > MAX_CACHE_TYPE {
+            return Err(format!(
+                "cache_type_k must be at most {MAX_CACHE_TYPE} characters"
+            ));
+        }
+    }
+    if let Some(ref cache_type_v) = body.cache_type_v {
+        if !cache_type_v.is_empty() && cache_type_v.len() > MAX_CACHE_TYPE {
+            return Err(format!(
+                "cache_type_v must be at most {MAX_CACHE_TYPE} characters"
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -1300,6 +1315,88 @@ mod tests {
         let result = apply_model_body(body, None);
         assert_eq!(result.cache_type_k, Some("q4_0".to_string()));
         assert_eq!(result.cache_type_v, Some("q8_0".to_string()));
+    }
+
+    /// cache_type_k that exceeds MAX_CACHE_TYPE must be rejected.
+    #[test]
+    fn test_validate_cache_type_k_too_long() {
+        let body = ModelBody {
+            backend: "llama-cpp".to_string(),
+            model: Some("model.gguf".to_string()),
+            quant: None,
+            mmproj: None,
+            args: vec![],
+            sampling: None,
+            enabled: None,
+            context_length: None,
+            num_parallel: None,
+            port: None,
+            api_name: None,
+            display_name: None,
+            gpu_layers: None,
+            quants: None,
+            modalities: None,
+            kv_unified: None,
+            cache_type_k: Some("a".repeat(MAX_CACHE_TYPE + 1)),
+            cache_type_v: None,
+        };
+        let result = validate_model_body(&body);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cache_type_k"));
+    }
+
+    /// cache_type_v that exceeds MAX_CACHE_TYPE must be rejected.
+    #[test]
+    fn test_validate_cache_type_v_too_long() {
+        let body = ModelBody {
+            backend: "llama-cpp".to_string(),
+            model: Some("model.gguf".to_string()),
+            quant: None,
+            mmproj: None,
+            args: vec![],
+            sampling: None,
+            enabled: None,
+            context_length: None,
+            num_parallel: None,
+            port: None,
+            api_name: None,
+            display_name: None,
+            gpu_layers: None,
+            quants: None,
+            modalities: None,
+            kv_unified: None,
+            cache_type_k: None,
+            cache_type_v: Some("a".repeat(MAX_CACHE_TYPE + 1)),
+        };
+        let result = validate_model_body(&body);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cache_type_v"));
+    }
+
+    /// cache_type_k/v at exactly MAX_CACHE_TYPE must pass.
+    #[test]
+    fn test_validate_cache_type_at_limit() {
+        let body = ModelBody {
+            backend: "llama-cpp".to_string(),
+            model: Some("model.gguf".to_string()),
+            quant: None,
+            mmproj: None,
+            args: vec![],
+            sampling: None,
+            enabled: None,
+            context_length: None,
+            num_parallel: None,
+            port: None,
+            api_name: None,
+            display_name: None,
+            gpu_layers: None,
+            quants: None,
+            modalities: None,
+            kv_unified: None,
+            cache_type_k: Some("a".repeat(MAX_CACHE_TYPE)),
+            cache_type_v: Some("b".repeat(MAX_CACHE_TYPE)),
+        };
+        assert!(validate_model_body(&body).is_ok());
     }
 
     /// When cache_type_k/v are omitted in the body, they should be None.
