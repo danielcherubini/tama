@@ -108,16 +108,6 @@ fn format_number(n: u64) -> String {
     result
 }
 
-/// Count how many models in `models` are currently loaded.
-///
-/// Extracted as a free function so the dashboard view and the unit tests can
-/// share a single implementation — the view formats the result into the
-/// "Active Models" summary line, and the tests assert the counting logic
-/// without needing to render Leptos components.
-fn loaded_model_count(models: &[ModelStatus]) -> usize {
-    models.iter().filter(|m| m.state == "ready").count()
-}
-
 /// Filter models to only those that are currently loaded (state == "ready").
 ///
 /// Used by the dashboard to render the Active Models list and by the
@@ -738,12 +728,10 @@ mod tests {
         assert_eq!(format_number(65183), "65,183");
     }
 
-    /// The dashboard's "Active Models" summary line shows how many of the
-    /// configured models are currently loaded. The helper that backs that line
-    /// must only count entries whose `loaded` flag is `true`, regardless of
-    /// backend or id.
+    /// `loaded_models` returns only entries whose state is "ready", preserving
+    /// order and including all fields (id, backend, state, etc.).
     #[test]
-    fn loaded_model_count_only_counts_loaded_entries() {
+    fn loaded_models_returns_only_ready_entries() {
         let models = vec![
             ModelStatus {
                 id: "a".into(),
@@ -783,14 +771,14 @@ mod tests {
             },
         ];
 
-        assert_eq!(loaded_model_count(&models), 2);
-    }
-
-    /// With no models configured the helper returns `0`, which is what the
-    /// empty-state UI renders alongside the "No models configured yet." copy.
-    #[test]
-    fn loaded_model_count_is_zero_for_empty_slice() {
-        assert_eq!(loaded_model_count(&[]), 0);
+        let loaded = loaded_models(&models);
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].id, "a");
+        assert_eq!(loaded[0].backend, "llama_cpp");
+        assert_eq!(loaded[0].state, "ready");
+        assert_eq!(loaded[1].id, "c");
+        assert_eq!(loaded[1].backend, "ik_llama");
+        assert_eq!(loaded[1].state, "ready");
     }
 
     /// Loaded (ready) models must use the success badge class so they visually pop
