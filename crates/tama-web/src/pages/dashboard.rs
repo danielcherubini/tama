@@ -108,14 +108,17 @@ fn format_number(n: u64) -> String {
     result
 }
 
-/// Count how many models in `models` are currently loaded.
+/// Filter models to only those that are currently loaded (state == "ready").
 ///
-/// Extracted as a free function so the dashboard view and the unit tests can
-/// share a single implementation — the view formats the result into the
-/// "Active Models" summary line, and the tests assert the counting logic
-/// without needing to render Leptos components.
-fn loaded_model_count(models: &[ModelStatus]) -> usize {
-    models.iter().filter(|m| m.state == "ready").count()
+/// Used by the dashboard to render the Active Models list and by the
+/// "X loaded" summary heading. Extracted as a free function so it can
+/// be unit-tested independently of the Leptos reactive view.
+fn loaded_models(models: &[ModelStatus]) -> Vec<ModelStatus> {
+    models
+        .iter()
+        .filter(|m| m.state == "ready")
+        .cloned()
+        .collect()
 }
 
 /// CSS class string used for the per-model status badge in the
@@ -422,7 +425,8 @@ pub fn Dashboard() -> impl IntoView {
             let vram_max = buf.last().and_then(|h| h.vram.as_ref().map(|v| v.total_mib as f32)).unwrap_or(1.0);
             let vram_y_refs = vec![vram_max];
 
-            let models: Vec<ModelStatus> = buf.last().map(|h| h.models.clone()).unwrap_or_default();
+            let all_models: Vec<ModelStatus> = buf.last().map(|h| h.models.clone()).unwrap_or_default();
+            let models = loaded_models(&all_models);
 
             view! {
                 <div class="grid-stats">
@@ -530,14 +534,20 @@ pub fn Dashboard() -> impl IntoView {
                     <div class="page-header">
                         <h2>"Active Models"</h2>
                         <span class="text-muted">
-                            {format!("{} loaded", loaded_model_count(&models))}
+                            {format!("{} loaded", models.len())}
                         </span>
                     </div>
                     {
-                        if models.is_empty() {
+                        if all_models.is_empty() {
                             view! {
                                 <div class="card card--centered">
                                     <p class="text-muted">"No models configured yet."</p>
+                                </div>
+                            }.into_any()
+                        } else if models.is_empty() {
+                            view! {
+                                <div class="card card--centered">
+                                    <p class="text-muted">"No models currently loaded."</p>
                                 </div>
                             }.into_any()
                         } else {
@@ -718,12 +728,10 @@ mod tests {
         assert_eq!(format_number(65183), "65,183");
     }
 
-    /// The dashboard's "Active Models" summary line shows how many of the
-    /// configured models are currently loaded. The helper that backs that line
-    /// must only count entries whose `loaded` flag is `true`, regardless of
-    /// backend or id.
+    /// `loaded_models` returns only entries whose state is "ready", preserving
+    /// order and including all fields (id, backend, state, etc.).
     #[test]
-    fn loaded_model_count_only_counts_loaded_entries() {
+    fn loaded_models_returns_only_ready_entries() {
         let models = vec![
             ModelStatus {
                 id: "a".into(),
@@ -763,14 +771,14 @@ mod tests {
             },
         ];
 
-        assert_eq!(loaded_model_count(&models), 2);
-    }
-
-    /// With no models configured the helper returns `0`, which is what the
-    /// empty-state UI renders alongside the "No models configured yet." copy.
-    #[test]
-    fn loaded_model_count_is_zero_for_empty_slice() {
-        assert_eq!(loaded_model_count(&[]), 0);
+        let loaded = loaded_models(&models);
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].id, "a");
+        assert_eq!(loaded[0].backend, "llama_cpp");
+        assert_eq!(loaded[0].state, "ready");
+        assert_eq!(loaded[1].id, "c");
+        assert_eq!(loaded[1].backend, "ik_llama");
+        assert_eq!(loaded[1].state, "ready");
     }
 
     /// Loaded (ready) models must use the success badge class so they visually pop
@@ -865,6 +873,80 @@ mod tests {
 
         assert_eq!(model_status_badge_class("idle"), "badge badge-muted");
         assert_eq!(model_status_badge_label("idle"), "Idle");
+    }
+
+    /// `loaded_models` returns only models whose state is "ready".
+    #[test]
+    fn loaded_models_filters_to_ready_only() {
+        let models = vec![
+            ModelStatus {
+                id: "a".into(),
+                state: "ready".into(),
+                ..Default::default()
+            },
+            ModelStatus {
+                id: "b".into(),
+                state: "idle".into(),
+                ..Default::default()
+            },
+            ModelStatus {
+                id: "c".into(),
+                state: "ready".into(),
+                ..Default::default()
+            },
+            ModelStatus {
+                id: "d".into(),
+                state: "loading".into(),
+                ..Default::default()
+            },
+        ];
+
+        let loaded = loaded_models(&models);
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].id, "a");
+        assert_eq!(loaded[1].id, "c");
+    }
+
+    /// `loaded_models` returns an empty vec when all models are idle.
+    #[test]
+    fn loaded_models_returns_empty_when_none_ready() {
+        let models = vec![
+            ModelStatus {
+                id: "a".into(),
+                state: "idle".into(),
+                ..Default::default()
+            },
+            ModelStatus {
+                id: "b".into(),
+                state: "failed".into(),
+                ..Default::default()
+            },
+        ];
+
+        let loaded = loaded_models(&models);
+        assert!(loaded.is_empty());
+    }
+
+    /// `loaded_models` returns a clone of all models when all are ready.
+    #[test]
+    fn loaded_models_returns_all_when_all_ready() {
+        let models = vec![ModelStatus {
+            id: "x".into(),
+            state: "ready".into(),
+            ..Default::default()
+        }];
+
+        let loaded = loaded_models(&models);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "x");
+    }
+
+    /// `loaded_models` returns an empty vec for an empty input slice.
+    #[test]
+    fn loaded_models_returns_empty_for_empty_input() {
+        let models: Vec<ModelStatus> = vec![];
+        let loaded = loaded_models(&models);
+        assert!(loaded.is_empty());
     }
 
     /// When the backend includes a populated `models` array, every `ModelStatus`
