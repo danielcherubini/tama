@@ -451,63 +451,144 @@ impl ProxyState {
     }
 
     /// Check if any server has been idle for longer than the timeout.
+    ///
+    /// Also performs process health monitoring:
+    /// - Detects dead PIDs in Ready models and confirms via health endpoint
+    /// - Transitions stuck Starting models to Failed
+    /// - Auto-restarts dead models (respecting max_restarts and restart_delay_ms)
+    /// - Cleans up Failed models
     pub async fn check_idle_timeouts(&self) -> Vec<String> {
         let now = Instant::now();
         let mut to_unload = Vec::new();
         let mut failed_to_remove = Vec::new();
+        // (server_name, model_name, backend, restart_count, pid, backend_url)
+        let mut dead_pid_candidates: Vec<(String, String, String, u32, u32, String)> = Vec::new();
+        // (server_name, model_name, backend)
+        let mut stuck_starting_servers: Vec<(String, String, String)> = Vec::new();
 
-        let (auto_unload, idle_timeout_secs) = {
+        let (auto_unload, idle_timeout_secs, startup_timeout_secs, max_restarts, restart_delay_ms) = {
             let cfg = self.config.read().await;
-            (cfg.proxy.auto_unload, cfg.proxy.idle_timeout_secs)
+            (
+                cfg.proxy.auto_unload,
+                cfg.proxy.idle_timeout_secs,
+                cfg.proxy.startup_timeout_secs,
+                cfg.supervisor.max_restarts,
+                cfg.supervisor.restart_delay_ms,
+            )
         };
 
-        let timeout = Duration::from_secs(idle_timeout_secs);
+        let idle_timeout = Duration::from_secs(idle_timeout_secs);
+        let startup_timeout = Duration::from_secs(startup_timeout_secs);
+
+        // === PHASE 1: Collect candidates under read lock (fast only) ===
         let models = self.models.read().await;
         for (server_name, state) in models.iter() {
-            // Skip servers that are still starting or unloading — they haven't
-            // had a chance to become ready yet / already being unloaded.
-            if matches!(
-                state,
-                ModelState::Starting { .. } | ModelState::Unloading { .. }
-            ) {
+            // Check Starting state first (including TTS — they can also get stuck)
+            if let ModelState::Starting { start_time, .. } = state {
+                if now.saturating_duration_since(*start_time) > startup_timeout {
+                    warn!(
+                        "Server '{}' stuck in Starting for {}s (timeout: {}s)",
+                        server_name,
+                        now.saturating_duration_since(*start_time).as_secs(),
+                        startup_timeout_secs,
+                    );
+                    stuck_starting_servers.push((
+                        server_name.clone(),
+                        state.model_name().to_string(),
+                        state.backend().to_string(),
+                    ));
+                }
                 continue;
             }
 
-            // Skip TTS backends — they're singleton, managed separately via
-            // load_tts_backend/unload_tts_backend lifecycle.
+            // Skip Unloading — already being handled
+            if matches!(state, ModelState::Unloading { .. }) {
+                continue;
+            }
+
+            // Skip TTS backends for Ready checks (separate lifecycle)
+            // TTS Starting was already checked above
             if state.is_tts_backend() {
                 continue;
             }
 
-            // Failed models have no last_accessed; always mark them for cleanup
-            let last = match state.last_accessed() {
-                Some(t) => t,
-                None => {
-                    warn!(
-                        "Server '{}' is in Failed state, marking for cleanup",
-                        server_name,
-                    );
-                    failed_to_remove.push(server_name.clone());
-                    continue;
+            // Ready models — check PID liveness (fast syscall, OK under lock)
+            if let ModelState::Ready {
+                backend_pid,
+                restart_count,
+                ..
+            } = state
+            {
+                let pid = *backend_pid;
+                if !super::process::is_process_alive(pid) {
+                    dead_pid_candidates.push((
+                        server_name.clone(),
+                        state.model_name().to_string(),
+                        state.backend().to_string(),
+                        *restart_count,
+                        pid,
+                        state
+                            .backend_url()
+                            .map(|u| u.to_string())
+                            .unwrap_or_default(),
+                    ));
+                    continue; // Skip idle check — process is dead
                 }
-            };
-            let idle_duration = now.saturating_duration_since(last);
 
-            // Only check idle timeout when auto_unload is enabled
-            if auto_unload && idle_duration > timeout {
+                // Process alive — check idle timeout (existing logic)
+                if let Some(last) = state.last_accessed() {
+                    let idle_duration = now.saturating_duration_since(last);
+                    if auto_unload && idle_duration > idle_timeout {
+                        warn!(
+                            "Server '{}' idle for {}s (timeout: {}s)",
+                            server_name,
+                            idle_duration.as_secs(),
+                            idle_timeout_secs
+                        );
+                        to_unload.push(server_name.clone());
+                    }
+                }
+            }
+
+            // Failed models — mark for cleanup
+            if matches!(state, ModelState::Failed { .. }) {
                 warn!(
-                    "Server '{}' has been idle for {}s (timeout: {}s)",
-                    server_name,
-                    idle_duration.as_secs(),
-                    idle_timeout_secs
+                    "Server '{}' in Failed state, marking for cleanup",
+                    server_name
                 );
-                to_unload.push(server_name.clone());
+                failed_to_remove.push(server_name.clone());
+            }
+        }
+        drop(models); // Release read lock
+
+        // === PHASE 2: Health confirmation (outside lock) ===
+        let mut confirmed_dead: Vec<(String, String, String, u32)> = Vec::new();
+        for (server_name, model_name, backend, restart_count, pid, backend_url) in
+            dead_pid_candidates
+        {
+            let health_url = format!("{}/health", backend_url);
+            let still_dead = match super::process::check_health(&health_url, Some(5)).await {
+                Ok(resp) => !resp.status().is_success(),
+                Err(_) => true,
+            };
+
+            if still_dead {
+                info!(
+                    "Server '{}' confirmed dead (pid {}, restart_count: {}/{})",
+                    server_name, pid, restart_count, max_restarts
+                );
+                confirmed_dead.push((server_name, model_name, backend, restart_count));
+            } else {
+                debug!(
+                    "Server '{}' PID {} reused, health endpoint responds",
+                    server_name, pid
+                );
             }
         }
 
-        drop(models);
+        // === PHASE 3: Mutations ===
 
-        // Remove Failed models directly (no process to kill)
+        // Remove Failed models
         if !failed_to_remove.is_empty() {
             let mut models = self.models.write().await;
             for server_name in &failed_to_remove {
@@ -516,15 +597,115 @@ impl ProxyState {
             }
         }
 
-        // Unload Ready models via the normal shutdown path
-        for server_name in &to_unload {
-            if let Err(e) = self.unload_model(server_name).await {
-                warn!("Failed to unload server '{}': {}", server_name, e);
+        // Handle stuck Starting — transition to Failed
+        if !stuck_starting_servers.is_empty() {
+            let mut models = self.models.write().await;
+            for (server_name, model_name, backend) in &stuck_starting_servers {
+                models.insert(
+                    server_name.clone(),
+                    ModelState::Failed {
+                        model_name: model_name.clone(),
+                        backend: backend.clone(),
+                        error: format!(
+                            "Stuck in Starting state for {}s — backend failed to initialize",
+                            startup_timeout_secs
+                        ),
+                    },
+                );
+                warn!(
+                    "Transitioned '{}' to Failed (stuck in Starting)",
+                    server_name
+                );
             }
         }
 
-        to_unload.extend(failed_to_remove);
-        to_unload
+        // Handle dead Ready servers — clean up + insert Failed or spawn restart
+        if !confirmed_dead.is_empty() {
+            // Remove + insert Failed under SAME lock — no race
+            {
+                let mut models = self.models.write().await;
+                for (server_name, model_name, backend, restart_count) in &confirmed_dead {
+                    models.remove(server_name);
+                    if *restart_count >= max_restarts {
+                        models.insert(
+                            server_name.clone(),
+                            ModelState::Failed {
+                                model_name: model_name.clone(),
+                                backend: backend.clone(),
+                                error: format!(
+                                    "Exceeded maximum restart attempts ({}) — manual intervention required",
+                                    max_restarts
+                                ),
+                            },
+                        );
+                        warn!(
+                            "Server '{}' exceeded max restarts ({}/{})",
+                            server_name, restart_count, max_restarts
+                        );
+                    }
+                }
+            }
+            // Clean DB
+            if let Some(conn) = self.open_db() {
+                for (server_name, _, _, restart_count) in &confirmed_dead {
+                    if *restart_count < max_restarts {
+                        let _ = crate::db::queries::remove_active_model(&conn, server_name);
+                    }
+                }
+            }
+
+            // Spawn restart tasks (no locks)
+            for (server_name, model_name, _, restart_count) in &confirmed_dead {
+                if *restart_count >= max_restarts {
+                    continue;
+                }
+
+                let new_restart_count = restart_count + 1;
+                info!(
+                    "Auto-restarting '{}' (model '{}', attempt {}/{})",
+                    server_name, model_name, new_restart_count, max_restarts
+                );
+
+                let state = self.clone();
+                let sn = server_name.clone();
+                let mn = model_name.clone();
+                let rdc = new_restart_count;
+                let delay_ms = restart_delay_ms;
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                    match state.load_model(&mn, None).await {
+                        Ok(_) => {
+                            let mut models = state.models.write().await;
+                            if let Some(ModelState::Ready {
+                                restart_count: rc, ..
+                            }) = models.get_mut(&sn)
+                            {
+                                *rc = rdc;
+                            }
+                            info!("Auto-restart succeeded for '{}' (model '{}')", sn, mn);
+                        }
+                        Err(e) => {
+                            warn!("Auto-restart failed for '{}' (model '{}'): {}", sn, mn, e);
+                        }
+                    }
+                });
+            }
+        }
+
+        // Unload idle models (existing logic)
+        for server_name in &to_unload {
+            if let Err(e) = self.unload_model(server_name).await {
+                warn!("Failed to unload '{}': {}", server_name, e);
+            }
+        }
+
+        // Build return value
+        let mut cleaned = Vec::new();
+        cleaned.extend(failed_to_remove);
+        cleaned.extend(stuck_starting_servers.iter().map(|(n, _, _)| n.clone()));
+        cleaned.extend(confirmed_dead.iter().map(|(n, _, _, _)| n.clone()));
+        cleaned.extend(to_unload);
+        cleaned
     }
 
     /// Load a TTS backend (Kokoro-FastAPI) by spawning its uvicorn server.
@@ -785,11 +966,12 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
     /// Helper to create a Ready ModelState for testing.
+    /// Uses PID 1 (init) which always exists and won't be killed by tests.
     fn make_ready_state(model_name: &str, backend: &str) -> ModelState {
         ModelState::Ready {
             model_name: model_name.to_string(),
             backend: backend.to_string(),
-            backend_pid: 12345,
+            backend_pid: 1, // PID 1 (init) always exists, safe for tests
             backend_url: "http://127.0.0.1:8080".to_string(),
             load_time: std::time::SystemTime::now(),
             last_accessed: Instant::now(),
@@ -997,7 +1179,7 @@ mod tests {
     #[test]
     fn test_model_state_backend_pid() {
         let ready = make_ready_state("m", "llama-cpp");
-        assert_eq!(ready.backend_pid(), Some(12345));
+        assert_eq!(ready.backend_pid(), Some(1));
 
         let starting = make_starting_state("m", "llama-cpp");
         assert!(starting.backend_pid().is_none());
@@ -1383,5 +1565,124 @@ mod tests {
             state.models.read().await.contains_key("tts-server"),
             "TTS backend should remain loaded"
         );
+    }
+
+    /// Test that a dead PID is detected and the model is cleaned up.
+    #[tokio::test]
+    async fn test_dead_pid_detected_and_cleaned() {
+        let config = Config::default();
+        let state = ProxyState::new(config, None);
+
+        // Insert a Ready model with a non-existent PID
+        let mut dead_state = make_ready_state("dead-model.gguf", "llama-cpp");
+        if let ModelState::Ready { backend_pid, .. } = &mut dead_state {
+            *backend_pid = 999999; // Non-existent PID
+        }
+        state
+            .models
+            .write()
+            .await
+            .insert("dead-server".to_string(), dead_state);
+
+        // Verify the model exists before the check
+        assert!(
+            state.models.read().await.contains_key("dead-server"),
+            "dead-server should exist before check"
+        );
+
+        let result = state.check_idle_timeouts().await;
+
+        // The dead PID should be detected and the model removed from the map
+        assert!(
+            result.contains(&"dead-server".to_string()),
+            "dead-server should be in cleaned results"
+        );
+        assert!(
+            !state.models.read().await.contains_key("dead-server"),
+            "dead-server should be removed from the model map"
+        );
+    }
+
+    /// Test that a server stuck in Starting state is transitioned to Failed.
+    #[tokio::test]
+    async fn test_stuck_starting_server_marked_failed() {
+        let config = Config::default();
+        let state = ProxyState::new(config, None);
+
+        // Insert a Starting model with start_time 300s in the past
+        // (default startup_timeout_secs is 120, so 300 > 120)
+        let stuck_state = make_starting_state_with_time(
+            "stuck-model.gguf",
+            "llama-cpp",
+            Instant::now() - Duration::from_secs(300),
+        );
+        state
+            .models
+            .write()
+            .await
+            .insert("stuck-server".to_string(), stuck_state);
+
+        let result = state.check_idle_timeouts().await;
+
+        // The stuck server should be in the cleaned results
+        assert!(
+            result.contains(&"stuck-server".to_string()),
+            "stuck-server should be in cleaned results"
+        );
+
+        // The model should now be in Failed state
+        let models = state.models.read().await;
+        let state_after = models
+            .get("stuck-server")
+            .expect("stuck-server should still exist");
+        assert!(
+            matches!(state_after, ModelState::Failed { .. }),
+            "stuck-server should be transitioned to Failed state"
+        );
+    }
+
+    /// Test that a model exceeding max_restarts goes to Failed instead of restarting.
+    #[tokio::test]
+    async fn test_max_restarts_exceeded_goes_to_failed() {
+        let mut config = Config::default();
+        config.supervisor.max_restarts = 2;
+        let state = ProxyState::new(config, None);
+
+        // Insert a Ready model with restart_count=2 (at max_restarts) and dead PID
+        let mut dead_state = make_ready_state_with_restarts("exhausted-model.gguf", "llama-cpp", 2);
+        if let ModelState::Ready { backend_pid, .. } = &mut dead_state {
+            *backend_pid = 999999; // Non-existent PID
+        }
+        state
+            .models
+            .write()
+            .await
+            .insert("exhausted-server".to_string(), dead_state);
+
+        let result = state.check_idle_timeouts().await;
+
+        // The exhausted server should be in the cleaned results
+        assert!(
+            result.contains(&"exhausted-server".to_string()),
+            "exhausted-server should be in cleaned results"
+        );
+
+        // The model should now be in Failed state (not restarted)
+        let models = state.models.read().await;
+        let state_after = models
+            .get("exhausted-server")
+            .expect("exhausted-server should still exist");
+        assert!(
+            matches!(state_after, ModelState::Failed { .. }),
+            "exhausted-server should be in Failed state after exceeding max restarts"
+        );
+
+        if let ModelState::Failed { error, .. } = state_after {
+            assert!(
+                error.contains("maximum restart"),
+                "Error message should mention maximum restarts, got: {}",
+                error
+            );
+        }
     }
 }
