@@ -13,6 +13,7 @@ pub enum ModelState {
         backend: String,
         backend_url: String,
         last_accessed: Instant,
+        start_time: Instant,
         consecutive_failures: Arc<std::sync::atomic::AtomicU32>,
         failure_timestamp: Option<std::time::SystemTime>,
     },
@@ -26,6 +27,7 @@ pub enum ModelState {
         last_accessed: Instant,
         consecutive_failures: Arc<std::sync::atomic::AtomicU32>,
         failure_timestamp: Option<std::time::SystemTime>,
+        restart_count: u32,
     },
     /// Backend failed to start
     Failed {
@@ -42,6 +44,7 @@ pub enum ModelState {
         last_accessed: Instant,
         consecutive_failures: Arc<std::sync::atomic::AtomicU32>,
         failure_timestamp: Option<std::time::SystemTime>,
+        restart_count: u32,
     },
 }
 
@@ -133,6 +136,23 @@ impl ModelState {
             ModelState::Starting { last_accessed, .. } => Some(*last_accessed),
             ModelState::Failed { .. } => None,
             ModelState::Unloading { last_accessed, .. } => Some(*last_accessed),
+        }
+    }
+
+    /// Get the restart count for this model (only set on Ready/Unloading states).
+    pub fn restart_count(&self) -> Option<u32> {
+        match self {
+            ModelState::Ready { restart_count, .. } => Some(*restart_count),
+            ModelState::Unloading { restart_count, .. } => Some(*restart_count),
+            _ => None,
+        }
+    }
+
+    /// Get the start time for Starting state models.
+    pub fn start_time(&self) -> Option<Instant> {
+        match self {
+            ModelState::Starting { start_time, .. } => Some(*start_time),
+            _ => None,
         }
     }
 
