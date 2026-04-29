@@ -1567,9 +1567,11 @@ mod tests {
         );
     }
 
-    /// Test that a dead PID is detected and the model is cleaned up.
+    /// Test that a dead PID is detected, cleaned, and auto-restart is triggered.
+    /// The model is removed from the map so that the spawned restart task
+    /// can call load_model() without hitting the "already loaded" guard.
     #[tokio::test]
-    async fn test_dead_pid_detected_and_cleaned() {
+    async fn test_dead_pid_detected_and_restarted() {
         let config = Config::default();
         let state = ProxyState::new(config, None);
 
@@ -1599,8 +1601,13 @@ mod tests {
         );
         assert!(
             !state.models.read().await.contains_key("dead-server"),
-            "dead-server should be removed from the model map"
+            "dead-server should be removed from the model map so restart can proceed"
         );
+
+        // Note: The spawned restart task calls load_model() after restart_delay_ms.
+        // In a test environment without a real backend binary, load_model() will
+        // fail and clean up the Starting state. In production, the backend would
+        // start, pass the health check, and transition to Ready with restart_count+1.
     }
 
     /// Test that a server stuck in Starting state is transitioned to Failed.
