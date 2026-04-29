@@ -14,9 +14,9 @@ This directory contains implementation plans for the Tama project. Each plan doc
 
 ## Quick Stats
 
-- **Total Plans**: 76
+- **Total Plans**: 77
 - **Completed**: 76 ✅
-- **In Progress**: 0 🚧
+- **In Progress**: 1 🚧
 - **Remaining**: 0
 
 > **Note**: The Tama Management API Spec (2026-04-03) was removed as it was a design document, not an implementation plan. The functionality it describes is already implemented via other plans.
@@ -24,6 +24,12 @@ This directory contains implementation plans for the Tama project. Each plan doc
 ---
 
 ## Completed Plans
+
+### In Progress
+
+| Plan | Description | PR / Git References |
+|------|-------------|---------------------|
+| [Process Health Monitor](2026-04-29-process-health-monitor.md) | Detect dead backend PIDs after Proxmox suspend/resume, auto-restart with max_restarts guard, catch stuck Starting states | 🚧 IN PROGRESS |
 
 ### Completed Plans
 
