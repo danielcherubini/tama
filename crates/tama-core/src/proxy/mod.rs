@@ -402,6 +402,7 @@ mod tests {
                 last_accessed: std::time::Instant::now(),
                 consecutive_failures: Arc::new(std::sync::atomic::AtomicU32::new(0)),
                 failure_timestamp: None,
+                restart_count: 0,
             },
         );
         drop(models);

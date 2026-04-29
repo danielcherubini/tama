@@ -382,6 +382,7 @@ mod tests {
                     last_accessed: Instant::now(),
                     consecutive_failures: Arc::new(AtomicU32::new(0)),
                     failure_timestamp: None,
+                    restart_count: 0,
                 },
             );
         }
@@ -449,6 +450,7 @@ mod tests {
                     backend: "llama_cpp".to_string(),
                     backend_url: "http://127.0.0.1:8000".to_string(),
                     last_accessed: Instant::now(),
+                    start_time: Instant::now(),
                     consecutive_failures: Arc::new(AtomicU32::new(0)),
                     failure_timestamp: None,
                 },

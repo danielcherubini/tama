@@ -54,6 +54,7 @@ impl ProxyState {
                     backend: server_config.backend.clone(),
                     backend_url: String::new(),
                     last_accessed: Instant::now(),
+                    start_time: Instant::now(),
                     consecutive_failures: Arc::new(std::sync::atomic::AtomicU32::new(0)),
                     failure_timestamp: None,
                 },
@@ -250,6 +251,7 @@ impl ProxyState {
                         last_accessed: Instant::now(),
                         consecutive_failures: cf,
                         failure_timestamp: ft,
+                        restart_count: 0,
                     };
                 }
             }
@@ -340,7 +342,8 @@ impl ProxyState {
                     last_accessed,
                     consecutive_failures,
                     failure_timestamp,
-                    ..
+                    restart_count,
+                    load_time: _,
                 } = std::mem::take(state)
                 {
                     *state = ModelState::Unloading {
@@ -351,6 +354,7 @@ impl ProxyState {
                         last_accessed,
                         consecutive_failures,
                         failure_timestamp,
+                        restart_count,
                     };
                 }
             }
@@ -569,6 +573,7 @@ impl ProxyState {
                     backend: info.name.clone(),
                     backend_url: String::new(),
                     last_accessed: Instant::now(),
+                    start_time: Instant::now(),
                     consecutive_failures: Arc::new(std::sync::atomic::AtomicU32::new(0)),
                     failure_timestamp: None,
                 },
@@ -687,6 +692,7 @@ impl ProxyState {
                         last_accessed: Instant::now(),
                         consecutive_failures: cf,
                         failure_timestamp: ft,
+                        restart_count: 0,
                     };
                 }
             }
@@ -789,6 +795,7 @@ mod tests {
             last_accessed: Instant::now(),
             consecutive_failures: Arc::new(AtomicU32::new(0)),
             failure_timestamp: None,
+            restart_count: 0,
         }
     }
 
@@ -799,6 +806,7 @@ mod tests {
             backend: backend.to_string(),
             backend_url: String::new(),
             last_accessed: Instant::now(),
+            start_time: Instant::now(),
             consecutive_failures: Arc::new(AtomicU32::new(0)),
             failure_timestamp: None,
         }
@@ -823,7 +831,37 @@ mod tests {
             last_accessed: Instant::now(),
             consecutive_failures: Arc::new(AtomicU32::new(0)),
             failure_timestamp: None,
+            restart_count: 0,
         }
+    }
+
+    /// Helper to create a Ready ModelState with a custom restart count.
+    fn make_ready_state_with_restarts(
+        model_name: &str,
+        backend: &str,
+        restart_count: u32,
+    ) -> ModelState {
+        let mut state = make_ready_state(model_name, backend);
+        if let ModelState::Ready {
+            restart_count: rc, ..
+        } = &mut state
+        {
+            *rc = restart_count;
+        }
+        state
+    }
+
+    /// Helper to create a Starting ModelState with a custom start_time.
+    fn make_starting_state_with_time(
+        model_name: &str,
+        backend: &str,
+        start_time: Instant,
+    ) -> ModelState {
+        let mut state = make_starting_state(model_name, backend);
+        if let ModelState::Starting { start_time: st, .. } = &mut state {
+            *st = start_time;
+        }
+        state
     }
 
     /// Test that auto_unload=false disables auto-unload.
