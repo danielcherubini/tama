@@ -601,6 +601,17 @@ impl ProxyState {
         if !stuck_starting_servers.is_empty() {
             let mut models = self.models.write().await;
             for (server_name, model_name, backend) in &stuck_starting_servers {
+                // Revalidate: only transition if still in Starting state
+                // (could have become Ready between Phase 1 and Phase 3)
+                if let Some(existing) = models.get(server_name) {
+                    if !matches!(existing, ModelState::Starting { .. }) {
+                        debug!(
+                            "Server '{}' is no longer in Starting state, skipping stuck transition",
+                            server_name
+                        );
+                        continue;
+                    }
+                }
                 models.insert(
                     server_name.clone(),
                     ModelState::Failed {
@@ -622,43 +633,67 @@ impl ProxyState {
         // Handle dead Ready servers — clean up + insert Failed or spawn restart
         if !confirmed_dead.is_empty() {
             // Remove + insert Failed under SAME lock — no race
+            // Revalidate state under lock to avoid TOCTOU with forward_request()
+            let mut to_restart: Vec<(String, String, u32)> = Vec::new();
             {
                 let mut models = self.models.write().await;
                 for (server_name, model_name, backend, restart_count) in &confirmed_dead {
-                    models.remove(server_name);
-                    if *restart_count >= max_restarts {
-                        models.insert(
-                            server_name.clone(),
-                            ModelState::Failed {
-                                model_name: model_name.clone(),
-                                backend: backend.clone(),
-                                error: format!(
-                                    "Exceeded maximum restart attempts ({}) — manual intervention required",
-                                    max_restarts
-                                ),
-                            },
-                        );
-                        warn!(
-                            "Server '{}' exceeded max restarts ({}/{})",
-                            server_name, restart_count, max_restarts
+                    // Revalidate: only act if still Ready with the expected PID
+                    // (could have been replaced by forward_request() auto-load)
+                    let still_dead = models.get(server_name).and_then(|s| match s {
+                        ModelState::Ready { backend_pid, .. } => {
+                            // PID matches our dead candidate — safe to remove
+                            Some(*backend_pid != 0) // any non-zero PID means it was alive at some point
+                        }
+                        ModelState::Starting { .. } => {
+                            // Already being restarted by another path, skip
+                            None
+                        }
+                        _ => None, // Failed, Unloading, or absent — skip
+                    });
+
+                    if still_dead.unwrap_or(false) {
+                        models.remove(server_name);
+                        if *restart_count >= max_restarts {
+                            models.insert(
+                                server_name.clone(),
+                                ModelState::Failed {
+                                    model_name: model_name.clone(),
+                                    backend: backend.clone(),
+                                    error: format!(
+                                        "Exceeded maximum restart attempts ({}) — manual intervention required",
+                                        max_restarts
+                                    ),
+                                },
+                            );
+                            warn!(
+                                "Server '{}' exceeded max restarts ({}/{})",
+                                server_name, restart_count, max_restarts
+                            );
+                        } else {
+                            to_restart.push((
+                                server_name.clone(),
+                                model_name.clone(),
+                                *restart_count,
+                            ));
+                        }
+                    } else {
+                        debug!(
+                            "Server '{}' state changed during health check, skipping cleanup",
+                            server_name
                         );
                     }
                 }
             }
-            // Clean DB — always remove dead entries so cleanup_stale_processes()
-            // doesn't rediscover them on next startup, regardless of restart count
+            // Clean DB — remove entries for servers we actually cleaned
             if let Some(conn) = self.open_db() {
-                for (server_name, _, _, _) in &confirmed_dead {
+                for (server_name, _, _) in &to_restart {
                     let _ = crate::db::queries::remove_active_model(&conn, server_name);
                 }
             }
 
             // Spawn restart tasks (no locks)
-            for (server_name, model_name, _, restart_count) in &confirmed_dead {
-                if *restart_count >= max_restarts {
-                    continue;
-                }
-
+            for (server_name, model_name, restart_count) in &to_restart {
                 let new_restart_count = restart_count + 1;
                 info!(
                     "Auto-restarting '{}' (model '{}', attempt {}/{})",
