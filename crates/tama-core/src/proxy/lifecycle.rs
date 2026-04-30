@@ -965,12 +965,12 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
     /// Helper to create a Ready ModelState for testing.
-    /// Uses PID 1 (init) which always exists and won't be killed by tests.
+    /// Uses the current process's PID — guaranteed alive on all platforms.
     fn make_ready_state(model_name: &str, backend: &str) -> ModelState {
         ModelState::Ready {
             model_name: model_name.to_string(),
             backend: backend.to_string(),
-            backend_pid: 1, // PID 1 (init) always exists, safe for tests
+            backend_pid: std::process::id(), // current process — always alive
             backend_url: "http://127.0.0.1:8080".to_string(),
             load_time: std::time::SystemTime::now(),
             last_accessed: Instant::now(),
@@ -1178,7 +1178,7 @@ mod tests {
     #[test]
     fn test_model_state_backend_pid() {
         let ready = make_ready_state("m", "llama-cpp");
-        assert_eq!(ready.backend_pid(), Some(1));
+        assert_eq!(ready.backend_pid(), Some(std::process::id()));
 
         let starting = make_starting_state("m", "llama-cpp");
         assert!(starting.backend_pid().is_none());
