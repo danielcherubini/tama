@@ -717,10 +717,14 @@ impl ProxyState {
                 let mn = model_name.clone();
                 let rdc = new_restart_count;
                 let delay_ms = restart_delay_ms;
+                // Total timeout: delay + startup_timeout_secs. Prevents a stuck
+                // restart from holding resources forever (also keeps tests from
+                // hanging when there's no real backend to load).
+                let total_timeout = Duration::from_millis(delay_ms) + startup_timeout;
                 tokio::spawn(async move {
                     tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-                    match state.load_model(&mn, None).await {
-                        Ok(_) => {
+                    match tokio::time::timeout(total_timeout, state.load_model(&mn, None)).await {
+                        Ok(Ok(_)) => {
                             let mut models = state.models.write().await;
                             if let Some(ModelState::Ready {
                                 restart_count: rc, ..
@@ -730,8 +734,14 @@ impl ProxyState {
                             }
                             info!("Auto-restart succeeded for '{}' (model '{}')", sn, mn);
                         }
-                        Err(e) => {
+                        Ok(Err(e)) => {
                             warn!("Auto-restart failed for '{}' (model '{}'): {}", sn, mn, e);
+                        }
+                        Err(_) => {
+                            warn!(
+                                "Auto-restart timed out for '{}' (model '{}') after {:?}",
+                                sn, mn, total_timeout
+                            );
                         }
                     }
                 });
@@ -1613,11 +1623,11 @@ mod tests {
         );
     }
 
-    /// Test that a dead PID is detected, cleaned, and auto-restart is triggered.
-    /// The model is removed from the map so that the spawned restart task
-    /// can call load_model() without hitting the "already loaded" guard.
+    /// Test that a dead PID is detected and the model is cleaned up.
+    /// (Auto-restart is spawned as a side effect but cannot be verified
+    /// without a real backend binary + model files + GPU.)
     #[tokio::test]
-    async fn test_dead_pid_detected_and_restarted() {
+    async fn test_dead_pid_detected_and_cleaned() {
         let config = Config::default();
         let state = ProxyState::new(config, None);
 
