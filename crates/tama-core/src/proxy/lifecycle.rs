@@ -638,6 +638,7 @@ impl ProxyState {
             // Remove + insert Failed under SAME lock — no race
             // Revalidate state under lock to avoid TOCTOU with forward_request()
             let mut to_restart: Vec<(String, String, u32)> = Vec::new();
+            let mut removed_servers: Vec<String> = Vec::new();
             {
                 let mut models = self.models.write().await;
                 for (server_name, model_name, backend, restart_count, observed_pid) in
@@ -663,6 +664,7 @@ impl ProxyState {
 
                     if pid_matches.unwrap_or(false) {
                         models.remove(server_name);
+                        removed_servers.push(server_name.clone());
                         if *restart_count >= max_restarts {
                             models.insert(
                                 server_name.clone(),
@@ -694,9 +696,10 @@ impl ProxyState {
                     }
                 }
             }
-            // Clean DB — remove entries for servers we actually cleaned
+            // Clean DB — remove ALL dead entries so cleanup_stale_processes()
+            // doesn't rediscover them, regardless of whether they'll be restarted
             if let Some(conn) = self.open_db() {
-                for (server_name, _, _) in &to_restart {
+                for server_name in &removed_servers {
                     let _ = crate::db::queries::remove_active_model(&conn, server_name);
                 }
             }
