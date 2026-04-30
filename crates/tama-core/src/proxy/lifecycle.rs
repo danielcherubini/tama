@@ -463,8 +463,8 @@ impl ProxyState {
         let mut failed_to_remove = Vec::new();
         // (server_name, model_name, backend, restart_count, pid, backend_url)
         let mut dead_pid_candidates: Vec<(String, String, String, u32, u32, String)> = Vec::new();
-        // (server_name, model_name, backend)
-        let mut stuck_starting_servers: Vec<(String, String, String)> = Vec::new();
+        // (server_name, model_name, backend, start_time)
+        let mut stuck_starting_servers: Vec<(String, String, String, Instant)> = Vec::new();
 
         let (auto_unload, idle_timeout_secs, startup_timeout_secs, max_restarts, restart_delay_ms) = {
             let cfg = self.config.read().await;
@@ -496,6 +496,7 @@ impl ProxyState {
                         server_name.clone(),
                         state.model_name().to_string(),
                         state.backend().to_string(),
+                        *start_time,
                     ));
                 }
                 continue;
@@ -562,7 +563,8 @@ impl ProxyState {
         drop(models); // Release read lock
 
         // === PHASE 2: Health confirmation (outside lock) ===
-        let mut confirmed_dead: Vec<(String, String, String, u32)> = Vec::new();
+        // (server_name, model_name, backend, restart_count, pid)
+        let mut confirmed_dead: Vec<(String, String, String, u32, u32)> = Vec::new();
         for (server_name, model_name, backend, restart_count, pid, backend_url) in
             dead_pid_candidates
         {
@@ -577,7 +579,7 @@ impl ProxyState {
                     "Server '{}' confirmed dead (pid {}, restart_count: {}/{})",
                     server_name, pid, restart_count, max_restarts
                 );
-                confirmed_dead.push((server_name, model_name, backend, restart_count));
+                confirmed_dead.push((server_name, model_name, backend, restart_count, pid));
             } else {
                 debug!(
                     "Server '{}' PID {} reused, health endpoint responds",
@@ -600,13 +602,14 @@ impl ProxyState {
         // Handle stuck Starting — transition to Failed
         if !stuck_starting_servers.is_empty() {
             let mut models = self.models.write().await;
-            for (server_name, model_name, backend) in &stuck_starting_servers {
-                // Revalidate: only transition if still in Starting state
+            for (server_name, model_name, backend, observed_start) in &stuck_starting_servers {
+                // Revalidate: only transition if still in Starting state with matching start_time
                 // (could have become Ready between Phase 1 and Phase 3)
                 if let Some(existing) = models.get(server_name) {
-                    if !matches!(existing, ModelState::Starting { .. }) {
+                    let still_starting = matches!(existing, ModelState::Starting { start_time, .. } if start_time == observed_start);
+                    if !still_starting {
                         debug!(
-                            "Server '{}' is no longer in Starting state, skipping stuck transition",
+                            "Server '{}' state or start_time changed, skipping stuck transition",
                             server_name
                         );
                         continue;
@@ -637,13 +640,19 @@ impl ProxyState {
             let mut to_restart: Vec<(String, String, u32)> = Vec::new();
             {
                 let mut models = self.models.write().await;
-                for (server_name, model_name, backend, restart_count) in &confirmed_dead {
-                    // Revalidate: only act if still Ready with the expected PID
+                for (server_name, model_name, backend, restart_count, observed_pid) in
+                    &confirmed_dead
+                {
+                    // Revalidate: only act if still Ready with matching PID
                     // (could have been replaced by forward_request() auto-load)
-                    let still_dead = models.get(server_name).and_then(|s| match s {
+                    let pid_matches = models.get(server_name).and_then(|s| match s {
                         ModelState::Ready { backend_pid, .. } => {
-                            // PID matches our dead candidate — safe to remove
-                            Some(*backend_pid != 0) // any non-zero PID means it was alive at some point
+                            if backend_pid == observed_pid {
+                                Some(true)
+                            } else {
+                                // Different PID — process was replaced, skip
+                                None
+                            }
                         }
                         ModelState::Starting { .. } => {
                             // Already being restarted by another path, skip
@@ -652,7 +661,7 @@ impl ProxyState {
                         _ => None, // Failed, Unloading, or absent — skip
                     });
 
-                    if still_dead.unwrap_or(false) {
+                    if pid_matches.unwrap_or(false) {
                         models.remove(server_name);
                         if *restart_count >= max_restarts {
                             models.insert(
@@ -736,8 +745,8 @@ impl ProxyState {
         // Build return value
         let mut cleaned = Vec::new();
         cleaned.extend(failed_to_remove);
-        cleaned.extend(stuck_starting_servers.iter().map(|(n, _, _)| n.clone()));
-        cleaned.extend(confirmed_dead.iter().map(|(n, _, _, _)| n.clone()));
+        cleaned.extend(stuck_starting_servers.iter().map(|(n, _, _, _)| n.clone()));
+        cleaned.extend(confirmed_dead.iter().map(|(n, _, _, _, _)| n.clone()));
         cleaned.extend(to_unload);
         cleaned
     }
@@ -853,8 +862,8 @@ impl ProxyState {
             }
         });
 
-        // Health check: poll every 2s, timeout 60s (longer than LLM default)
-        let timeout = Duration::from_secs(60);
+        // Health check: poll every 2s, use configured startup timeout
+        let timeout = Duration::from_secs(self.config.read().await.proxy.startup_timeout_secs);
         let start = Instant::now();
         let mut health_ok = false;
 
