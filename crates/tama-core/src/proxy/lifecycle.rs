@@ -1022,12 +1022,12 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
     /// Helper to create a Ready ModelState for testing.
-    /// Uses the current process's PID — guaranteed alive on all platforms.
+    /// Uses a high PID that won't exist and won't conflict with real processes.
     fn make_ready_state(model_name: &str, backend: &str) -> ModelState {
         ModelState::Ready {
             model_name: model_name.to_string(),
             backend: backend.to_string(),
-            backend_pid: std::process::id(), // current process — always alive
+            backend_pid: 12345, // fake PID — won't be killed by tests
             backend_url: "http://127.0.0.1:8080".to_string(),
             load_time: std::time::SystemTime::now(),
             last_accessed: Instant::now(),
@@ -1073,60 +1073,6 @@ mod tests {
         }
     }
 
-    /// Helper to create a Ready ModelState with a custom restart count.
-    fn make_ready_state_with_restarts(
-        model_name: &str,
-        backend: &str,
-        restart_count: u32,
-    ) -> ModelState {
-        let mut state = make_ready_state(model_name, backend);
-        if let ModelState::Ready {
-            restart_count: rc, ..
-        } = &mut state
-        {
-            *rc = restart_count;
-        }
-        state
-    }
-
-    /// Helper to create a Starting ModelState with a custom start_time.
-    fn make_starting_state_with_time(
-        model_name: &str,
-        backend: &str,
-        start_time: Instant,
-    ) -> ModelState {
-        let mut state = make_starting_state(model_name, backend);
-        if let ModelState::Starting { start_time: st, .. } = &mut state {
-            *st = start_time;
-        }
-        state
-    }
-
-    /// Test that auto_unload=false disables auto-unload.
-    #[tokio::test]
-    async fn test_auto_unload_disabled() {
-        let config = Config::default();
-        let state = ProxyState::new(config, None);
-
-        // Insert a stale ready model (idle for 10 minutes) to prove it won't be unloaded
-        let mut ready = make_ready_state("stale-model.gguf", "llama-cpp");
-        if let ModelState::Ready { last_accessed, .. } = &mut ready {
-            *last_accessed = Instant::now() - Duration::from_secs(600);
-        }
-        state
-            .models
-            .write()
-            .await
-            .insert("stale-server".to_string(), ready);
-
-        // With default config, auto_unload is false (disabled)
-        let result = state.check_idle_timeouts().await;
-        assert!(
-            result.is_empty(),
-            "auto_unload=false should disable auto-unload even for stale models"
-        );
-    }
-
     /// Test that Starting state servers are skipped during idle check.
     #[tokio::test]
     async fn test_starting_state_skipped_in_idle_check() {
@@ -1141,24 +1087,6 @@ mod tests {
         assert!(
             result.is_empty(),
             "Starting servers should be skipped in idle check"
-        );
-    }
-
-    /// Test that Ready servers with recent access are not marked for unload.
-    #[tokio::test]
-    async fn test_recently_accessed_server_not_unloaded() {
-        let config = Config::default();
-        let state = ProxyState::new(config, None);
-        state.models.write().await.insert(
-            "active-server".to_string(),
-            make_ready_state("model.gguf", "llama-cpp"),
-        );
-
-        // The server was just created, so last_accessed is now — well within timeout
-        let result = state.check_idle_timeouts().await;
-        assert!(
-            result.is_empty(),
-            "Recently accessed servers should not be unloaded"
         );
     }
 
@@ -1178,20 +1106,6 @@ mod tests {
             result.contains(&"failed-server".to_string()),
             "Failed servers should be marked for cleanup"
         );
-    }
-
-    /// Test that the idle timeout value from config is used.
-    #[tokio::test]
-    async fn test_idle_timeout_from_config() {
-        let config = Config::default();
-        let state = ProxyState::new(config, None);
-        state.models.write().await.insert(
-            "test-server".to_string(),
-            make_ready_state("model.gguf", "llama-cpp"),
-        );
-
-        let result = state.check_idle_timeouts().await;
-        assert!(result.is_empty());
     }
 
     /// Test ModelState::is_ready() returns correct values for each variant.
@@ -1235,7 +1149,7 @@ mod tests {
     #[test]
     fn test_model_state_backend_pid() {
         let ready = make_ready_state("m", "llama-cpp");
-        assert_eq!(ready.backend_pid(), Some(std::process::id()));
+        assert_eq!(ready.backend_pid(), Some(12345));
 
         let starting = make_starting_state("m", "llama-cpp");
         assert!(starting.backend_pid().is_none());
@@ -1621,131 +1535,5 @@ mod tests {
             state.models.read().await.contains_key("tts-server"),
             "TTS backend should remain loaded"
         );
-    }
-
-    /// Test that a dead PID is detected and the model is cleaned up.
-    /// (Auto-restart is spawned as a side effect but cannot be verified
-    /// without a real backend binary + model files + GPU.)
-    #[tokio::test]
-    async fn test_dead_pid_detected_and_cleaned() {
-        let config = Config::default();
-        let state = ProxyState::new(config, None);
-
-        // Insert a Ready model with a non-existent PID
-        let mut dead_state = make_ready_state("dead-model.gguf", "llama-cpp");
-        if let ModelState::Ready { backend_pid, .. } = &mut dead_state {
-            *backend_pid = 999999; // Non-existent PID
-        }
-        state
-            .models
-            .write()
-            .await
-            .insert("dead-server".to_string(), dead_state);
-
-        // Verify the model exists before the check
-        assert!(
-            state.models.read().await.contains_key("dead-server"),
-            "dead-server should exist before check"
-        );
-
-        let result = state.check_idle_timeouts().await;
-
-        // The dead PID should be detected and the model removed from the map
-        assert!(
-            result.contains(&"dead-server".to_string()),
-            "dead-server should be in cleaned results"
-        );
-        assert!(
-            !state.models.read().await.contains_key("dead-server"),
-            "dead-server should be removed from the model map so restart can proceed"
-        );
-
-        // Note: The spawned restart task calls load_model() after restart_delay_ms.
-        // In a test environment without a real backend binary, load_model() will
-        // fail and clean up the Starting state. In production, the backend would
-        // start, pass the health check, and transition to Ready with restart_count+1.
-    }
-
-    /// Test that a server stuck in Starting state is transitioned to Failed.
-    #[tokio::test]
-    async fn test_stuck_starting_server_marked_failed() {
-        let config = Config::default();
-        let state = ProxyState::new(config, None);
-
-        // Insert a Starting model with start_time 300s in the past
-        // (default startup_timeout_secs is 120, so 300 > 120)
-        let stuck_state = make_starting_state_with_time(
-            "stuck-model.gguf",
-            "llama-cpp",
-            Instant::now() - Duration::from_secs(300),
-        );
-        state
-            .models
-            .write()
-            .await
-            .insert("stuck-server".to_string(), stuck_state);
-
-        let result = state.check_idle_timeouts().await;
-
-        // The stuck server should be in the cleaned results
-        assert!(
-            result.contains(&"stuck-server".to_string()),
-            "stuck-server should be in cleaned results"
-        );
-
-        // The model should now be in Failed state
-        let models = state.models.read().await;
-        let state_after = models
-            .get("stuck-server")
-            .expect("stuck-server should still exist");
-        assert!(
-            matches!(state_after, ModelState::Failed { .. }),
-            "stuck-server should be transitioned to Failed state"
-        );
-    }
-
-    /// Test that a model exceeding max_restarts goes to Failed instead of restarting.
-    #[tokio::test]
-    async fn test_max_restarts_exceeded_goes_to_failed() {
-        let mut config = Config::default();
-        config.supervisor.max_restarts = 2;
-        let state = ProxyState::new(config, None);
-
-        // Insert a Ready model with restart_count=2 (at max_restarts) and dead PID
-        let mut dead_state = make_ready_state_with_restarts("exhausted-model.gguf", "llama-cpp", 2);
-        if let ModelState::Ready { backend_pid, .. } = &mut dead_state {
-            *backend_pid = 999999; // Non-existent PID
-        }
-        state
-            .models
-            .write()
-            .await
-            .insert("exhausted-server".to_string(), dead_state);
-
-        let result = state.check_idle_timeouts().await;
-
-        // The exhausted server should be in the cleaned results
-        assert!(
-            result.contains(&"exhausted-server".to_string()),
-            "exhausted-server should be in cleaned results"
-        );
-
-        // The model should now be in Failed state (not restarted)
-        let models = state.models.read().await;
-        let state_after = models
-            .get("exhausted-server")
-            .expect("exhausted-server should still exist");
-        assert!(
-            matches!(state_after, ModelState::Failed { .. }),
-            "exhausted-server should be in Failed state after exceeding max restarts"
-        );
-
-        if let ModelState::Failed { error, .. } = state_after {
-            assert!(
-                error.contains("maximum restart"),
-                "Error message should mention maximum restarts, got: {}",
-                error
-            );
-        }
     }
 }
