@@ -242,7 +242,6 @@ pub fn Models() -> impl IntoView {
                                                                 class="btn btn-danger btn-sm"
                                                                 on:click=move |_| {
                                                                     unload_action.dispatch(id_unload.clone());
-                                                                    refresh.update(|n| *n += 1);
                                                                 }
                                                             >
                                                                 "Unload"
@@ -254,15 +253,17 @@ pub fn Models() -> impl IntoView {
                                                                 class="btn btn-success btn-sm"
                                                                 on:click=move |_| {
                                                                     load_action.dispatch(id_load.clone());
-                                                                    refresh.update(|n| *n += 1);
                                                                 }
                                                             >
                                                                 "Load"
                                                             </button>
                                                         }.into_any()
                                                     }}
-                                                    <A href=format!("/models/{}/edit", id_edit)>
-                                                        <button class="btn btn-secondary btn-sm">"Edit"</button>
+                                                    <A
+                                                        href=format!("/models/{}/edit", id_edit)
+                                                        attr:class="btn btn-secondary btn-sm"
+                                                    >
+                                                        "Edit"
                                                     </A>
                                                 </div>
                                             </div>

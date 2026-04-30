@@ -14,7 +14,7 @@
 
 ---
 
-### Task 1: Convert models page to horizontal row layout
+## Task 1: Convert models page to horizontal row layout
 
 **Context:**
 The models page (`pages/models.rs`) currently renders models in two sections ("Loaded Models" and "Unloaded Models") using vertical `model-card` components in a `models-grid` CSS grid. The dashboard's Active Models section uses horizontal `model-row` items in a `models-list` flex column. This task replaces the card layout with the row layout, removing the partition logic and duplicating view code.

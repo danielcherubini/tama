@@ -584,7 +584,7 @@ pub fn ModelEditor() -> impl IntoView {
                         }
                     >"Delete Model"</button>
                 })}
-                <A href="/models"><button type="button" class="btn btn-secondary btn-sm ml-2">"← Back to Models"</button></A>
+                <A href="/models" attr:class="btn btn-secondary btn-sm ml-2">"← Back to Models"</A>
             </div>
         </div>
 
