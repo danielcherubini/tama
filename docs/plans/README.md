@@ -14,8 +14,8 @@ This directory contains implementation plans for the Tama project. Each plan doc
 
 ## Quick Stats
 
-- **Total Plans**: 76
-- **Completed**: 76 ✅
+- **Total Plans**: 77
+- **Completed**: 77 ✅
 - **In Progress**: 0 🚧
 - **Remaining**: 0
 
@@ -25,7 +25,13 @@ This directory contains implementation plans for the Tama project. Each plan doc
 
 ## Completed Plans
 
+### In Progress
+
 ### Completed Plans
+
+| Plan | Description | PR / Git References |
+|------|-------------|---------------------|
+| [Process Health Monitor](2026-04-29-process-health-monitor.md) | Detect dead backend PIDs after Proxmox suspend/resume, auto-restart with max_restarts guard, catch stuck Starting states | #80 `1af210f`, `a19b4a2`, `02bd651`, `59cac4c` |
 
 ### Core Infrastructure
 

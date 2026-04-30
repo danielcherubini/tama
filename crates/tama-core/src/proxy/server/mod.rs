@@ -199,6 +199,7 @@ impl ProxyServer {
                             std::sync::atomic::AtomicU32::new(0),
                         ),
                         failure_timestamp: None,
+                        restart_count: 0,
                     },
                 );
             } else {
