@@ -645,12 +645,11 @@ impl ProxyState {
                     }
                 }
             }
-            // Clean DB
+            // Clean DB — always remove dead entries so cleanup_stale_processes()
+            // doesn't rediscover them on next startup, regardless of restart count
             if let Some(conn) = self.open_db() {
-                for (server_name, _, _, restart_count) in &confirmed_dead {
-                    if *restart_count < max_restarts {
-                        let _ = crate::db::queries::remove_active_model(&conn, server_name);
-                    }
+                for (server_name, _, _, _) in &confirmed_dead {
+                    let _ = crate::db::queries::remove_active_model(&conn, server_name);
                 }
             }
 
