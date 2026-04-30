@@ -284,7 +284,11 @@ fn parse_amd_gpu_metrics_gfx_activity(data: &[u8]) -> Option<u8> {
 
     // Some formats report in centi-percent (0–10 000), others in percent (0–100).
     // If the value exceeds 100, assume centi-percent and divide by 100.
-    let pct = if val > 100 { (val / 100) as u8 } else { val as u8 };
+    let pct = if val > 100 {
+        (val / 100) as u8
+    } else {
+        val as u8
+    };
 
     Some(pct)
 }
@@ -345,10 +349,18 @@ mod tests {
         let offset = match format_rev {
             0 => 24,
             1 => {
-                if content_rev >= 4 { 12 } else { 16 }
+                if content_rev >= 4 {
+                    12
+                } else {
+                    16
+                }
             }
             2 => {
-                if content_rev == 0 { 36 } else { 28 }
+                if content_rev == 0 {
+                    36
+                } else {
+                    28
+                }
             }
             3 => 42,
             _ => 50,
