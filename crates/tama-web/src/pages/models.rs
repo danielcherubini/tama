@@ -43,12 +43,14 @@ fn model_display_name(m: &ModelEntry) -> String {
 }
 
 /// Map a model's state string to (display label, CSS badge class).
-fn model_state_badge(state: &str) -> (&'static str, &'static str) {
+/// Falls back to `loaded` flag when `state` is empty (API doesn't always return it).
+fn model_state_badge(state: &str, loaded: bool) -> (&'static str, &'static str) {
     match state {
         "ready" => ("Loaded", "badge-success"),
         "loading" => ("Loading", "badge-info"),
         "unloading" => ("Unloading", "badge-warning"),
         "failed" => ("Failed", "badge-error"),
+        _ if loaded => ("Loaded", "badge-success"),
         _ => ("Idle", "badge-muted"),
     }
 }
@@ -225,7 +227,7 @@ pub fn Models() -> impl IntoView {
                                         let id_unload = m.id.to_string();
                                         let id_edit = m.id.to_string();
                                         let enabled_class = if m.enabled { "badge badge-success" } else { "badge badge-warning" };
-                                        let (state_label, state_class) = model_state_badge(&m.state);
+                                        let (state_label, state_class) = model_state_badge(&m.state, m.loaded);
                                         view! {
                                             <div class="model-row card">
                                                 <span class="model-row__name">{model_display_name(&m)}</span>
