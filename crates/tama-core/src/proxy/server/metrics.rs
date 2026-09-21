@@ -17,40 +17,54 @@ fn bucket_start(ts_ms: i64) -> i64 {
     (ts_ms / BUCKET_MS) * BUCKET_MS
 }
 
-/// Fold the tamad-observed spec-decode values (ADR-0012) off the live rows
-/// into the per-server `inference_stats` map.
+/// Fold the tamad-observed inference stats (ADR-0014) off the live rows into
+/// the per-server `inference_stats` map.
 ///
-/// Must run in the metrics loop BEFORE the step-2 snapshot — no await
-/// sits between the merge and that snapshot, so the merged value lands
-/// in this tick's `MetricCurrent` (surfacing within the ~2 s iteration
-/// cycle); reordered, it would only surface next tick.
+/// Must run in the metrics loop BEFORE the step-2 snapshot — no await sits
+/// between the merge and that snapshot, so the merged value lands in this
+/// tick's `MetricCurrent` (surfacing within the ~2 s iteration cycle);
+/// reordered, it would only surface next tick.
 ///
-/// Semantics: or-merge only. Rows at their stale defaults (`None` /
-/// `false`) are skipped entirely so a previously merged value survives a
-/// tamad blip until a fresh `Some(pct)` overwrites it. `tps`, `prompt_tps`,
-/// `cache_hit_pct` and `last_updated_ms` on any entry are never touched,
-/// and no entry is ever removed.
-pub(crate) async fn merge_tamad_spec_stats(
+/// Semantics (ADR-0014): the row is the SOLE WRITER OF THE VALUES — overwrite
+/// all five fields unconditionally, INCLUDING `None`. (Other paths — lifecycle
+/// unload, rename, reset, conn-error cleanup — still remove or migrate entries;
+/// see the task context.) The row is itself 30s-gated by the tamad (a `None`
+/// means "no traffic for 30s" and must blank the entry); the pre-ADR-0014
+/// "skip stale defaults" or-merge is retired. `last_updated_ms` is stamped
+/// (proxy clock) ONLY when the row's `tps` is `Some` — stamping unconditionally
+/// would make it ~equal across all entries (the merge touches every entry every
+/// tick) and `aggregate_inference`'s "latest entry wins" would degenerate to
+/// arbitrary.
+pub(crate) async fn merge_tamad_inference_stats(
     state: &crate::proxy::ProxyState,
     live: &crate::proxy::Rows,
 ) {
     let cfg = state.config.read().await;
     let model_configs = state.registry.model_configs.read().await;
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
     for row in live.all() {
-        if row.spec_accept_pct.is_none() && !row.spec_decoding_active {
-            continue; // stale row default: never clear freshly-merged values
-        }
+        let tps = row.tps;
+        let prompt_tps = row.prompt_tps;
+        let cache_hit_pct = row.cache_hit_pct;
+        let spec_accept_pct = row.spec_accept_pct;
+        let active = row.spec_decoding_active;
+        let stamp = tps.is_some();
         let servers = cfg.resolve_backends_for_model(&model_configs, &row.key);
         for (server_name, _, _) in &servers {
             let sn = server_name.clone();
-            let pct = row.spec_accept_pct;
-            let active = row.spec_decoding_active;
             state.metrics.modify_inference_stats(|m| {
                 let entry = m.entry(sn.clone()).or_default();
-                if let Some(p) = pct {
-                    entry.spec_accept_pct = Some(p);
+                entry.tps = tps;
+                entry.prompt_tps = prompt_tps;
+                entry.cache_hit_pct = cache_hit_pct;
+                entry.spec_accept_pct = spec_accept_pct;
+                entry.spec_decoding_active = active;
+                if stamp {
+                    entry.last_updated_ms = now_ms;
                 }
-                entry.spec_decoding_active = entry.spec_decoding_active || active;
             });
         }
     }
@@ -58,8 +72,14 @@ pub(crate) async fn merge_tamad_spec_stats(
 
 /// Live-value aggregation for the broadcast snapshot. tps/prompt_tps AND
 /// spec_accept_pct are None when the newest entry is older than the 30 s
-/// bucket window; cache_hit_pct and the OR'd spec_decoding_active flag keep
-/// their existing (ungated / sticky) semantics.
+/// bucket window — a BACKSTOP since ADR-0014 (entries are already 30s-gated
+/// by the tamad; the gate now only fires on edge cases like a wedged row
+/// stream). `cache_hit_pct` keeps the newest entry's value when stale — a
+/// no-op backstop under ADR-0014 (the entry's `cache_hit_pct` is already
+/// `None` after 30s idle, so the ungated read returns `None` anyway).
+/// `spec_decoding_active` is OR'd across entries (cluster level) but is no
+/// longer sticky per entry: the merge overwrites it, so an entry un-sticks
+/// when its backend stops spec-decoding.
 // The 6-element return tuple is consumed once, into locals at the metrics
 // loop's single call site — a struct would add indirection for zero callers.
 #[allow(clippy::type_complexity)]
@@ -352,11 +372,9 @@ pub fn start_metrics_collector(
             // below and `models_loaded` further down (plan-193 T4).
             let live = crate::proxy::live_rows(metrics_state.tamad_pool().as_ref()).await;
 
-            // 2a. Fold the tamad-observed spec-decode values into the
-            // per-server map BEFORE the snapshot (nothing awaits between
-            // the two), so they land in this tick's MetricCurrent — the
-            // ~2 s sleep plus iteration work is the cycle period.
-            merge_tamad_spec_stats(&metrics_state, &live).await;
+            // 2a. Fold the tamad-observed inference stats into the
+            // per-server map BEFORE the snapshot (ADR-0014)
+            merge_tamad_inference_stats(&metrics_state, &live).await;
 
             // 2b. Read latest inference stats and aggregate across servers
             // (latest-server values, freshness-gated; sticky flag OR'd).
@@ -571,7 +589,7 @@ mod tests {
         assert_eq!(bucket.prompt_tps, 123.0);
     }
 
-    // ── merge_tamad_spec_stats / aggregate_inference ────────────────
+    // ── inference-stats merge (ADR-0014) / aggregate_inference ────────
 
     use crate::config::ModelConfig;
     use std::collections::HashMap;
@@ -612,6 +630,34 @@ mod tests {
         }
     }
 
+    /// Sibling to [`process`]: a ready vLLM process also carrying the
+    /// tamad's windowed rates (the ADR-0014 wire fields).
+    fn process_with_rates(
+        model_name: &str,
+        tps: Option<f64>,
+        prompt_tps: Option<f64>,
+        cache_hit_pct: Option<f64>,
+        spec_accept_pct: Option<f64>,
+        spec_decoding_active: bool,
+    ) -> crate::tamad::ProcessInfo {
+        crate::tamad::ProcessInfo {
+            model_name: model_name.to_string(),
+            provider_name: "vllm".to_string(),
+            pid: 1,
+            alive: true,
+            endpoint_url: "http://127.0.0.1:8000".to_string(),
+            status: "ready".to_string(),
+            desired: true,
+            restart_count: 0,
+            max_restarts: 3,
+            spec_accept_pct,
+            spec_decoding_active,
+            tps,
+            prompt_tps,
+            cache_hit_pct,
+        }
+    }
+
     /// Seed a fresh live `ready` row into the state's tamad pool so
     /// [`crate::proxy::live_rows`] surfaces it with the given spec values.
     async fn seed_live_row(
@@ -625,6 +671,39 @@ mod tests {
             1.5,
             vec![],
             vec![process(model_id, spec_accept_pct, spec_decoding_active)],
+        );
+        let pool = state.tamad_pool();
+        pool.insert_raw_handle(
+            model_id,
+            Arc::new(handle_with_latest(std::time::Instant::now(), stats).await),
+        )
+        .await;
+    }
+
+    /// Sibling to [`seed_live_row`]: seed a fresh live `ready` row carrying
+    /// the given windowed rates (the ADR-0014 wire fields), via the same
+    /// `stats_full` / `handle_with_latest` / `insert_raw_handle` plumbing.
+    async fn seed_live_row_with_rates(
+        state: &crate::proxy::ProxyState,
+        model_id: &str,
+        tps: Option<f64>,
+        prompt_tps: Option<f64>,
+        cache_hit_pct: Option<f64>,
+        spec_accept_pct: Option<f64>,
+        spec_decoding_active: bool,
+    ) {
+        use crate::tamad::pool::test_support::{handle_with_latest, stats_full};
+        let stats = stats_full(
+            1.5,
+            vec![],
+            vec![process_with_rates(
+                model_id,
+                tps,
+                prompt_tps,
+                cache_hit_pct,
+                spec_accept_pct,
+                spec_decoding_active,
+            )],
         );
         let pool = state.tamad_pool();
         pool.insert_raw_handle(
@@ -656,10 +735,12 @@ mod tests {
         state
     }
 
-    /// Merging a spec row into an existing forwarder-written entry must set
-    /// the spec fields without touching `tps` or `last_updated_ms`.
+    /// Merging a row into an existing forwarder-written entry OVERWRITES
+    /// the entry's values — the row is the SOLE source of values (ADR-0014):
+    /// a `tps: None` row blanks `tps`, and a `tps: Some` row stamps
+    /// `last_updated_ms`.
     #[tokio::test]
-    async fn test_merge_sets_spec_fields_preserving_forwarder_write() {
+    async fn test_merge_overwrites_forwarder_write() {
         let state = state_with_live_model("alpha", Some(44.5), true).await;
         state.metrics.record_inference_stats(
             "alpha",
@@ -674,66 +755,195 @@ mod tests {
         );
 
         let live = crate::proxy::live_rows(state.tamad_pool().as_ref()).await;
-        merge_tamad_spec_stats(&state, &live).await;
+        merge_tamad_inference_stats(&state, &live).await;
 
         let snap = state.metrics.inference_stats_snapshot();
         let stats = snap.get("alpha").expect("existing entry updated in place");
         assert_eq!(stats.spec_accept_pct, Some(44.5));
         assert!(stats.spec_decoding_active);
-        assert_eq!(stats.tps, Some(50.0), "merge must not touch tps");
+        assert_eq!(stats.tps, None, "a tps: None row blanks the entry's tps");
         assert_eq!(
-            stats.last_updated_ms, 123,
-            "merge must not touch last_updated_ms"
+            stats.prompt_tps, None,
+            "the row is the sole source of values"
+        );
+        assert_eq!(
+            stats.cache_hit_pct, None,
+            "the row is the sole source of values"
+        );
+        assert_eq!(stats.last_updated_ms, 123, "a tps: None row does not stamp");
+
+        // A tps-bearing row stamps last_updated_ms.
+        seed_live_row_with_rates(&state, "alpha", Some(42.0), None, None, Some(44.5), true).await;
+        let live = crate::proxy::live_rows(state.tamad_pool().as_ref()).await;
+        merge_tamad_inference_stats(&state, &live).await;
+        let snap = state.metrics.inference_stats_snapshot();
+        let stats = snap.get("alpha").unwrap();
+        assert_eq!(stats.tps, Some(42.0));
+        assert!(
+            stats.last_updated_ms > 123,
+            "a tps: Some row stamps last_updated_ms"
         );
     }
 
-    /// No existing entry → one is created by `or_default()` and only the
-    /// spec fields carry the tamad's observation.
+    /// No existing entry → one is created by `or_default()` and carries
+    /// the row's values (the row is the sole source).
     #[tokio::test]
-    async fn test_merge_creates_or_default_entry_when_absent() {
+    async fn test_merge_creates_entry_when_absent() {
         let state = state_with_live_model("beta", Some(44.5), true).await;
 
         let live = crate::proxy::live_rows(state.tamad_pool().as_ref()).await;
-        merge_tamad_spec_stats(&state, &live).await;
+        merge_tamad_inference_stats(&state, &live).await;
 
         let snap = state.metrics.inference_stats_snapshot();
         let stats = snap.get("beta").expect("merge creates the entry");
         assert_eq!(stats.spec_accept_pct, Some(44.5));
         assert!(stats.spec_decoding_active);
-        assert_eq!(stats.tps, None, "or_default() entry has no tps");
-        assert_eq!(stats.last_updated_ms, 0, "or_default() entry timestamps 0");
+        assert_eq!(stats.tps, None, "or_default() entry + tps: None row");
+        assert_eq!(stats.last_updated_ms, 0, "a tps: None row does not stamp");
     }
 
-    /// A row at its stale defaults (`None` / `false`) is skipped entirely —
-    /// no entry is created, nothing existing is cleared.
+    /// A row at its stale defaults (all `None` / `false`) BLANKS the entry:
+    /// the row is 30s-gated by the tamad, so a `None` means "no traffic for
+    /// 30s" and the entry's values must go (ADR-0014).
     #[tokio::test]
-    async fn test_merge_skips_row_with_default_spec_values() {
+    async fn test_merge_overwrites_including_none() {
         let state = state_with_live_model("gamma", None, false).await;
-        // A prior merge must also survive the skip (never cleared).
         state.metrics.record_inference_stats(
             "gamma",
             crate::proxy::types::LatestInferenceStats {
                 tps: Some(50.0),
-                prompt_tps: None,
-                cache_hit_pct: None,
+                prompt_tps: Some(200.0),
+                cache_hit_pct: Some(85.0),
                 spec_accept_pct: Some(30.0),
                 spec_decoding_active: true,
-                last_updated_ms: 7,
+                last_updated_ms: 500,
             },
         );
 
         let live = crate::proxy::live_rows(state.tamad_pool().as_ref()).await;
-        merge_tamad_spec_stats(&state, &live).await;
+        merge_tamad_inference_stats(&state, &live).await;
 
         let snap = state.metrics.inference_stats_snapshot();
-        assert_eq!(snap.len(), 1, "default row must be skipped");
         let stats = snap.get("gamma").unwrap();
+        assert_eq!(stats.tps, None, "a None row blanks tps");
+        assert_eq!(stats.prompt_tps, None, "a None row blanks prompt_tps");
+        assert_eq!(stats.cache_hit_pct, None, "a None row blanks cache_hit_pct");
         assert_eq!(
-            stats.spec_accept_pct,
-            Some(30.0),
-            "previously merged value survives a blip"
+            stats.spec_accept_pct, None,
+            "a None row blanks spec_accept_pct"
         );
-        assert!(stats.spec_decoding_active);
+        assert!(
+            !stats.spec_decoding_active,
+            "a false row un-sticks spec_decoding_active"
+        );
+        assert_eq!(stats.last_updated_ms, 500, "a tps: None row does not stamp");
+    }
+
+    /// `last_updated_ms` is stamped ONLY when the row's `tps` is `Some` —
+    /// an unconditional stamp would make it ~equal across all entries (the
+    /// merge touches every entry every tick) and `aggregate_inference`'s
+    /// "latest entry wins" would degenerate to arbitrary.
+    #[tokio::test]
+    async fn test_merge_stamps_last_updated_only_when_some() {
+        let state = state_with_live_model("delta", None, false).await;
+        state.metrics.record_inference_stats(
+            "delta",
+            crate::proxy::types::LatestInferenceStats {
+                tps: Some(50.0),
+                prompt_tps: None,
+                cache_hit_pct: None,
+                spec_accept_pct: None,
+                spec_decoding_active: false,
+                last_updated_ms: 1000,
+            },
+        );
+
+        // A tps: None row must not touch last_updated_ms.
+        let live = crate::proxy::live_rows(state.tamad_pool().as_ref()).await;
+        merge_tamad_inference_stats(&state, &live).await;
+        let snap = state.metrics.inference_stats_snapshot();
+        let stats = snap.get("delta").unwrap();
+        assert_eq!(
+            stats.last_updated_ms, 1000,
+            "a tps: None row must not stamp"
+        );
+
+        // A tps: Some(1.0) row stamps last_updated_ms.
+        seed_live_row_with_rates(&state, "delta", Some(1.0), None, None, None, false).await;
+        let live = crate::proxy::live_rows(state.tamad_pool().as_ref()).await;
+        merge_tamad_inference_stats(&state, &live).await;
+        let snap = state.metrics.inference_stats_snapshot();
+        let stats = snap.get("delta").unwrap();
+        assert!(
+            stats.last_updated_ms > 1000,
+            "a tps: Some row stamps last_updated_ms"
+        );
+        assert_eq!(stats.tps, Some(1.0));
+    }
+
+    /// A newer row's values replace the previous merge's values.
+    #[tokio::test]
+    async fn test_merge_replaces_previous_value() {
+        let state = state_with_live_model("epsilon", None, false).await;
+
+        seed_live_row_with_rates(&state, "epsilon", Some(50.0), None, None, None, false).await;
+        let live = crate::proxy::live_rows(state.tamad_pool().as_ref()).await;
+        merge_tamad_inference_stats(&state, &live).await;
+        let snap = state.metrics.inference_stats_snapshot();
+        let stats = snap.get("epsilon").unwrap();
+        assert_eq!(stats.tps, Some(50.0));
+
+        seed_live_row_with_rates(&state, "epsilon", Some(30.0), None, None, None, false).await;
+        let live = crate::proxy::live_rows(state.tamad_pool().as_ref()).await;
+        merge_tamad_inference_stats(&state, &live).await;
+        let snap = state.metrics.inference_stats_snapshot();
+        let stats = snap.get("epsilon").unwrap();
+        assert_eq!(
+            stats.tps,
+            Some(30.0),
+            "the newer row's value replaces the previous one"
+        );
+    }
+
+    /// A model key resolving to multiple model configs (aliases) delivers
+    /// the row's values to EVERY resolved config entry.
+    #[tokio::test]
+    async fn test_merge_fanout_aliases() {
+        let state = crate::proxy::ProxyState::new(
+            crate::config::Config::default(),
+            None,
+            crate::db::pool::test_dummy_pool(),
+        );
+        {
+            let mut mc = state.registry.model_configs.write().await;
+            mc.insert("a1".to_string(), model_config("vllm", Some("dl-shared")));
+            mc.insert("b2".to_string(), model_config("vllm", Some("dl-shared")));
+        }
+        seed_live_row_with_rates(
+            &state,
+            "dl-shared",
+            Some(42.0),
+            Some(120.0),
+            Some(25.0),
+            Some(44.5),
+            true,
+        )
+        .await;
+
+        let live = crate::proxy::live_rows(state.tamad_pool().as_ref()).await;
+        merge_tamad_inference_stats(&state, &live).await;
+
+        let snap = state.metrics.inference_stats_snapshot();
+        for key in ["a1", "b2"] {
+            let stats = snap
+                .get(key)
+                .unwrap_or_else(|| panic!("{key} entry missing"));
+            assert_eq!(stats.tps, Some(42.0));
+            assert_eq!(stats.prompt_tps, Some(120.0));
+            assert_eq!(stats.cache_hit_pct, Some(25.0));
+            assert_eq!(stats.spec_accept_pct, Some(44.5));
+            assert!(stats.spec_decoding_active);
+        }
     }
 
     /// A model key resolving to multiple model configs updates EVERY
@@ -753,13 +963,61 @@ mod tests {
         seed_live_row(&state, "dl-shared", Some(44.5), true).await;
 
         let live = crate::proxy::live_rows(state.tamad_pool().as_ref()).await;
-        merge_tamad_spec_stats(&state, &live).await;
+        merge_tamad_inference_stats(&state, &live).await;
 
         let snap = state.metrics.inference_stats_snapshot();
         assert_eq!(snap.get("a1").unwrap().spec_accept_pct, Some(44.5));
         assert_eq!(snap.get("b2").unwrap().spec_accept_pct, Some(44.5));
         assert!(snap.get("a1").unwrap().spec_decoding_active);
         assert!(snap.get("b2").unwrap().spec_decoding_active);
+    }
+
+    /// Wire → row → merge → aggregate: a live tamad row's windowed rates
+    /// flow through `merge_tamad_inference_stats` into
+    /// `aggregate_inference`'s output (ADR-0014).
+    #[tokio::test]
+    async fn test_merge_to_aggregate_end_to_end() {
+        let state = crate::proxy::ProxyState::new(
+            crate::config::Config::default(),
+            None,
+            crate::db::pool::test_dummy_pool(),
+        );
+        state
+            .registry
+            .model_configs
+            .write()
+            .await
+            .insert("omega".to_string(), model_config("vllm", None));
+        seed_live_row_with_rates(
+            &state,
+            "omega",
+            Some(42.0),
+            Some(120.0),
+            Some(25.0),
+            Some(44.5),
+            true,
+        )
+        .await;
+
+        let live = crate::proxy::live_rows(state.tamad_pool().as_ref()).await;
+        merge_tamad_inference_stats(&state, &live).await;
+
+        let inference_map = state.metrics.inference_stats_snapshot();
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let (tps, prompt_tps, cache_hit_pct, spec_accept_pct, active, last) =
+            aggregate_inference(&inference_map, now_ms, BUCKET_MS);
+        assert_eq!(tps, Some(42.0), "wire → row → merge → aggregate");
+        assert_eq!(prompt_tps, Some(120.0));
+        assert_eq!(cache_hit_pct, Some(25.0));
+        assert_eq!(spec_accept_pct, Some(44.5));
+        assert!(active);
+        assert!(
+            last.is_some(),
+            "the stamped last_updated_ms surfaces in the aggregate"
+        );
     }
 
     fn agg_map(last_updated_ms: i64) -> HashMap<String, crate::proxy::types::LatestInferenceStats> {
