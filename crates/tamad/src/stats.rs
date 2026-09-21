@@ -577,11 +577,15 @@ mod tests {
         format!(
             "\n# HELP vllm:generation_tokens_total Total generated tokens\n\
              vllm:generation_tokens_total{{model_name=\"m\",engine=\"0\"}} {gen}\n\
-             vllm:prompt_tokens_by_source_total{{source=\"local_compute\",model_name=\"m\",engine=\"0\"}} {computed}\n\
-             vllm:prompt_tokens_by_source_total{{source=\"local_cache_hit\",model_name=\"m\",engine=\"0\"}} {cached}\n\
+             vllm:prompt_tokens_by_source_total{{source=\"local_compute\",\
+             model_name=\"m\",engine=\"0\"}} {computed}\n\
+             vllm:prompt_tokens_by_source_total{{source=\"local_cache_hit\",\
+             model_name=\"m\",engine=\"0\"}} {cached}\n\
              vllm:spec_decode_num_drafts_total{{model_name=\"m\",engine=\"0\"}} {drafts}\n\
-             vllm:spec_decode_num_draft_tokens_total{{model_name=\"m\",engine=\"0\"}} {draft_tokens}\n\
-             vllm:spec_decode_num_accepted_tokens_total{{model_name=\"m\",engine=\"0\"}} {accepted}\n"
+             vllm:spec_decode_num_draft_tokens_total{{model_name=\"m\",\
+             engine=\"0\"}} {draft_tokens}\n\
+             vllm:spec_decode_num_accepted_tokens_total{{model_name=\"m\",\
+             engine=\"0\"}} {accepted}\n"
         )
     }
 
@@ -1094,7 +1098,8 @@ mod tests {
             .build()
             .unwrap();
         let server = rt.block_on(MockServer::start());
-        let body = "llamacpp_duration_s{status_stage=\"0\",lifespan_stage=\"0\",vram_stage=\"3\"} 2.5\nllamacpp_inference_duration_s{model=\"m\"} 1.0\n";
+        let body = "llamacpp_duration_s{status_stage=\"0\",lifespan_stage=\"0\",\
+            vram_stage=\"3\"} 2.5\nllamacpp_inference_duration_s{model=\"m\"} 1.0\n";
         rt.block_on(
             Mock::given(method("GET"))
                 .and(path("/metrics"))

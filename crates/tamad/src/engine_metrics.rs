@@ -545,7 +545,10 @@ process_cpu_seconds_total 42.0\n";
     #[test]
     fn test_parse_unparseable_value_line_skipped() {
         let body = "\
-vllm:spec_decode_num_drafts_total{model_name=\"x\",engine=\"0\"} 10.0\nbroken_metric{a=\"b\"} not_a_number\nvllm:spec_decode_num_draft_tokens_total{model_name=\"x\",engine=\"0\"} 30.0\nvllm:spec_decode_num_accepted_tokens_total{model_name=\"x\",engine=\"0\"} 15.0\n";
+vllm:spec_decode_num_drafts_total{model_name=\"x\",engine=\"0\"} 10.0\n\
+broken_metric{a=\"b\"} not_a_number\n\
+vllm:spec_decode_num_draft_tokens_total{model_name=\"x\",engine=\"0\"} 30.0\n\
+vllm:spec_decode_num_accepted_tokens_total{model_name=\"x\",engine=\"0\"} 15.0\n";
         let (kind, c) = parse_engine_metrics(body).expect("two valid lines remain");
         assert_eq!(kind, EngineKind::Vllm);
         assert_eq!(
@@ -715,10 +718,12 @@ llamacpp:prompt_tokens_total 10.0\n";
         let body = "\
 vllm:prompt_tokens_by_source_total{source=\"local_compute\",model_name=\"m\",engine=\"0\"} 100.0\n\
 vllm:prompt_tokens_by_source_total{source=\"local_cache_hit\",model_name=\"m\",engine=\"0\"} 50.0\n\
-vllm:prompt_tokens_by_source_total{source=\"external_kv_transfer\",model_name=\"m\",engine=\"0\"} 7.0\n\
+vllm:prompt_tokens_by_source_total{source=\"external_kv_transfer\",\
+model_name=\"m\",engine=\"0\"} 7.0\n\
 vllm:prompt_tokens_by_source_total{source=\"local_compute\",model_name=\"n\",engine=\"0\"} 25.0\n\
 vllm:prompt_tokens_by_source_total{source=\"local_cache_hit\",model_name=\"n\",engine=\"0\"} 5.0\n\
-vllm:prompt_tokens_by_source_total{other_source=\"local_compute\",model_name=\"m\",engine=\"0\"} 9.0\n";
+vllm:prompt_tokens_by_source_total{other_source=\"local_compute\",\
+model_name=\"m\",engine=\"0\"} 9.0\n";
         let (kind, c) = parse_engine_metrics(body).expect("by_source lines present");
         assert_eq!(kind, EngineKind::Vllm);
         assert_eq!(
