@@ -341,6 +341,13 @@ impl StatsCollector {
                 None
             };
             p.spec_decoding_active = fresh && o.is_some_and(|o| o.spec_active);
+            // ADR-0014: carry the observation's time (tamad clock) so the
+            // proxy stamps the inference entry's last_updated_ms from it
+            // ("most recently active backend wins" stays deterministic — no
+            // shared-timestamp ties). Stale (or never observed) → None, so
+            // the entry's freshness stops advancing and the aggregate's 30s
+            // gate blanks it.
+            p.last_obs_ms = if fresh { Some(s.last_obs_ms) } else { None };
         }
     }
 }
@@ -470,6 +477,7 @@ mod tests {
             tps: None,
             prompt_tps: None,
             cache_hit_pct: None,
+            last_obs_ms: None,
         };
         let third = collector.tick(vec![proc.clone()]);
         assert_eq!(third.processes.len(), 1);
@@ -552,6 +560,7 @@ mod tests {
             tps: None,
             prompt_tps: None,
             cache_hit_pct: None,
+            last_obs_ms: None,
         }
     }
 

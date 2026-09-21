@@ -162,6 +162,7 @@ mod tests {
             tps: None,
             prompt_tps: None,
             cache_hit_pct: None,
+            last_obs_ms: None,
         }
     }
 

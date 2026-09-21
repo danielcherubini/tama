@@ -165,8 +165,9 @@ pub fn parse_engine_metrics(body: &str) -> Option<(EngineKind, EngineCounters)> 
 /// Split a `name{...maybe labels...} <value>` line into its exact metric
 /// name, value, and the raw label-set text (the content between the first
 /// `{` and the first `}` that is NOT inside a quoted value — a legal
-/// Prometheus label value may contain `}` inside quotes; if no closing
-/// `}` exists, the label set is unparseable and the line is treated as
+/// Prometheus label value may contain `}` inside quotes, and a `\"`
+/// (escaped quote) does NOT close the quoted value; if no closing `}`
+/// exists, the label set is unparseable and the line is treated as
 /// having no labels).
 ///
 /// Guarantees, over the whitespace-token sequence `t[0..n]` (`n >= 2`,
@@ -227,16 +228,30 @@ fn split_metric_line(line: &str) -> Option<(String, f64, Option<String>)> {
         Some(i) => {
             let after = &rejoined[i + 1..];
             // The label set ends at the first `}` that is NOT inside a
-            // quoted value (a legal label value may contain `}`).
+            // quoted value (a legal label value may contain `}`); a `\`
+            // inside a quoted value makes the next byte literal, so a
+            // `\"` does NOT close the quote and a `\\` does not escape
+            // the following `"`.
             let mut in_quotes = false;
             let mut end = None;
-            for (j, b) in after.bytes().enumerate() {
-                if b == b'"' {
-                    in_quotes = !in_quotes;
-                } else if b == b'}' && !in_quotes {
-                    end = Some(j);
+            let mut k = 0;
+            while k < after.len() {
+                let b = after.as_bytes()[k];
+                if in_quotes {
+                    if b == b'\\' {
+                        k += 2; // escape sequence: the next byte is literal
+                        continue;
+                    }
+                    if b == b'"' {
+                        in_quotes = false;
+                    }
+                } else if b == b'"' {
+                    in_quotes = true;
+                } else if b == b'}' {
+                    end = Some(k);
                     break;
                 }
+                k += 1;
             }
             match end {
                 Some(j) => (rejoined[..i].to_string(), Some(after[..j].to_string())),
@@ -253,7 +268,9 @@ fn split_metric_line(line: &str) -> Option<(String, f64, Option<String>)> {
 /// `source` at the start of the set or immediately after a `,` outside
 /// a quoted value (so e.g. `other_source="local_compute"` never matches).
 /// The value is the quoted string following `=`, or the unquoted token
-/// (legal for numbers / NaN / Inf).
+/// (legal for numbers / NaN / Inf). Quote tracking honors backslash
+/// escapes: inside a quoted value a `\` makes the next byte literal, so a
+/// `\"` does NOT close the quote.
 fn source_label_value(labels: &str) -> Option<&str> {
     let mut pos = 0;
     loop {
@@ -262,14 +279,23 @@ fn source_label_value(labels: &str) -> Option<&str> {
             return read_label_value(after);
         }
         // Advance to the next `,` outside a quoted value; the key after
-        // it is the next candidate.
+        // it is the next candidate. A `\` inside a quoted value makes the
+        // next byte literal, so a `\"` does NOT close the quote.
         let mut i = 0;
         let mut in_quotes = false;
         while i < rest.len() {
             let b = rest.as_bytes()[i];
-            if b == b'"' {
-                in_quotes = !in_quotes;
-            } else if b == b',' && !in_quotes {
+            if in_quotes {
+                if b == b'\\' {
+                    i += 2; // escape sequence: the next byte is literal
+                    continue;
+                }
+                if b == b'"' {
+                    in_quotes = false;
+                }
+            } else if b == b'"' {
+                in_quotes = true;
+            } else if b == b',' {
                 break;
             }
             i += 1;
@@ -283,18 +309,38 @@ fn source_label_value(labels: &str) -> Option<&str> {
 
 /// Read a label value following `=`: the quoted string, or (legal for
 /// numbers / NaN / Inf) the unquoted token up to the next comma or
-/// whitespace. Asymmetry with the quoted form: the unquoted value
+/// whitespace. The closing quote of the quoted form is found escape-aware
+/// (a `\` makes the next byte literal, so a `\"` does NOT close the
+/// quote). Asymmetry with the quoted form: the unquoted value
 /// requires a terminating `,` or whitespace, so a final unquoted label
 /// (e.g. `source=5` at end-of-string) yields `None` rather than `"5"`.
 /// Harmless here — only the quoted `source` values are matched.
 fn read_label_value(s: &str) -> Option<&str> {
     if let Some(v) = s.strip_prefix('"') {
-        let end = v.find('"')?;
+        let end = closing_quote(v)?;
         Some(&v[..end])
     } else {
         let end = s.find(|c: char| c == ',' || c.is_ascii_whitespace())?;
         Some(&s[..end])
     }
+}
+
+/// The index of the first UNESCAPED `"` in `v` (a `\` makes the next byte
+/// literal, so a `\"` does not close the quote), or `None` when the quoted value is unterminated.
+fn closing_quote(v: &str) -> Option<usize> {
+    let mut i = 0;
+    while i < v.len() {
+        let b = v.as_bytes()[i];
+        if b == b'\\' {
+            i += 2; // escape sequence: the next byte is literal
+            continue;
+        }
+        if b == b'"' {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
 }
 
 /// Whether `tok` is a plain integer (`-?[0-9]+`) — the shape of a
@@ -714,6 +760,43 @@ vllm:spec_decode_num_accepted_tokens_total{model_name=\"m\",engine=\"0\"} 82.0\n
                 spec_accepted_tokens: Some(82.0),
             }
         );
+    }
+
+    /// A quoted label value may contain an escaped quote (`\"`) — legal
+    /// Prometheus text format. The escape must NOT close the quoted value:
+    /// the line still parses and its counter counts.
+    #[test]
+    fn test_parse_escaped_quote_in_model_label() {
+        let body = "vllm:generation_tokens_total{model=\"a\\\"b\"} 5";
+        let (kind, c) = parse_engine_metrics(body).expect("escaped quote line parses");
+        assert_eq!(kind, EngineKind::Vllm);
+        assert_eq!(c.decode_tokens, Some(5.0));
+    }
+
+    /// An escaped quote in a PRECEDING label must not break the `source`
+    /// label's extraction — the quote parity must survive the escape, so
+    /// the `source` value is still read and matched.
+    #[test]
+    fn test_parse_escaped_quote_before_source_label() {
+        let body =
+            "vllm:prompt_tokens_by_source_total{model=\"a\\\"b\",source=\"local_compute\"} 7";
+        let (kind, c) = parse_engine_metrics(body).expect("escaped quote line parses");
+        assert_eq!(kind, EngineKind::Vllm);
+        assert_eq!(
+            c.prompt_computed,
+            Some(7.0),
+            "the escaped quote must not break the source label's extraction"
+        );
+    }
+
+    /// A `}` inside a quoted value must not close the label set (existing
+    /// behavior, regression-guarded through the escape-aware walk).
+    #[test]
+    fn test_parse_brace_in_quoted_value() {
+        let body = "vllm:generation_tokens_total{model=\"a}b\"} 5";
+        let (kind, c) = parse_engine_metrics(body).expect("in-quote brace line parses");
+        assert_eq!(kind, EngineKind::Vllm);
+        assert_eq!(c.decode_tokens, Some(5.0));
     }
 
     #[test]

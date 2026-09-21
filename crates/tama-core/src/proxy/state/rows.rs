@@ -72,6 +72,7 @@ fn row_from(p: &ProcessInfo, last_seen_ms: i64) -> ModelRow {
         tps: p.tps.map(|v| v as f32),
         prompt_tps: p.prompt_tps.map(|v| v as f32),
         cache_hit_pct: p.cache_hit_pct.map(|v| v as f32),
+        last_obs_ms: p.last_obs_ms,
     }
 }
 
@@ -112,6 +113,12 @@ pub struct ModelRow {
     /// Windowed prefix-cache hit percentage (0-100) from the tamad's scrape
     /// (ADR-0014); same `None` semantics as `tps`.
     pub cache_hit_pct: Option<f32>,
+    /// Last traffic-bearing observation (Unix millis, tamad clock, ADR-0014);
+    /// `None` = no traffic in the tamad's 30s window (or never observed).
+    /// Rides the wire so the merge can stamp the inference entry's
+    /// `last_updated_ms` with the observation time (deterministic aggregate
+    /// selection — no shared-timestamp ties).
+    pub last_obs_ms: Option<i64>,
 }
 
 /// Transactionally spawn as a Vec + index so `all()` can hand out a slice.
@@ -234,6 +241,7 @@ mod tests {
             tps: None,
             prompt_tps: None,
             cache_hit_pct: None,
+            last_obs_ms: None,
         }
     }
 
@@ -443,6 +451,7 @@ mod tests {
         p.tps = Some(42.0);
         p.prompt_tps = Some(120.0);
         p.cache_hit_pct = Some(25.0);
+        p.last_obs_ms = Some(1234);
         let rows = live(&pool_with(stats_with(vec![p])).await).await;
         let r = rows.row("qwen3-spec").expect("ready row present");
         assert_eq!(
@@ -464,6 +473,11 @@ mod tests {
             r.cache_hit_pct,
             Some(25.0),
             "windowed cache_hit_pct rides the wire"
+        );
+        assert_eq!(
+            r.last_obs_ms,
+            Some(1234),
+            "the observation time rides the wire (ADR-0014)"
         );
     }
 
@@ -491,6 +505,7 @@ mod tests {
         assert_eq!(r.tps, None);
         assert_eq!(r.prompt_tps, None);
         assert_eq!(r.cache_hit_pct, None);
+        assert_eq!(r.last_obs_ms, None, "never observed → no observation time");
     }
 
     /// plan-193 T6 — the `models_loaded` semantics switch, as a count,

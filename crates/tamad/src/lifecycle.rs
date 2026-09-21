@@ -113,6 +113,7 @@ pub fn to_process_info(entry: &ProcessEntry, store_row: Option<&StoredProcess>) 
         tps: None,
         prompt_tps: None,
         cache_hit_pct: None,
+        last_obs_ms: None,
     }
 }
 
@@ -2767,6 +2768,7 @@ mod tests {
             tps: None,
             prompt_tps: None,
             cache_hit_pct: None,
+            last_obs_ms: None,
         };
         let bytes = old.encode_to_vec();
         let decoded = ProcessInfo::decode(::prost::bytes::Bytes::from(bytes)).unwrap();

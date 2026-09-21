@@ -38,6 +38,7 @@ async fn test_handle_tama_system_health() {
             tps: None,
             prompt_tps: None,
             cache_hit_pct: None,
+            last_obs_ms: None,
         };
         let stats = stats_full(1.5, vec![], vec![proc]);
         let pool = state.tamad_pool();
