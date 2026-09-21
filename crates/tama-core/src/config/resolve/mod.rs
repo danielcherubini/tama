@@ -588,6 +588,13 @@ impl Config {
             }
         }
 
+        // Managed flag (ADR-0014): the tamad scrapes the engine's /metrics endpoint
+        // for inference stats; llama.cpp serves it only with --metrics (501 without).
+        // Inject for llama.cpp backends, presence-checked (user args never overridden).
+        if is_llama_cpp_backend {
+            crate::config::llama_cpp_args::ensure_metrics(&mut grouped);
+        }
+
         // Sampling: each sampling flag fully replaces the same flag in
         // anything injected so far.
         if let Some(sampling) = &server.sampling {

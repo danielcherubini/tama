@@ -54,6 +54,10 @@ async fn seed_live_row(state: &Arc<ProxyState>, model_id: &str, endpoint: &str) 
         max_restarts: 3,
         spec_accept_pct: None,
         spec_decoding_active: false,
+        tps: None,
+        prompt_tps: None,
+        cache_hit_pct: None,
+        last_obs_ms: None,
     };
     let stats = stats_full(1.5, vec![], vec![proc]);
     let pool = state.tamad_pool();
@@ -79,9 +83,9 @@ async fn test_forward_request_conn_error_returns_502_and_cleans_up() {
     seed_live_row(&state, "test-model", "http://127.0.0.1:1").await;
 
     // Pre-seed inference_stats so we can assert it's cleared.
-    state
-        .metrics
-        .record_inference_stats("test-model", LatestInferenceStats::default());
+    state.metrics.modify_inference_stats(|m| {
+        m.insert("test-model".to_string(), LatestInferenceStats::default());
+    });
 
     let resp = forward_request(
         &state,

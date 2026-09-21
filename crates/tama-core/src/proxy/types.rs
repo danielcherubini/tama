@@ -13,24 +13,26 @@ pub struct ProxyMetrics {
     pub failed_requests: std::sync::atomic::AtomicU64,
 }
 
-/// Latest inference timing stats extracted from llama_cpp response `timings` object.
+/// Latest inference stats for a backend server.
 ///
-/// Stored behind a `watch` channel in `ProxyState`. Updated on each non-streaming
-/// response that includes a `timings` field. Fields are `Option<f32>` — `None` when
-/// the value cannot be computed (e.g. division by zero) or has not been observed yet.
+/// Sole source (ADR-0014): the tamad's windowed `/metrics` scrape, folded
+/// into this map by `merge_tamad_inference_stats`. Fields are `Option<f32>`
+/// — `None` when the value was not observed in the last 30 s (or the
+/// engine doesn't expose the counter).
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct LatestInferenceStats {
-    /// Token generation speed (predicted_per_second from timings)
+    /// Windowed decode tokens/s (Δ generation tokens / Δt over the scrape window)
     pub tps: Option<f32>,
-    /// Prompt processing speed in tokens per second (prompt_per_second from timings)
+    /// Windowed prompt processing speed in tokens per second (compute-only tokens)
     pub prompt_tps: Option<f32>,
-    /// Cache hit rate percentage (cache_n / prompt_n * 100), None if prompt_n == 0
+    /// Windowed cache hit rate percentage, None if no prompt tokens in the window
     pub cache_hit_pct: Option<f32>,
-    /// Speculative decoding acceptance rate (draft_n_accepted / draft_n * 100), None if draft_n == 0
+    /// Windowed speculative decoding acceptance rate, None if no draft tokens in the window
     pub spec_accept_pct: Option<f32>,
-    /// True if draft_n > 0 has ever been observed (spec decoding is active on this backend)
+    /// The last window's spec-traffic flag (Δ draft tokens > 0) — NOT sticky:
+    /// the merge overwrites it, so it un-sticks 30 s after the last spec traffic
     pub spec_decoding_active: bool,
-    /// Unix ms timestamp of the last update
+    /// Unix ms timestamp of the last merge that observed `tps` (proxy clock)
     pub last_updated_ms: i64,
 }
 

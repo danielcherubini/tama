@@ -343,6 +343,10 @@ mod tests {
                 max_restarts: 3,
                 spec_accept_pct: None,
                 spec_decoding_active: false,
+                tps: None,
+                prompt_tps: None,
+                cache_hit_pct: None,
+                last_obs_ms: None,
             };
             let stats = crate::tamad::pool::test_support::stats_full(1.5, vec![], vec![proc]);
             state

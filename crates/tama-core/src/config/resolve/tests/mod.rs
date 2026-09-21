@@ -6,6 +6,7 @@ mod batch_args;
 mod context_np;
 mod gpu_device;
 mod kv_cache_types;
+mod metrics_flag;
 mod path_resolution;
 mod server_resolution;
 mod spec_decoding;

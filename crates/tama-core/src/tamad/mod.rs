@@ -59,6 +59,10 @@ mod tests {
                 max_restarts: 0,
                 spec_accept_pct: None,
                 spec_decoding_active: false,
+                tps: None,
+                prompt_tps: None,
+                cache_hit_pct: None,
+                last_obs_ms: None,
             }],
         };
         assert_eq!(stats.cpu_usage_percent, 42.5);
@@ -145,6 +149,10 @@ mod tests {
                 max_restarts: 0,
                 spec_accept_pct: None,
                 spec_decoding_active: false,
+                tps: None,
+                prompt_tps: None,
+                cache_hit_pct: None,
+                last_obs_ms: None,
             }],
         };
         assert_eq!(provider.loaded_models.len(), 1);
@@ -202,5 +210,45 @@ mod tests {
         };
         assert!(remove.gpu_variant.is_empty());
         assert!(remove.version.is_empty());
+    }
+
+    /// ADR-0014: the new inference-stats fields (ProcessInfo 12-15) use
+    /// explicit proto3 presence — `Some(0.0)` round-trips as `Some(0.0)`
+    /// (0.0 is NOT the same as absent), and an unset field round-trips
+    /// as `None`. An old tamad's frame (fields omitted) decodes to `None`.
+    #[test]
+    fn test_process_info_inference_stats_explicit_presence() {
+        use prost::Message;
+
+        let p = ProcessInfo {
+            model_name: "qwen3".to_string(),
+            provider_name: "vllm".to_string(),
+            pid: 1,
+            alive: true,
+            endpoint_url: "http://127.0.0.1:8000".to_string(),
+            status: "ready".to_string(),
+            desired: false,
+            restart_count: 0,
+            max_restarts: 0,
+            spec_accept_pct: None,
+            spec_decoding_active: false,
+            tps: Some(0.0),
+            prompt_tps: None,
+            cache_hit_pct: None,
+            last_obs_ms: Some(1234),
+        };
+        let bytes = p.encode_to_vec();
+        let back = ProcessInfo::decode(&bytes[..]).expect("round-trip decode");
+        assert_eq!(back.tps, Some(0.0), "explicit 0.0 is not absent");
+        assert_eq!(back.prompt_tps, None, "unset field round-trips as None");
+        assert_eq!(back.cache_hit_pct, None, "unset field round-trips as None");
+        assert_eq!(back.last_obs_ms, Some(1234), "explicit value round-trips");
+
+        // Unset last_obs_ms (an old tamad's frame) decodes to None.
+        let mut p2 = p;
+        p2.last_obs_ms = None;
+        let bytes2 = p2.encode_to_vec();
+        let back2 = ProcessInfo::decode(&bytes2[..]).expect("round-trip decode");
+        assert_eq!(back2.last_obs_ms, None, "unset field round-trips as None");
     }
 }

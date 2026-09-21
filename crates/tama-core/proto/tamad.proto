@@ -167,6 +167,21 @@ message ProcessInfo {
   // recently or engine is not vLLM). See ADR-0012.
   optional double spec_accept_pct = 10;
   bool spec_decoding_active = 11;
+
+  // Inference stats observed by the tamad's /metrics scrape (ADR-0014):
+  // windowed Δ/Δt over the measured scrape interval. None = no traffic in
+  // the window, observation stale (>30s), or the engine doesn't expose
+  // the counter.
+  optional double tps = 12;
+  optional double prompt_tps = 13;
+  optional double cache_hit_pct = 14;
+
+  // Unix millis (tamad clock) of the last traffic-bearing observation window;
+  // ADR-0014. None = no traffic in the last 30s (or never observed). The
+  // proxy stamps the per-backend inference entry's last_updated_ms from this
+  // so the aggregate's "most recently active backend wins" is deterministic
+  // (no shared-timestamp ties).
+  optional int64 last_obs_ms = 15;
 }
 
 message SystemStats {

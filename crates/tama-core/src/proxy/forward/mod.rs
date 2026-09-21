@@ -3,7 +3,6 @@ pub(super) mod json;
 pub(super) mod langfuse;
 pub(super) mod request;
 pub(super) mod sse;
-pub(super) mod stats;
 
 #[cfg(test)]
 mod tests;

@@ -108,6 +108,12 @@ pub fn to_process_info(entry: &ProcessEntry, store_row: Option<&StoredProcess>) 
         // tamad backend /metrics scrape populates them (plan-194 Task 2).
         spec_accept_pct: None,
         spec_decoding_active: false,
+        // Inference stats (wire fields 12-14, ADR-0014): defaults until
+        // the tamad's /metrics scrape window populates them.
+        tps: None,
+        prompt_tps: None,
+        cache_hit_pct: None,
+        last_obs_ms: None,
     }
 }
 
@@ -2759,6 +2765,10 @@ mod tests {
             max_restarts: 0,
             spec_accept_pct: None,
             spec_decoding_active: false,
+            tps: None,
+            prompt_tps: None,
+            cache_hit_pct: None,
+            last_obs_ms: None,
         };
         let bytes = old.encode_to_vec();
         let decoded = ProcessInfo::decode(::prost::bytes::Bytes::from(bytes)).unwrap();

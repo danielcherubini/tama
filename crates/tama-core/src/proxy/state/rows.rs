@@ -69,6 +69,10 @@ fn row_from(p: &ProcessInfo, last_seen_ms: i64) -> ModelRow {
         max_restarts: p.max_restarts,
         spec_accept_pct: p.spec_accept_pct.map(|v| v as f32),
         spec_decoding_active: p.spec_decoding_active,
+        tps: p.tps.map(|v| v as f32),
+        prompt_tps: p.prompt_tps.map(|v| v as f32),
+        cache_hit_pct: p.cache_hit_pct.map(|v| v as f32),
+        last_obs_ms: p.last_obs_ms,
     }
 }
 
@@ -100,6 +104,21 @@ pub struct ModelRow {
     pub spec_accept_pct: Option<f32>,
     /// Whether the backend currently has spec decoding active (vLLM only).
     pub spec_decoding_active: bool,
+    /// Windowed decode tokens/s from the tamad's scrape (ADR-0014); `None` = no
+    /// traffic observed, stale, or engine doesn't expose the counter.
+    pub tps: Option<f32>,
+    /// Windowed prompt (compute-only) tokens/s from the tamad's scrape
+    /// (ADR-0014); same `None` semantics as `tps`.
+    pub prompt_tps: Option<f32>,
+    /// Windowed prefix-cache hit percentage (0-100) from the tamad's scrape
+    /// (ADR-0014); same `None` semantics as `tps`.
+    pub cache_hit_pct: Option<f32>,
+    /// Last traffic-bearing observation (Unix millis, tamad clock, ADR-0014);
+    /// `None` = no traffic in the tamad's 30s window (or never observed).
+    /// Rides the wire so the merge can stamp the inference entry's
+    /// `last_updated_ms` with the observation time (deterministic aggregate
+    /// selection — no shared-timestamp ties).
+    pub last_obs_ms: Option<i64>,
 }
 
 /// Transactionally spawn as a Vec + index so `all()` can hand out a slice.
@@ -219,6 +238,10 @@ mod tests {
             max_restarts,
             spec_accept_pct: None,
             spec_decoding_active: false,
+            tps: None,
+            prompt_tps: None,
+            cache_hit_pct: None,
+            last_obs_ms: None,
         }
     }
 
@@ -416,14 +439,19 @@ mod tests {
         assert!(rows.all().is_empty());
     }
 
-    /// Wire spec-decode fields (ProcessInfo fields 10-11, ADR-0012) ride
-    /// onto the live row: a vLLM process reporting an acceptance rate and
-    /// active spec decoding surfaces both on the ModelRow.
+    /// Wire inference-stats fields (ProcessInfo fields 10-14, ADR-0012/
+    /// ADR-0014) ride onto the live row: a vLLM process reporting an
+    /// acceptance rate, active spec decoding, and windowed rates surfaces
+    /// all of them on the ModelRow.
     #[tokio::test]
     async fn test_row_carries_spec_decode_fields() {
         let mut p = proc("qwen3-spec", "ready", true, "http://x:1", true, 0, 3);
         p.spec_accept_pct = Some(44.5);
         p.spec_decoding_active = true;
+        p.tps = Some(42.0);
+        p.prompt_tps = Some(120.0);
+        p.cache_hit_pct = Some(25.0);
+        p.last_obs_ms = Some(1234);
         let rows = live(&pool_with(stats_with(vec![p])).await).await;
         let r = rows.row("qwen3-spec").expect("ready row present");
         assert_eq!(
@@ -435,10 +463,27 @@ mod tests {
             r.spec_decoding_active,
             "spec-decode active flag rides the wire"
         );
+        assert_eq!(r.tps, Some(42.0), "windowed tps rides the wire");
+        assert_eq!(
+            r.prompt_tps,
+            Some(120.0),
+            "windowed prompt_tps rides the wire"
+        );
+        assert_eq!(
+            r.cache_hit_pct,
+            Some(25.0),
+            "windowed cache_hit_pct rides the wire"
+        );
+        assert_eq!(
+            r.last_obs_ms,
+            Some(1234),
+            "the observation time rides the wire (ADR-0014)"
+        );
     }
 
-    /// The default wire frame (no spec observation) maps the spec-decode
-    /// fields to their `None`/`false` defaults — no population, no crash.
+    /// The default wire frame (no spec observation, no inference stats)
+    /// maps the spec-decode and inference-stats fields to their `None`/
+    /// `false` defaults — no population, no crash.
     #[tokio::test]
     async fn test_row_spec_fields_default_to_none_false() {
         let rows = live(
@@ -457,6 +502,10 @@ mod tests {
         let r = rows.row("qwen3").expect("ready row present");
         assert_eq!(r.spec_accept_pct, None);
         assert!(!r.spec_decoding_active);
+        assert_eq!(r.tps, None);
+        assert_eq!(r.prompt_tps, None);
+        assert_eq!(r.cache_hit_pct, None);
+        assert_eq!(r.last_obs_ms, None, "never observed → no observation time");
     }
 
     /// plan-193 T6 — the `models_loaded` semantics switch, as a count,
