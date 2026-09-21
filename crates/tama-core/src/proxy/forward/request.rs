@@ -5,7 +5,6 @@ use super::langfuse::{
     extract_usage, get_gpu_power_watts, parse_sse_accumulated, LangfuseTelemetry,
 };
 use super::sse::process_sse_line;
-use super::stats::extract_inference_stats;
 use crate::proxy::{api_keys::AuthSubject, ProxyState};
 use axum::{body::Body, http::request::Parts, response::IntoResponse};
 use bytes::{Bytes, BytesMut};
@@ -224,9 +223,6 @@ pub async fn forward_request(
                 // When Langfuse streaming capture is enabled, tee raw bytes via mpsc
                 // for background accumulation and telemetry reporting.
                 let model_name: Option<String> = model_name.map(|s| s.to_string());
-                let backend_name_owned = backend_name.to_string();
-                // Clone metrics_state for sharing across async unfold iterations.
-                let metrics_state = state.metrics.clone();
                 let byte_stream = response.bytes_stream();
 
                 // Channel for tee'd bytes — None when capture disabled.
@@ -294,8 +290,6 @@ pub async fn forward_request(
                     (byte_stream, String::new()),
                     move |(mut stream, mut line_buf)| {
                         let model_name = model_name.clone();
-                        let backend_name = backend_name_owned.clone();
-                        let metrics_state = metrics_state.clone();
                         let tx = tx.clone(); // Option<UnboundedSender<Bytes>> clone for closure
                         async move {
                             let chunk_result = stream.next().await?;
@@ -317,9 +311,7 @@ pub async fn forward_request(
                                             process_sse_line(
                                                 &line,
                                                 model_name.as_deref(),
-                                                &backend_name,
                                                 &mut out,
-                                                Some(&metrics_state),
                                             );
                                         }
                                     }
@@ -354,9 +346,6 @@ pub async fn forward_request(
                 // Only attempt JSON rewrite if content is valid JSON
                 let new_body = if let Ok(parsed) = serde_json::from_slice::<JsonValue>(&body_bytes)
                 {
-                    // Extract inference stats from timings (before rewrite — timings unaffected by model name change)
-                    let _stats = extract_inference_stats(backend_name, &parsed, &state.metrics);
-
                     // Collect Langfuse telemetry (non-streaming path) — fire-and-forget.
                     // MUST be before rewrite_json_model_name which consumes `parsed`.
                     {

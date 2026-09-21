@@ -65,13 +65,6 @@ impl MetricsState {
         self.inference_stats.send_modify(f);
     }
 
-    /// Record inference stats for a specific backend.
-    pub(crate) fn record_inference_stats(&self, backend: &str, stats: LatestInferenceStats) {
-        self.modify_inference_stats(|map| {
-            map.insert(backend.to_string(), stats);
-        });
-    }
-
     /// Clear all inference stats by replacing the watch channel value with an empty HashMap.
     pub(crate) fn clear_inference_stats(&self) {
         let _ = self.inference_stats.send_replace(HashMap::new());
@@ -130,58 +123,28 @@ mod tests {
         assert_eq!(snap.ram_used_mib, 8192);
     }
 
-    /// Verify that record_inference_stats inserts a backend's stats and
-    /// inference_stats_snapshot returns them.
-    #[tokio::test]
-    async fn test_record_inference_stats_and_snapshot() {
-        let state = MetricsState::new();
-
-        // Snapshot should be empty initially
-        let snap = state.inference_stats_snapshot();
-        assert!(snap.is_empty());
-
-        // Record stats for a backend
-        state.record_inference_stats(
-            "llama_cpp",
-            LatestInferenceStats {
-                tps: Some(50.0),
-                prompt_tps: Some(200.0),
-                cache_hit_pct: Some(85.0),
-                spec_accept_pct: Some(90.0),
-                spec_decoding_active: true,
-                last_updated_ms: 1700000000000,
-            },
-        );
-
-        // Snapshot should contain the backend
-        let snap = state.inference_stats_snapshot();
-        assert_eq!(snap.len(), 1);
-        let stats = &snap["llama_cpp"];
-        assert_eq!(stats.tps, Some(50.0));
-        assert_eq!(stats.cache_hit_pct, Some(85.0));
-        assert!(stats.spec_decoding_active);
-    }
-
     /// Verify that clear_inference_stats empties the map.
     #[tokio::test]
     async fn test_clear_inference_stats() {
         let state = MetricsState::new();
 
-        // Record some stats
-        state.record_inference_stats(
-            "backend-a",
-            LatestInferenceStats {
-                tps: Some(10.0),
-                ..Default::default()
-            },
-        );
-        state.record_inference_stats(
-            "backend-b",
-            LatestInferenceStats {
-                tps: Some(20.0),
-                ..Default::default()
-            },
-        );
+        // Seed some stats
+        state.modify_inference_stats(|m| {
+            m.insert(
+                "backend-a".to_string(),
+                LatestInferenceStats {
+                    tps: Some(10.0),
+                    ..Default::default()
+                },
+            );
+            m.insert(
+                "backend-b".to_string(),
+                LatestInferenceStats {
+                    tps: Some(20.0),
+                    ..Default::default()
+                },
+            );
+        });
         assert_eq!(state.inference_stats_snapshot().len(), 2);
 
         // Clear should empty the map
@@ -209,14 +172,16 @@ mod tests {
     async fn test_modify_inference_stats() {
         let state = MetricsState::new();
 
-        // Record initial stats
-        state.record_inference_stats(
-            "backend-a",
-            LatestInferenceStats {
-                tps: Some(10.0),
-                ..Default::default()
-            },
-        );
+        // Seed initial stats
+        state.modify_inference_stats(|m| {
+            m.insert(
+                "backend-a".to_string(),
+                LatestInferenceStats {
+                    tps: Some(10.0),
+                    ..Default::default()
+                },
+            );
+        });
 
         // Modify via closure — change tps for backend-a
         state.modify_inference_stats(|map| {

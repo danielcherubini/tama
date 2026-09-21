@@ -742,17 +742,19 @@ mod tests {
     #[tokio::test]
     async fn test_merge_overwrites_forwarder_write() {
         let state = state_with_live_model("alpha", Some(44.5), true).await;
-        state.metrics.record_inference_stats(
-            "alpha",
-            crate::proxy::types::LatestInferenceStats {
-                tps: Some(50.0),
-                prompt_tps: Some(200.0),
-                cache_hit_pct: Some(85.0),
-                spec_accept_pct: None,
-                spec_decoding_active: false,
-                last_updated_ms: 123,
-            },
-        );
+        state.metrics.modify_inference_stats(|m| {
+            m.insert(
+                "alpha".to_string(),
+                crate::proxy::types::LatestInferenceStats {
+                    tps: Some(50.0),
+                    prompt_tps: Some(200.0),
+                    cache_hit_pct: Some(85.0),
+                    spec_accept_pct: None,
+                    spec_decoding_active: false,
+                    last_updated_ms: 123,
+                },
+            );
+        });
 
         let live = crate::proxy::live_rows(state.tamad_pool().as_ref()).await;
         merge_tamad_inference_stats(&state, &live).await;
@@ -808,17 +810,19 @@ mod tests {
     #[tokio::test]
     async fn test_merge_overwrites_including_none() {
         let state = state_with_live_model("gamma", None, false).await;
-        state.metrics.record_inference_stats(
-            "gamma",
-            crate::proxy::types::LatestInferenceStats {
-                tps: Some(50.0),
-                prompt_tps: Some(200.0),
-                cache_hit_pct: Some(85.0),
-                spec_accept_pct: Some(30.0),
-                spec_decoding_active: true,
-                last_updated_ms: 500,
-            },
-        );
+        state.metrics.modify_inference_stats(|m| {
+            m.insert(
+                "gamma".to_string(),
+                crate::proxy::types::LatestInferenceStats {
+                    tps: Some(50.0),
+                    prompt_tps: Some(200.0),
+                    cache_hit_pct: Some(85.0),
+                    spec_accept_pct: Some(30.0),
+                    spec_decoding_active: true,
+                    last_updated_ms: 500,
+                },
+            );
+        });
 
         let live = crate::proxy::live_rows(state.tamad_pool().as_ref()).await;
         merge_tamad_inference_stats(&state, &live).await;
@@ -846,17 +850,19 @@ mod tests {
     #[tokio::test]
     async fn test_merge_stamps_last_updated_only_when_some() {
         let state = state_with_live_model("delta", None, false).await;
-        state.metrics.record_inference_stats(
-            "delta",
-            crate::proxy::types::LatestInferenceStats {
-                tps: Some(50.0),
-                prompt_tps: None,
-                cache_hit_pct: None,
-                spec_accept_pct: None,
-                spec_decoding_active: false,
-                last_updated_ms: 1000,
-            },
-        );
+        state.metrics.modify_inference_stats(|m| {
+            m.insert(
+                "delta".to_string(),
+                crate::proxy::types::LatestInferenceStats {
+                    tps: Some(50.0),
+                    prompt_tps: None,
+                    cache_hit_pct: None,
+                    spec_accept_pct: None,
+                    spec_decoding_active: false,
+                    last_updated_ms: 1000,
+                },
+            );
+        });
 
         // A tps: None row must not touch last_updated_ms.
         let live = crate::proxy::live_rows(state.tamad_pool().as_ref()).await;

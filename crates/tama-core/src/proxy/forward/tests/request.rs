@@ -82,9 +82,9 @@ async fn test_forward_request_conn_error_returns_502_and_cleans_up() {
     seed_live_row(&state, "test-model", "http://127.0.0.1:1").await;
 
     // Pre-seed inference_stats so we can assert it's cleared.
-    state
-        .metrics
-        .record_inference_stats("test-model", LatestInferenceStats::default());
+    state.metrics.modify_inference_stats(|m| {
+        m.insert("test-model".to_string(), LatestInferenceStats::default());
+    });
 
     let resp = forward_request(
         &state,
