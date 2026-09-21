@@ -159,6 +159,9 @@ mod tests {
             max_restarts: 0,
             spec_accept_pct: None,
             spec_decoding_active: false,
+            tps: None,
+            prompt_tps: None,
+            cache_hit_pct: None,
         }
     }
 

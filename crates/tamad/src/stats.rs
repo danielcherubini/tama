@@ -12,8 +12,8 @@ use std::path::Path;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::engine_metrics;
 use crate::state::TamadState;
-use crate::vllm_metrics;
 use tama_core::tamad::GpuInfo;
 use tama_core::tamad::ProcessInfo;
 use tama_core::tamad::SystemStats;
@@ -27,9 +27,9 @@ pub struct StatsCollector {
     sys: sysinfo::System,
     /// Refreshed per tick.
     disks: sysinfo::Disks,
-    /// Spec-decode scrape state per model_name (all ready+alive backends,
-    /// any engine — the scraped body determines vLLM-ness).
-    spec: HashMap<String, SpecState>,
+    /// Engine-metrics scrape state per model_name (all ready+alive
+    /// backends, any engine — the scraped body determines the engine).
+    engine: HashMap<String, EngineState>,
     /// Overridable in tests (`Duration::ZERO` = scrape every tick).
     scrape_interval: Duration,
     /// Blocking HTTP client for `/metrics` scrapes (per-scrape timeout),
@@ -45,22 +45,25 @@ pub struct StatsCollector {
     http: OnceLock<Option<reqwest::blocking::Client>>,
 }
 
-/// Per-endpoint spec-decode scrape state. `prev` is the last cumulative
+/// Per-endpoint engine-metrics scrape state. `prev` is the last cumulative
 /// counter set (diffed on the next scrape); the `last_*` fields are the
 /// most recent observation until it goes stale or is evicted.
 #[derive(Debug, Default)]
-struct SpecState {
+struct EngineState {
     /// Last cumulative counter set (None until the first successful parse).
-    prev: Option<vllm_metrics::SpecCounters>,
-    /// The last scraped body contained the vLLM spec-decode counters.
-    is_vllm: bool,
+    prev: Option<engine_metrics::EngineCounters>,
+    /// Engine family of the last parsed body (body-driven detection).
+    kind: Option<engine_metrics::EngineKind>,
     /// Last scrape attempt, for the per-endpoint scrape throttle.
     last_scrape: Option<Instant>,
-    /// Acceptance rate of the last window with spec traffic.
-    last_rate_pct: Option<f64>,
-    /// Whether the last observation window had spec traffic.
-    last_active: bool,
-    /// Unix millis of the last observation (poison-pill for freshness).
+    /// Last SUCCESSFUL parse, for the window length (`dt`). A failed attempt
+    /// or an unknown body must NOT shorten the next window — the counters
+    /// advanced over the full interval since the last successful parse.
+    last_parse: Option<Instant>,
+    /// The most recent window observation (None until a window had traffic).
+    last_obs: Option<engine_metrics::WindowObs>,
+    /// Unix millis of the last traffic-bearing observation (poison-pill for
+    /// freshness).
     last_obs_ms: i64,
 }
 
@@ -79,8 +82,8 @@ impl StatsCollector {
             state,
             sys,
             disks: sysinfo::Disks::new_with_refreshed_list(),
-            spec: HashMap::new(),
-            scrape_interval: vllm_metrics::SCRAPE_INTERVAL,
+            engine: HashMap::new(),
+            scrape_interval: engine_metrics::SCRAPE_INTERVAL,
             http: OnceLock::new(),
         }
     }
@@ -100,7 +103,7 @@ impl StatsCollector {
         self.http
             .get_or_init(|| {
                 match reqwest::blocking::Client::builder()
-                    .timeout(vllm_metrics::PER_SCRAPE_TIMEOUT)
+                    .timeout(engine_metrics::PER_SCRAPE_TIMEOUT)
                     .build()
                 {
                     Ok(client) => Some(client),
@@ -186,13 +189,15 @@ impl StatsCollector {
         }
     }
 
-    /// Scrape `/metrics` for every ready+alive process and diff the spec
-    /// counters; stamp `spec_accept_pct` / `spec_decoding_active` on the
-    /// matching entries. Blocking (HTTP) — legitimate only because `tick`
-    /// already runs via `spawn_blocking`. The tick must never linger: the
-    /// proxy's 5s `LIVE_FRAME_MAX_AGE` freshness gate blanks every model on
-    /// the host if a tick overshoots, so scrapes are throttled per endpoint
-    /// and the cumulative scrape work is capped at `TICK_SCRAPE_BUDGET`.
+    /// Scrape `/metrics` for every ready+alive process and diff the engine
+    /// counters; stamp `tps` / `prompt_tps` / `cache_hit_pct` /
+    /// `spec_accept_pct` / `spec_decoding_active` on the matching entries
+    /// (every field is 30s-gated, ADR-0014). Blocking (HTTP) — legitimate
+    /// only because `tick` already runs via `spawn_blocking`. The tick must
+    /// never linger: the proxy's 5s `LIVE_FRAME_MAX_AGE` freshness gate
+    /// blanks every model on the host if a tick overshoots, so scrapes are
+    /// throttled per endpoint and the cumulative scrape work is capped at
+    /// `TICK_SCRAPE_BUDGET`.
     /// The budget is preflighted *before* a scrape is started: a send
     /// can run up to the full `PER_SCRAPE_TIMEOUT` before timing out and
     /// cannot be interrupted, so a post-hoc check would admit one extra
@@ -214,7 +219,13 @@ impl StatsCollector {
                 continue;
             }
             let model_name = p.model_name.clone();
-            let throttled = self.spec.get(&model_name).is_some_and(|s| {
+            // The entry may not exist yet (the `entry().or_default()` binding
+            // is created AFTER the fetch), so read via `.get()`. It is the
+            // last SUCCESSFUL parse (not the last attempt) that anchors the
+            // window length — a failed attempt or an unknown body must not
+            // shorten the next window.
+            let prev_parse = self.engine.get(&model_name).and_then(|s| s.last_parse);
+            let throttled = self.engine.get(&model_name).is_some_and(|s| {
                 s.last_scrape.is_some_and(|t| {
                     self.scrape_interval > Duration::ZERO
                         && now.duration_since(t) < self.scrape_interval
@@ -227,12 +238,12 @@ impl StatsCollector {
             // refusing it now keeps total scrape work within the budget
             // even against a hanging engine.
             if throttled
-                || scrape_elapsed + vllm_metrics::PER_SCRAPE_TIMEOUT
-                    >= vllm_metrics::TICK_SCRAPE_BUDGET
+                || scrape_elapsed + engine_metrics::PER_SCRAPE_TIMEOUT
+                    >= engine_metrics::TICK_SCRAPE_BUDGET
             {
                 continue;
             }
-            let Some(url) = vllm_metrics::metrics_url_for(&p.endpoint_url) else {
+            let Some(url) = engine_metrics::metrics_url_for(&p.endpoint_url) else {
                 continue;
             };
 
@@ -242,7 +253,7 @@ impl StatsCollector {
                 r.text().map(move |t| (ok, t))
             });
             scrape_elapsed += t0.elapsed();
-            let s = self.spec.entry(model_name).or_default();
+            let s = self.engine.entry(model_name).or_default();
             s.last_scrape = Some(Instant::now());
 
             // ANY failure (send error, non-2xx, text error): debug-log
@@ -251,55 +262,81 @@ impl StatsCollector {
             let text = match outcome {
                 Ok((true, t)) => t,
                 Ok((false, _)) => {
-                    tracing::debug!("{} spec scrape: non-2xx response", p.model_name);
+                    tracing::debug!("{} engine scrape: non-2xx response", p.model_name);
                     continue;
                 }
                 Err(e) => {
-                    tracing::debug!("{} spec scrape failed: {e}", p.model_name);
+                    tracing::debug!("{} engine scrape failed: {e}", p.model_name);
                     continue;
                 }
             };
 
-            match vllm_metrics::parse_spec_metrics(&text) {
-                // Non-vLLM engine (or a vLLM build without the spec
-                // counters): leave the entry at its `to_process_info`
-                // defaults and memo that it is not a vLLM engine.
-                None => s.is_vllm = false,
-                Some(cur) => {
-                    s.is_vllm = true;
-                    if let Some((pct, active)) = vllm_metrics::observe(s.prev, cur) {
-                        s.last_rate_pct = Some(pct);
-                        s.last_active = active;
-                        s.last_obs_ms = now_ms;
-                    }
-                    s.prev = Some(cur);
+            let (kind, cur) = match engine_metrics::parse_engine_metrics(&text) {
+                Some(k) => k,
+                // Unknown engine body: leave `prev`/`last_parse` untouched
+                // (the next window's `dt` spans the whole interval — the
+                // counters advanced over it) and memo that the engine is
+                // unrecognised.
+                None => {
+                    s.kind = None;
+                    continue;
                 }
+            };
+            let dt_secs = prev_parse
+                .map(|t| (Instant::now() - t).as_secs_f64())
+                .unwrap_or(1.0); // first successful parse: prev is None so
+                                 // observe() returns None anyway
+            let obs = engine_metrics::observe(s.prev, &cur, dt_secs);
+            s.kind = Some(kind);
+            if let Some(o) = obs {
+                // ONLY a traffic-bearing window updates the observation and
+                // its timestamp — an idle window (observe() → None) must
+                // leave the last observation intact until it goes stale
+                // (30s, below).
+                s.last_obs_ms = now_ms;
+                s.last_obs = Some(o);
             }
+            s.last_parse = Some(Instant::now()); // dt anchor — every successful parse
+            s.prev = Some(cur);
         }
 
         // Evict state for models no longer in this tick's process list — a
         // restarted engine gets a fresh `prev` (its counters were reset).
         let current: std::collections::HashSet<&str> =
             processes.iter().map(|p| p.model_name.as_str()).collect();
-        self.spec.retain(|name, _| current.contains(name.as_str()));
+        self.engine
+            .retain(|name, _| current.contains(name.as_str()));
 
-        // Emit observations to the tracked entries. An entry summarizes as
-        // inactive (defaults) as soon as it stops being ready, or when the
-        // observation goes stale (older than STALE_MS).
+        // Emit observations to the tracked entries. Every field is now
+        // 30s-gated (ADR-0014): an entry stamps the last traffic-bearing
+        // observation while fresh, and blanks (defaults) as soon as it
+        // stops being ready or the observation goes stale.
         for p in processes.iter_mut() {
             if p.status != "ready" || !p.alive {
                 continue;
             }
-            let Some(s) = self.spec.get(&p.model_name) else {
+            let Some(s) = self.engine.get(&p.model_name) else {
                 continue;
             };
-            let fresh = now_ms - s.last_obs_ms <= vllm_metrics::STALE_MS;
-            p.spec_accept_pct = if s.is_vllm && fresh {
-                s.last_rate_pct
+            let fresh = now_ms - s.last_obs_ms <= engine_metrics::STALE_MS;
+            let o = s.last_obs;
+            p.tps = if fresh { o.and_then(|o| o.tps) } else { None };
+            p.prompt_tps = if fresh {
+                o.and_then(|o| o.prompt_tps)
             } else {
                 None
             };
-            p.spec_decoding_active = s.is_vllm && fresh && s.last_active;
+            p.cache_hit_pct = if fresh {
+                o.and_then(|o| o.cache_hit_pct)
+            } else {
+                None
+            };
+            p.spec_accept_pct = if fresh {
+                o.and_then(|o| o.spec_accept_pct)
+            } else {
+                None
+            };
+            p.spec_decoding_active = fresh && o.is_some_and(|o| o.spec_active);
         }
     }
 }
@@ -426,6 +463,9 @@ mod tests {
             max_restarts: 0,
             spec_accept_pct: None,
             spec_decoding_active: false,
+            tps: None,
+            prompt_tps: None,
+            cache_hit_pct: None,
         };
         let third = collector.tick(vec![proc.clone()]);
         assert_eq!(third.processes.len(), 1);
@@ -505,12 +545,51 @@ mod tests {
             max_restarts: 0,
             spec_accept_pct: None,
             spec_decoding_active: false,
+            tps: None,
+            prompt_tps: None,
+            cache_hit_pct: None,
         }
     }
 
-    /// VLLM body: three spec counters, one label set each.
-    fn vllm_body(drafts: f64, draft_tokens: f64, accepted: f64) -> String {
-        format!("\n# HELP vllm:spec_decode_num_drafts_total Total spec iterations\n# TYPE vllm:spec_decode_num_drafts_total counter\nvllm:spec_decode_num_drafts_total{{model_name=\"m\",engine=\"0\"}} {drafts}\nvllm:spec_decode_num_draft_tokens_total{{model_name=\"m\",engine=\"0\"}} {draft_tokens}\nvllm:spec_decode_num_accepted_tokens_total{{model_name=\"m\",engine=\"0\"}} {accepted}\n")
+    /// vLLM body: the token counters plus the three spec counters, one
+    /// label set each.
+    fn vllm_body(
+        gen: f64,
+        computed: f64,
+        cached: f64,
+        drafts: f64,
+        draft_tokens: f64,
+        accepted: f64,
+    ) -> String {
+        format!(
+            "\n# HELP vllm:generation_tokens_total Total generated tokens\n\
+             vllm:generation_tokens_total{{model_name=\"m\",engine=\"0\"}} {gen}\n\
+             vllm:prompt_tokens_by_source_total{{source=\"local_compute\",model_name=\"m\",engine=\"0\"}} {computed}\n\
+             vllm:prompt_tokens_by_source_total{{source=\"local_cache_hit\",model_name=\"m\",engine=\"0\"}} {cached}\n\
+             vllm:spec_decode_num_drafts_total{{model_name=\"m\",engine=\"0\"}} {drafts}\n\
+             vllm:spec_decode_num_draft_tokens_total{{model_name=\"m\",engine=\"0\"}} {draft_tokens}\n\
+             vllm:spec_decode_num_accepted_tokens_total{{model_name=\"m\",engine=\"0\"}} {accepted}\n"
+        )
+    }
+
+    /// llama.cpp body: the six unlabelled `llamacpp:` counters.
+    fn llamacpp_body(
+        gen: f64,
+        computed: f64,
+        cached: f64,
+        drafts: f64,
+        draft_tokens: f64,
+        accepted: f64,
+    ) -> String {
+        format!(
+            "\n# HELP llamacpp:tokens_predicted_total Total predicted tokens\n\
+             llamacpp:tokens_predicted_total {gen}\n\
+             llamacpp:prompt_tokens_total {computed}\n\
+             llamacpp:prompt_tokens_cached_total {cached}\n\
+             llamacpp:spec_decode_num_drafts_total {drafts}\n\
+             llamacpp:spec_decode_num_draft_tokens_total {draft_tokens}\n\
+             llamacpp:spec_decode_num_accepted_tokens_total {accepted}\n"
+        )
     }
 
     /// Two ticks against mock vLLM engines: the first scrape only seeds
@@ -529,34 +608,40 @@ mod tests {
             .build()
             .unwrap();
         // Tick-1 endpoint seeds the cumulative counters at zero; the tick-2
-        // endpoint serves the real-log window (165/371 ≈ 44.5%).
+        // endpoint serves the real-log window (165/371 ≈ 44.5%) plus the
+        // token counters (500/200/50).
         let seed = rt.block_on(MockServer::start());
         let next = rt.block_on(MockServer::start());
         rt.block_on(
             Mock::given(method("GET"))
                 .and(path("/metrics"))
-                .respond_with(ResponseTemplate::new(200).set_body_string(vllm_body(0.0, 0.0, 0.0)))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string(vllm_body(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)),
+                )
                 .mount(&seed),
         );
         rt.block_on(
             Mock::given(method("GET"))
                 .and(path("/metrics"))
                 .respond_with(
-                    ResponseTemplate::new(200).set_body_string(vllm_body(115.0, 371.0, 165.0)),
+                    ResponseTemplate::new(200)
+                        .set_body_string(vllm_body(500.0, 200.0, 50.0, 115.0, 371.0, 165.0)),
                 )
                 .mount(&next),
         );
 
         let (first, second) = std::thread::spawn(move || {
             let mut collector =
-                StatsCollector::new(test_state()).with_scrape_interval(Duration::from_millis(1));
+                StatsCollector::new(test_state()).with_scrape_interval(Duration::from_millis(50));
             let first = collector.tick(vec![spec_process(seed.uri())]);
             // Guarantee at least one scrape interval elapses between the
-            // two ticks: on fast CI machines tick 2 can land <1ms after
+            // two ticks: on fast CI machines tick 2 can land <50ms after
             // tick 1's scrape, the `last_scrape` guard would throttle it
             // and the 2nd tick would observe no fresh window (the
-            // presence-assert below would fail).
-            std::thread::sleep(Duration::from_millis(5));
+            // presence-assert below would fail) — and a real sleep also
+            // keeps `dt_secs` > 0 for the windowed rates.
+            std::thread::sleep(Duration::from_millis(60));
             let second = collector.tick(vec![spec_process(next.uri())]);
             (first, second)
         })
@@ -567,12 +652,185 @@ mod tests {
         assert_eq!(first.processes.len(), 1);
         assert!(first.processes[0].spec_accept_pct.is_none());
         assert!(!first.processes[0].spec_decoding_active);
+        assert!(first.processes[0].tps.is_none());
+        assert!(first.processes[0].prompt_tps.is_none());
+        assert!(first.processes[0].cache_hit_pct.is_none());
 
-        let Some(pct) = second.processes[0].spec_accept_pct else {
+        // Tick 2: the windowed observation is stamped — the spec
+        // acceptance rate is the real-log vector, and the token counters
+        // yield the windowed tps / prompt_tps / cache_hit_pct (the exact
+        // math is covered by the engine_metrics `observe` unit tests; here
+        // we only assert presence + sign).
+        let p = &second.processes[0];
+        let Some(pct) = p.spec_accept_pct else {
             panic!("expected a spec acceptance rate on tick 2");
         };
         assert!((44.4..=44.55).contains(&pct), "expected ~44.47, got {pct}");
-        assert!(second.processes[0].spec_decoding_active);
+        assert!(p.spec_decoding_active);
+        assert!(
+            p.tps.is_some_and(|v| v > 0.0),
+            "windowed tps stamped, got {:?}",
+            p.tps
+        );
+        assert!(
+            p.prompt_tps.is_some_and(|v| v > 0.0),
+            "windowed prompt_tps stamped, got {:?}",
+            p.prompt_tps
+        );
+        assert!(
+            p.cache_hit_pct.is_some_and(|v| (0.0..=100.0).contains(&v)),
+            "windowed cache_hit_pct stamped, got {:?}",
+            p.cache_hit_pct
+        );
+    }
+
+    /// A mock llama.cpp engine (unlabelled `llamacpp:` counters) gets the
+    /// windowed rates stamped on tick 2, mirroring the vLLM test — the
+    /// engine is detected from the body, not the provider name.
+    #[test]
+    fn test_tick_spec_scrape_llamacpp_positive() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let seed = rt.block_on(MockServer::start());
+        let next = rt.block_on(MockServer::start());
+        rt.block_on(
+            Mock::given(method("GET"))
+                .and(path("/metrics"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string(llamacpp_body(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)),
+                )
+                .mount(&seed),
+        );
+        rt.block_on(
+            Mock::given(method("GET"))
+                .and(path("/metrics"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string(llamacpp_body(500.0, 200.0, 50.0, 115.0, 371.0, 165.0)),
+                )
+                .mount(&next),
+        );
+
+        let (first, second) = std::thread::spawn(move || {
+            let mut collector =
+                StatsCollector::new(test_state()).with_scrape_interval(Duration::from_millis(50));
+            let first = collector.tick(vec![spec_process(seed.uri())]);
+            std::thread::sleep(Duration::from_millis(60));
+            let second = collector.tick(vec![spec_process(next.uri())]);
+            (first, second)
+        })
+        .join()
+        .unwrap();
+
+        assert_eq!(first.processes.len(), 1);
+        assert!(first.processes[0].tps.is_none());
+        assert!(first.processes[0].prompt_tps.is_none());
+        assert!(first.processes[0].cache_hit_pct.is_none());
+        assert!(first.processes[0].spec_accept_pct.is_none());
+        assert!(!first.processes[0].spec_decoding_active);
+
+        let p = &second.processes[0];
+        assert!(
+            p.tps.is_some_and(|v| v > 0.0),
+            "llama.cpp windowed tps stamped, got {:?}",
+            p.tps
+        );
+        assert!(
+            p.prompt_tps.is_some_and(|v| v > 0.0),
+            "llama.cpp windowed prompt_tps stamped, got {:?}",
+            p.prompt_tps
+        );
+        assert!(
+            p.cache_hit_pct.is_some_and(|v| (0.0..=100.0).contains(&v)),
+            "llama.cpp windowed cache_hit_pct stamped, got {:?}",
+            p.cache_hit_pct
+        );
+        let Some(pct) = p.spec_accept_pct else {
+            panic!("expected a spec acceptance rate on tick 2");
+        };
+        assert!((44.4..=44.55).contains(&pct), "expected ~44.47, got {pct}");
+        assert!(p.spec_decoding_active);
+    }
+
+    /// A stale observation (31s old) blanks ALL FIVE wire fields; the same
+    /// observation with a fresh timestamp stamps them (positive control —
+    /// without it the staleness test would pass even if `fresh` were
+    /// computed backwards). The scrape itself fails (nothing listening), so
+    /// only the seeded state decides.
+    #[test]
+    fn test_tick_stale_observation_blanks_all_fields() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let endpoint = format!("http://127.0.0.1:{port}/v1");
+
+        let mut collector = StatsCollector::new(test_state()).with_scrape_interval(Duration::ZERO);
+        let now_ms = unix_now_ms();
+        let seeded_obs = engine_metrics::WindowObs {
+            tps: Some(42.0),
+            prompt_tps: Some(120.0),
+            cache_hit_pct: Some(25.0),
+            spec_accept_pct: Some(44.5),
+            spec_active: true,
+            had_traffic: true,
+        };
+        // 31s old: every field must blank.
+        collector.engine.insert(
+            "m".to_string(),
+            EngineState {
+                prev: None,
+                kind: None,
+                last_scrape: None,
+                last_parse: None,
+                last_obs: Some(seeded_obs),
+                last_obs_ms: now_ms - 31_000,
+            },
+        );
+        let out = collector.tick(vec![spec_process(endpoint.clone())]);
+        assert_eq!(out.processes.len(), 1);
+        assert_eq!(out.processes[0].tps, None, "stale observation blanks tps");
+        assert_eq!(
+            out.processes[0].prompt_tps, None,
+            "stale observation blanks prompt_tps"
+        );
+        assert_eq!(
+            out.processes[0].cache_hit_pct, None,
+            "stale observation blanks cache_hit_pct"
+        );
+        assert_eq!(
+            out.processes[0].spec_accept_pct, None,
+            "stale observation blanks spec_accept_pct"
+        );
+        assert!(
+            !out.processes[0].spec_decoding_active,
+            "stale observation un-sticks the active flag"
+        );
+
+        // Positive control: the SAME observation with a fresh timestamp
+        // stamps every field.
+        collector.engine.insert(
+            "m".to_string(),
+            EngineState {
+                prev: None,
+                kind: None,
+                last_scrape: None,
+                last_parse: None,
+                last_obs: Some(seeded_obs),
+                last_obs_ms: now_ms,
+            },
+        );
+        let out = collector.tick(vec![spec_process(endpoint)]);
+        assert_eq!(out.processes[0].tps, Some(42.0));
+        assert_eq!(out.processes[0].prompt_tps, Some(120.0));
+        assert_eq!(out.processes[0].cache_hit_pct, Some(25.0));
+        assert_eq!(out.processes[0].spec_accept_pct, Some(44.5));
+        assert!(out.processes[0].spec_decoding_active);
     }
 
     /// Non-vLLM body (llama.cpp-style metrics) → defaults on both ticks;
@@ -661,7 +919,7 @@ mod tests {
                 .and(path("/metrics"))
                 .respond_with(
                     ResponseTemplate::new(200)
-                        .set_body_string(vllm_body(0.0, 0.0, 0.0))
+                        .set_body_string(vllm_body(0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
                         .set_delay(Duration::from_millis(1100)),
                 )
                 .mount(&slow),

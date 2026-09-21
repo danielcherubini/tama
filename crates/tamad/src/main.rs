@@ -11,6 +11,7 @@ use crate::host_installs::docker::runtime::ContainerRuntime;
 mod bench;
 mod compaction_server;
 mod download;
+mod engine_metrics;
 mod gpu;
 mod host_installs;
 mod installs;
@@ -24,7 +25,6 @@ mod register;
 mod server;
 mod state;
 mod stats;
-mod vllm_metrics;
 
 use process_table::ProcessTable;
 use register::Registrar;

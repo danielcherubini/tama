@@ -54,6 +54,9 @@ async fn seed_live_row(state: &Arc<ProxyState>, model_id: &str, endpoint: &str) 
         max_restarts: 3,
         spec_accept_pct: None,
         spec_decoding_active: false,
+        tps: None,
+        prompt_tps: None,
+        cache_hit_pct: None,
     };
     let stats = stats_full(1.5, vec![], vec![proc]);
     let pool = state.tamad_pool();

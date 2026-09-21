@@ -606,6 +606,9 @@ mod tests {
             max_restarts: 3,
             spec_accept_pct,
             spec_decoding_active,
+            tps: None,
+            prompt_tps: None,
+            cache_hit_pct: None,
         }
     }
 
