@@ -32,8 +32,9 @@ fn bucket_start(ts_ms: i64) -> i64 {
 /// means "no traffic for 30s" and must blank the entry); the pre-ADR-0014
 /// "skip stale defaults" or-merge is retired. `last_updated_ms` is stamped
 /// from the row's `last_obs_ms` (the tamad's clock) ONLY when it is `Some`
-/// — the observation time, not a proxy-clock read. Stamping unconditionally
-/// (or with a shared proxy clock) would make it ~equal across all entries
+/// — the observation time, clamped to the proxy's clock (`min(obs, now)`) so
+/// it is never in the future. Stamping unconditionally (or with a shared
+/// proxy clock) would make it ~equal across all entries
 /// (the merge touches every entry every tick) and `aggregate_inference`'s
 /// "latest entry wins" would degenerate to arbitrary (shared-timestamp ties).
 /// A `Some` fires on any traffic-bearing window (e.g. prefill-only, `tps`
@@ -44,6 +45,12 @@ pub(crate) async fn merge_tamad_inference_stats(
     state: &crate::proxy::ProxyState,
     live: &crate::proxy::Rows,
 ) {
+    // One proxy-clock read per merge call: the clamp below caps any
+    // future-dated observation at the receipt time.
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
     let cfg = state.config.read().await;
     let model_configs = state.registry.model_configs.read().await;
     for row in live.all() {
@@ -66,12 +73,17 @@ pub(crate) async fn merge_tamad_inference_stats(
                 // Stamp from the row's observation time (tamad clock, ADR-0014):
                 // the "most recently active backend wins" aggregate selection is
                 // deterministic (distinct observation times, no shared-timestamp
-                // ties). The tamad sends Some only when the observation is within
-                // its 30s window, so a stale or vanished row stops advancing this
-                // entry's timestamp — the aggregate's 30s gate then blanks the
-                // whole entry (F3).
+                // ties). Clamped to the proxy clock: the tamad is co-located with
+                // the proxy (same host clock), but capping at receipt time keeps
+                // the invariant "last_updated_ms is never in the future" if that
+                // topology ever changes — a future-dated observation can then
+                // neither keep a stale entry visible past the 30s gate nor beat a
+                // fresh observation. The tamad sends Some only when the observation
+                // is within its 30s window, so a stale or vanished row stops
+                // advancing this entry's timestamp — the aggregate's 30s gate then
+                // blanks the whole entry (F3).
                 if let Some(obs) = last_obs_ms {
-                    entry.last_updated_ms = obs;
+                    entry.last_updated_ms = obs.min(now_ms);
                 }
             });
         }
@@ -999,6 +1011,72 @@ mod tests {
             Some(30.0),
             "the newer row's value replaces the previous one"
         );
+    }
+
+    /// A future-dated `last_obs_ms` (a tamad clock AHEAD of the proxy) is
+    /// clamped to the proxy's clock domain — the stamp is `min(obs, now)`,
+    /// so a future-dated observation can neither keep a stale entry visible
+    /// past the 30s aggregate gate nor beat a fresh observation. A
+    /// clock-BEHIND observation is left as-is (it blanks slightly early —
+    /// the safe direction, same principle as the `now_ms` pre-scrape-loop
+    /// skew comment in crates/tamad/src/stats.rs).
+    #[tokio::test]
+    async fn test_merge_clamps_future_observation_time() {
+        let state = state_with_live_model("zeta", None, false, None).await;
+        state.metrics.modify_inference_stats(|m| {
+            m.insert(
+                "zeta".to_string(),
+                crate::proxy::types::LatestInferenceStats {
+                    tps: Some(50.0),
+                    prompt_tps: None,
+                    cache_hit_pct: None,
+                    spec_accept_pct: None,
+                    spec_decoding_active: false,
+                    last_updated_ms: 1000,
+                },
+            );
+        });
+
+        // A future-dated observation: the proxy's own clock + 60s (a
+        // tamad clock running 60s ahead), on a traffic-bearing row.
+        let future_obs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64
+            + 60_000;
+        seed_live_row_with_rates(
+            &state,
+            "zeta",
+            Some(42.0),
+            None,
+            None,
+            None,
+            false,
+            Some(future_obs),
+        )
+        .await;
+        let live = crate::proxy::live_rows(state.tamad_pool().as_ref()).await;
+        merge_tamad_inference_stats(&state, &live).await;
+
+        let snap = state.metrics.inference_stats_snapshot();
+        let stats = snap.get("zeta").unwrap();
+        assert!(
+            stats.last_updated_ms < future_obs,
+            "a future-dated observation is clamped to the proxy clock, not copied verbatim"
+        );
+        assert!(
+            stats.last_updated_ms >= 1000,
+            "the entry was actually stamped (not left at the seed value)"
+        );
+        let now_after = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        assert!(
+            stats.last_updated_ms <= now_after,
+            "the stamp is never in the future"
+        );
+        assert_eq!(stats.tps, Some(42.0));
     }
 
     /// A model key resolving to multiple model configs (aliases) delivers
