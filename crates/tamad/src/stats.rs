@@ -211,6 +211,10 @@ impl StatsCollector {
             return;
         };
         let now = Instant::now();
+        // Intentional skew: captured before the scrape loop, so a
+        // `last_obs_ms` stamped during this tick is up to
+        // `TICK_SCRAPE_BUDGET` (~3s) older than at emit — values blank
+        // slightly early, never linger (the safe direction).
         let now_ms = unix_now_ms();
         let mut scrape_elapsed = Duration::ZERO;
 
@@ -758,6 +762,110 @@ mod tests {
         assert!(p.spec_decoding_active);
     }
 
+    /// Non-2xx response (501) takes the `Ok((false, _))` failure arm:
+    /// no observation is stamped and the `last_parse` dt anchor does not
+    /// move, so the next windowed rate spans the FULL interval since the
+    /// last successful parse — the failed attempt does not shorten the
+    /// window. Three ticks: seed (200, zero counters) → 501 → 200 with
+    /// the counters advanced; the tick-3 rate is consistent with dt
+    /// spanning both 3s sleeps (~6s → ~83 tps), not just the second
+    /// one (~3s → ~167 tps).
+    #[test]
+    fn test_tick_spec_scrape_non_2xx_does_not_shorten_window() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        // Tick 1: seed the cumulative counters at zero. Tick 2: 501
+        // (the non-2xx arm). Tick 3: the counters advanced (500/200/50
+        // plus the 165/371 spec vector).
+        let seed = rt.block_on(MockServer::start());
+        let fail = rt.block_on(MockServer::start());
+        let next = rt.block_on(MockServer::start());
+        rt.block_on(
+            Mock::given(method("GET"))
+                .and(path("/metrics"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string(vllm_body(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)),
+                )
+                .mount(&seed),
+        );
+        rt.block_on(
+            Mock::given(method("GET"))
+                .and(path("/metrics"))
+                .respond_with(ResponseTemplate::new(501))
+                .mount(&fail),
+        );
+        rt.block_on(
+            Mock::given(method("GET"))
+                .and(path("/metrics"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string(vllm_body(500.0, 200.0, 50.0, 115.0, 371.0, 165.0)),
+                )
+                .mount(&next),
+        );
+
+        let mut collector =
+            StatsCollector::new(test_state()).with_scrape_interval(Duration::from_millis(50));
+
+        // Tick 1: first successful parse seeds `prev` — no window yet.
+        let first = collector.tick(vec![spec_process(seed.uri())]);
+        assert!(first.processes[0].spec_accept_pct.is_none());
+        assert!(first.processes[0].tps.is_none());
+        let parse_after_seed = collector
+            .engine
+            .get("m")
+            .unwrap()
+            .last_parse
+            .expect("tick 1 seeds last_parse");
+
+        // Tick 2: the 501 takes the non-2xx arm — no observation, and
+        // the dt anchor must stay at tick 1's parse.
+        std::thread::sleep(Duration::from_millis(3000));
+        let second = collector.tick(vec![spec_process(fail.uri())]);
+        let p = &second.processes[0];
+        assert!(p.spec_accept_pct.is_none());
+        assert!(!p.spec_decoding_active);
+        assert!(p.tps.is_none());
+        assert!(
+            collector
+                .engine
+                .get("m")
+                .unwrap()
+                .last_parse
+                .is_some_and(|t| t == parse_after_seed),
+            "a non-2xx response must not move the last_parse dt anchor"
+        );
+
+        // Tick 3: the counters advanced — the window spans BOTH 3s
+        // sleeps (~6s → ~83 tps). If the failed attempt had shortened
+        // it, the rate would be ~2x higher (~500/3s ≈ 167 tps).
+        std::thread::sleep(Duration::from_millis(3000));
+        let third = collector.tick(vec![spec_process(next.uri())]);
+        let p = &third.processes[0];
+        let Some(pct) = p.spec_accept_pct else {
+            panic!("expected a spec acceptance rate on tick 3");
+        };
+        assert!((44.4..=44.55).contains(&pct), "expected ~44.47, got {pct}");
+        assert!(p.spec_decoding_active);
+        let Some(tps) = p.tps else {
+            panic!("expected a windowed tps on tick 3");
+        };
+        // dt is at least the two sleeps minus the (small) pre-scrape
+        // work of the seeding tick and at most the two sleeps plus the
+        // other ticks' work — so a full window yields ~500/6s ≈ 72-88
+        // tps, while a shortened window would yield ~500/3s ≈ 139-185.
+        assert!(
+            (65.0..100.0).contains(&tps),
+            "expected ~500/6s (the failed attempt must not shorten the window), got {tps}"
+        );
+    }
+
     /// A stale observation (31s old) blanks ALL FIVE wire fields; the same
     /// observation with a fresh timestamp stamps them (positive control —
     /// without it the staleness test would pass even if `fresh` were
@@ -831,6 +939,126 @@ mod tests {
         assert_eq!(out.processes[0].cache_hit_pct, Some(25.0));
         assert_eq!(out.processes[0].spec_accept_pct, Some(44.5));
         assert!(out.processes[0].spec_decoding_active);
+    }
+
+    /// An idle window (a successful parse with UNCHANGED counters →
+    /// `observe()` → `None`) advances the `prev`/`last_parse` anchors
+    /// WITHOUT refreshing `last_obs_ms`: the last observation goes stale
+    /// (30s) and blanks every field, and the next counter advance is
+    /// diffed over the window since the idle tick — not the stale anchor.
+    /// Seeded state + a live mock: ticks 1 and 2 serve unchanged counters
+    /// (idle), tick 3 advances them.
+    #[test]
+    fn test_tick_idle_window_advances_anchors_without_refreshing_observation() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        // Idle mock: the unchanged counters; advance mock: decode +500.
+        let idle = rt.block_on(MockServer::start());
+        let advance = rt.block_on(MockServer::start());
+        let idle_body = vllm_body(100.0, 40.0, 10.0, 20.0, 60.0, 30.0);
+        rt.block_on(
+            Mock::given(method("GET"))
+                .and(path("/metrics"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(idle_body.clone()))
+                .mount(&idle),
+        );
+        rt.block_on(
+            Mock::given(method("GET"))
+                .and(path("/metrics"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_string(vllm_body(600.0, 40.0, 10.0, 20.0, 60.0, 30.0)),
+                )
+                .mount(&advance),
+        );
+
+        // Seed a successful parse 10s ago (the `prev`/`last_parse`
+        // anchor) with a traffic-bearing observation 31s old (stale).
+        let (kind, prev) =
+            engine_metrics::parse_engine_metrics(&idle_body).expect("vllm body parses");
+        let now_ms = unix_now_ms();
+        let stale_ms = now_ms - 31_000;
+        let seeded_obs = engine_metrics::WindowObs {
+            tps: Some(42.0),
+            prompt_tps: Some(120.0),
+            cache_hit_pct: Some(25.0),
+            spec_accept_pct: Some(44.5),
+            spec_active: true,
+            had_traffic: true,
+        };
+        let mut collector =
+            StatsCollector::new(test_state()).with_scrape_interval(Duration::from_millis(50));
+        collector.engine.insert(
+            "m".to_string(),
+            EngineState {
+                prev: Some(prev),
+                kind: Some(kind),
+                last_scrape: None,
+                last_parse: Some(Instant::now() - Duration::from_secs(10)),
+                last_obs: Some(seeded_obs),
+                last_obs_ms: stale_ms,
+            },
+        );
+
+        // Tick 1: the counters are unchanged → idle → observe() → None.
+        // The 31s-old observation is NOT refreshed: every field blanks.
+        let before = Instant::now();
+        let first = collector.tick(vec![spec_process(idle.uri())]);
+        let p = &first.processes[0];
+        assert_eq!(
+            p.tps, None,
+            "idle window leaves the stale observation blank"
+        );
+        assert_eq!(p.prompt_tps, None);
+        assert_eq!(p.cache_hit_pct, None);
+        assert_eq!(p.spec_accept_pct, None);
+        assert!(!p.spec_decoding_active);
+        let s = collector.engine.get("m").unwrap();
+        assert_eq!(
+            s.last_obs_ms, stale_ms,
+            "an idle window must not refresh last_obs_ms"
+        );
+        assert!(
+            s.last_parse.is_some_and(|t| t >= before),
+            "an idle (successful) parse advances the last_parse dt anchor"
+        );
+
+        // Tick 2: still idle — the blanking persists across ticks.
+        std::thread::sleep(Duration::from_millis(2000));
+        let second = collector.tick(vec![spec_process(idle.uri())]);
+        assert_eq!(second.processes[0].tps, None, "still idle, still blank");
+        assert_eq!(
+            collector.engine.get("m").unwrap().last_obs_ms,
+            stale_ms,
+            "the idle anchor extension persists across ticks"
+        );
+
+        // Tick 3: the counters advance — the window is diffed over the
+        // ~1s since the last successful parse (the idle tick), NOT the
+        // 10s+ anchor (which would yield ~500/13s ≈ 38 tps). The window
+        // is at least the 1s sleep (the parse stamps are ordered), so
+        // the rate is at most 500 tps and at least ~500/2.5s ≈ 200.
+        std::thread::sleep(Duration::from_millis(1000));
+        let third = collector.tick(vec![spec_process(advance.uri())]);
+        let p = &third.processes[0];
+        let Some(tps) = p.tps else {
+            panic!("expected a windowed tps after the counter advance");
+        };
+        assert!(
+            (150.0..500.0).contains(&tps),
+            "expected ~500/1s (the window since the idle tick), got {tps}"
+        );
+        // Only decode advanced: prompt_tps is a stamped 0.0 and the spec
+        // counters are idle again.
+        assert_eq!(p.prompt_tps, Some(0.0));
+        assert_eq!(p.cache_hit_pct, None);
+        assert_eq!(p.spec_accept_pct, None);
+        assert!(!p.spec_decoding_active);
     }
 
     /// Non-vLLM body (llama.cpp-style metrics) → defaults on both ticks;

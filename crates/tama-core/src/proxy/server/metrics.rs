@@ -978,6 +978,89 @@ mod tests {
         assert!(snap.get("b2").unwrap().spec_decoding_active);
     }
 
+    /// A row whose key resolves to ZERO model configs (e.g. the model was
+    /// removed from the config while its backend still runs on the host)
+    /// is a pure no-op: the merge writes nothing — a pre-existing entry
+    /// for a resolving server is left untouched, neither cleared nor
+    /// stamped, and no entry is created for the unresolvable row
+    /// (ADR-0014).
+    #[tokio::test]
+    async fn test_merge_skips_row_with_zero_resolving_backends() {
+        let state = crate::proxy::ProxyState::new(
+            crate::config::Config::default(),
+            None,
+            crate::db::pool::test_dummy_pool(),
+        );
+        state
+            .registry
+            .model_configs
+            .write()
+            .await
+            .insert("a1".to_string(), model_config("vllm", Some("dl-shared")));
+        state.metrics.modify_inference_stats(|m| {
+            m.insert(
+                "a1".to_string(),
+                crate::proxy::types::LatestInferenceStats {
+                    tps: Some(50.0),
+                    prompt_tps: Some(200.0),
+                    cache_hit_pct: Some(85.0),
+                    spec_accept_pct: Some(30.0),
+                    spec_decoding_active: true,
+                    last_updated_ms: 500,
+                },
+            );
+        });
+        // Live row whose key matches no model config (config key, model
+        // field, or api_name) → `resolve_backends_for_model` returns empty.
+        seed_live_row_with_rates(
+            &state,
+            "orphan-row",
+            Some(42.0),
+            Some(120.0),
+            Some(25.0),
+            Some(44.5),
+            true,
+        )
+        .await;
+
+        let live = crate::proxy::live_rows(state.tamad_pool().as_ref()).await;
+        merge_tamad_inference_stats(&state, &live).await;
+
+        let snap = state.metrics.inference_stats_snapshot();
+        assert_eq!(
+            snap.len(),
+            1,
+            "the unresolvable row must not create an entry"
+        );
+        let stats = snap
+            .get("a1")
+            .expect("the pre-existing entry must survive untouched");
+        assert_eq!(stats.tps, Some(50.0), "the row must not overwrite tps");
+        assert_eq!(
+            stats.prompt_tps,
+            Some(200.0),
+            "the row must not overwrite prompt_tps"
+        );
+        assert_eq!(
+            stats.cache_hit_pct,
+            Some(85.0),
+            "the row must not overwrite cache_hit_pct"
+        );
+        assert_eq!(
+            stats.spec_accept_pct,
+            Some(30.0),
+            "the row must not overwrite spec_accept_pct"
+        );
+        assert!(
+            stats.spec_decoding_active,
+            "the row must not un-stick spec_decoding_active"
+        );
+        assert_eq!(
+            stats.last_updated_ms, 500,
+            "the row must not stamp last_updated_ms"
+        );
+    }
+
     /// Wire → row → merge → aggregate: a live tamad row's windowed rates
     /// flow through `merge_tamad_inference_stats` into
     /// `aggregate_inference`'s output (ADR-0014).

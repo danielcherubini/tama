@@ -283,7 +283,10 @@ fn source_label_value(labels: &str) -> Option<&str> {
 
 /// Read a label value following `=`: the quoted string, or (legal for
 /// numbers / NaN / Inf) the unquoted token up to the next comma or
-/// whitespace.
+/// whitespace. Asymmetry with the quoted form: the unquoted value
+/// requires a terminating `,` or whitespace, so a final unquoted label
+/// (e.g. `source=5` at end-of-string) yields `None` rather than `"5"`.
+/// Harmless here — only the quoted `source` values are matched.
 fn read_label_value(s: &str) -> Option<&str> {
     if let Some(v) = s.strip_prefix('"') {
         let end = v.find('"')?;
