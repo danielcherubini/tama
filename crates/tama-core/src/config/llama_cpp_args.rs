@@ -9,9 +9,15 @@
 
 use crate::config::flag_name;
 
-/// Append `--metrics` to grouped args if not already present.
+/// Append `--metrics` to grouped backend args if not already present.
 ///
-/// Returns `true` if the flag was added.
+/// `grouped` is the backend's grouped args (each entry is one "line" in
+/// shell-like form) — inspected for a user-supplied `--metrics` in any
+/// form `flag_name` recognises (grouped, inline, short), and the flag is
+/// appended when absent.
+///
+/// Returns `true` if the flag was added, `false` if the user already
+/// supplied it.
 pub fn ensure_metrics(grouped: &mut Vec<String>) -> bool {
     let present = grouped
         .iter()
