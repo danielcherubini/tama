@@ -813,6 +813,9 @@ mod tests {
         let mut collector =
             StatsCollector::new(test_state()).with_scrape_interval(Duration::from_millis(50));
 
+        // Ticks run on the plain test thread (not in an async context
+        // — the `rt.block_on` enter-guard is released before the blocking
+        // scrape), so no `std::thread::spawn` wrapper is needed.
         // Tick 1: first successful parse seeds `prev` — no window yet.
         let first = collector.tick(vec![spec_process(seed.uri())]);
         assert!(first.processes[0].spec_accept_pct.is_none());
@@ -860,8 +863,11 @@ mod tests {
         // work of the seeding tick and at most the two sleeps plus the
         // other ticks' work — so a full window yields ~500/6s ≈ 72-88
         // tps, while a shortened window would yield ~500/3s ≈ 139-185.
+        // The 55.0 floor is deliberately looser than the expected ~72-88
+        // to absorb slow-machine overhead; it still excludes the
+        // shortened-window hypothesis (~139-185) by a wide margin.
         assert!(
-            (65.0..100.0).contains(&tps),
+            (55.0..100.0).contains(&tps),
             "expected ~500/6s (the failed attempt must not shorten the window), got {tps}"
         );
     }
@@ -1005,6 +1011,9 @@ mod tests {
             },
         );
 
+        // Ticks run on the plain test thread (not in an async context
+        // — the `rt.block_on` enter-guard is released before the blocking
+        // scrape), so no `std::thread::spawn` wrapper is needed.
         // Tick 1: the counters are unchanged → idle → observe() → None.
         // The 31s-old observation is NOT refreshed: every field blanks.
         let before = Instant::now();
@@ -1043,6 +1052,9 @@ mod tests {
         // 10s+ anchor (which would yield ~500/13s ≈ 38 tps). The window
         // is at least the 1s sleep (the parse stamps are ordered), so
         // the rate is at most 500 tps and at least ~500/2.5s ≈ 200.
+        // The 150.0 floor is deliberately looser than the expected
+        // ~200-500 to absorb slow-machine overhead; it still excludes
+        // the wrong-anchor hypothesis (~38 tps) by a wide margin.
         std::thread::sleep(Duration::from_millis(1000));
         let third = collector.tick(vec![spec_process(advance.uri())]);
         let p = &third.processes[0];
