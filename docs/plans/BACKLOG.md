@@ -53,9 +53,3 @@ Execute in order 180 → 181 → 182 → 183 (180 and 181 are independent of eac
 | [Leptos UI Consolidation](plan-176-leptos-ui-consolidation.md) | Shared wasm-safe types via #[path] inclusion, collapse mirror types, DOM/request helpers + patch_request, benchmark form-state hook | F29, F31 |
 | [ProxyState Sub-structs](plan-177-proxystate-substructs.md) | RegistryState/MetricsState/PullState composition, domain methods over lock-guard accessors, shim migration | F32 |
 | [Router Consolidation](plan-169-router-consolidation.md) | Single-source route table (31 routes), process helpers to crate::process, cross-crate ownership test, fix shadowed /system/health | F33 |
-
-### Feature Plans (2026-08)
-
-| Plan | Description |
-|------|-------------|
-| [LiteLLM-Compatible Model Info](plan-196-litellm-model-info.md) | `GET /v1/model/info` + `/model/info` serving LiteLLM's discovery shape from existing model data (plan-196) |

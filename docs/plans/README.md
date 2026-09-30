@@ -13,8 +13,8 @@ Plans for features, refactors, and bug fixes in the Tama project.
 ## Quick Stats
 
 - **Total Plans**: 102
-- **Backlog**: 1
-- **Completed**: 99 ✅
+- **Backlog**: 0
+- **Completed**: 100 ✅
 
 > **Note:** The Tama Management API Spec (2026-04-03) was removed as it was a design document, not an implementation plan.
 
@@ -24,6 +24,7 @@ Plans for features, refactors, and bug fixes in the Tama project.
 
 | # | Plan | Status |
 |---|------|--------|
+| 196 | [LiteLLM-Compatible Model Info](done/plan-196-litellm-model-info.md) | ✅ COMPLETED (squash `3268e5d8`) |
 | 195 | [Structured Logging Redesign](done/plan-195-structured-logging.md) (ADR-0013) | ✅ COMPLETED (squash `93985db4`) |
 | 194 | [vLLM Spec-Decode Telemetry + Consistent tok/s Formatting](done/plan-194-vllm-spec-telemetry.md) (ADR-0012) | ✅ COMPLETED (squash `930ee31d`) |
 | 194 | [Models Page: Live State, Filter Toolbar, Pull-Host UX](done/plan-194-models-live-state-filters-pull-host.md) | ✅ COMPLETED (squash `d59398f4`) |
