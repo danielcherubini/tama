@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use crate::config::{Config, ModelConfig};
-use crate::proxy::tama_handlers::models::handle_opencode_list_models;
+use crate::proxy::tama_handlers::models::{handle_litellm_model_info, handle_opencode_list_models};
 use crate::proxy::ProxyState;
 use axum::body::Body;
 use axum::extract::Request;
+use axum::http::StatusCode;
 use axum::Router;
 use tower::ServiceExt;
 
@@ -36,4 +37,31 @@ pub async fn call_list_models(state: Arc<ProxyState>) -> serde_json::Value {
         .await
         .unwrap();
     serde_json::from_slice(&body).unwrap()
+}
+
+/// Helper: build the router serving the LiteLLM handler at both discovery
+/// paths and call it with the given URI (e.g. `"/v1/model/info"` or
+/// `"/model/info?litellm_model_id=test-model"`). Returns the status and the
+/// raw body bytes (so parity tests can compare byte-identical bodies).
+pub async fn call_litellm_model_info(state: Arc<ProxyState>, uri: &str) -> (StatusCode, Vec<u8>) {
+    let app = Router::new()
+        .route(
+            "/v1/model/info",
+            axum::routing::get(handle_litellm_model_info),
+        )
+        .route("/model/info", axum::routing::get(handle_litellm_model_info))
+        .with_state(state);
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(uri)
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (status, body.to_vec())
 }

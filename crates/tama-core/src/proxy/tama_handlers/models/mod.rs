@@ -1,4 +1,5 @@
 mod handlers;
+mod litellm;
 mod opencode;
 mod utils;
 
@@ -14,6 +15,7 @@ pub use handlers::{
     handle_tama_cancel_load, handle_tama_get_model, handle_tama_list_models,
     handle_tama_load_model, handle_tama_unload_model,
 };
+pub use litellm::handle_litellm_model_info;
 pub use opencode::handle_opencode_list_models;
 pub use utils::{
     capitalize_first, generate_display_name, ModelEntry, ModelLimit, OpencodeModelsResponse,
@@ -28,6 +30,7 @@ mod tests {
     mod cancel;
     mod capabilities;
     mod helpers;
+    mod litellm;
     mod model_handlers;
     mod opencode;
 }

@@ -4,7 +4,7 @@ use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
 
-use super::super::opencode::{extract_capabilities, fetch_capabilities_from_backend};
+use super::super::utils::{extract_capabilities, fetch_capabilities_from_backend};
 
 /// Valid response with supports_tool_calls: true → (true, false)
 #[test]

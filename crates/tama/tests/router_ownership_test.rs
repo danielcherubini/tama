@@ -107,7 +107,7 @@ fn test_proxy_and_management_tables_are_disjoint() {
             .map(|(_, p)| p)
             .collect();
 
-    const EXPECTED_PROXY_PATH_COUNT: usize = 31;
+    const EXPECTED_PROXY_PATH_COUNT: usize = 33;
     assert_eq!(
         proxy_paths.len(),
         EXPECTED_PROXY_PATH_COUNT,

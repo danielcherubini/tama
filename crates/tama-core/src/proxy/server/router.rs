@@ -24,11 +24,12 @@ use crate::proxy::handlers::tts::{
     handle_audio_models, handle_audio_speech, handle_audio_stream, handle_audio_voices,
 };
 use crate::proxy::tama_handlers::{
-    handle_opencode_list_models, handle_pull_job_stream, handle_system_metrics_stream,
-    handle_tama_api_keys_create, handle_tama_api_keys_list, handle_tama_api_keys_revoke,
-    handle_tama_api_keys_update, handle_tama_cancel_load, handle_tama_get_pull_job,
-    handle_tama_load_model, handle_tama_pull_model, handle_tama_system_gpu_devices,
-    handle_tama_system_gpu_devices_refresh, handle_tama_system_restart, handle_tama_unload_model,
+    handle_litellm_model_info, handle_opencode_list_models, handle_pull_job_stream,
+    handle_system_metrics_stream, handle_tama_api_keys_create, handle_tama_api_keys_list,
+    handle_tama_api_keys_revoke, handle_tama_api_keys_update, handle_tama_cancel_load,
+    handle_tama_get_pull_job, handle_tama_load_model, handle_tama_pull_model,
+    handle_tama_system_gpu_devices, handle_tama_system_gpu_devices_refresh,
+    handle_tama_system_restart, handle_tama_unload_model,
 };
 use crate::proxy::ProxyState;
 
@@ -87,6 +88,9 @@ fn proxy_routes() -> Vec<ProxyRoute> {
             "/v1/opencode/models",
             get(handle_opencode_list_models),
         ),
+        // LiteLLM-compatible discovery (plan-196)
+        ("GET", "/v1/model/info", get(handle_litellm_model_info)),
+        ("GET", "/model/info", get(handle_litellm_model_info)),
         // Pull jobs
         ("POST", "/tama/v1/pulls", post(handle_tama_pull_model)),
         (
@@ -216,6 +220,9 @@ pub async fn build_unified_router(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::util::ServiceExt;
 
     /// Verify that the proxy router returns 200 for known proxy endpoints.
     #[tokio::test]
@@ -351,5 +358,134 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), 200);
+    }
+
+    /// Verify the auth/scope boundary of the LiteLLM model-info routes through
+    /// the ASSEMBLED router (plan-196): the route table is what changed, so the
+    /// boundary must be pinned at the router level, not just by the
+    /// `required_scope` pure-function tests. With API keys enabled:
+    /// - unauthenticated → 401 on both `/v1/model/info` and `/model/info`
+    /// - a key WITHOUT the `Inference` scope (ManagementRead only) → 403 on
+    ///   both (pins the scope unification of the two twins as executable
+    ///   behavior)
+    /// - a key WITH the `Inference` scope → 200 on both
+    #[tokio::test]
+    async fn test_router_litellm_model_info_auth_scope_boundary() {
+        let guard = crate::testing::postgres::with_schema().await;
+
+        // Seed a ManagementRead-only key and an Inference-scoped key.
+        let mgmt_key = crate::proxy::api_keys::generate_key();
+        let inference_key = crate::proxy::api_keys::generate_key();
+        let store = crate::proxy::api_keys::ApiKeyStore::new(Arc::new(guard.pool.clone()));
+        store
+            .create_key(
+                "mgmt-only",
+                &mgmt_key,
+                &[crate::proxy::api_keys::Scope::ManagementRead],
+                "admin",
+                None,
+            )
+            .await
+            .unwrap();
+        store
+            .create_key(
+                "inference-key",
+                &inference_key,
+                &[crate::proxy::api_keys::Scope::Inference],
+                "admin",
+                None,
+            )
+            .await
+            .unwrap();
+
+        let config = crate::config::Config {
+            proxy: crate::config::ProxyConfig {
+                authenticator_skip_paths: vec![
+                    "/health".to_string(),
+                    "/metrics".to_string(),
+                    "/login".to_string(),
+                    "/login/callback".to_string(),
+                    "/login/error".to_string(),
+                ],
+                api_keys_enabled: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let state = Arc::new(crate::proxy::ProxyState::new(
+            config,
+            None,
+            Arc::new(guard.pool.clone()),
+        ));
+        let app = build_router(state).await;
+
+        // 1. Unauthenticated → 401 on both routes (auth is configured via
+        // api_keys_enabled, so both twins must gate on credentials).
+        for path in ["/v1/model/info", "/model/info"] {
+            let resp = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::UNAUTHORIZED,
+                "{} unauthenticated must be 401",
+                path
+            );
+        }
+
+        // 2. ManagementRead-only key → 403 on both routes: both twins require
+        // the Inference scope (the scope unification fix).
+        for path in ["/v1/model/info", "/model/info"] {
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .header("Authorization", format!("Bearer {}", mgmt_key))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::FORBIDDEN,
+                "{} with a management-only key must be 403",
+                path
+            );
+            let body_bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+                .await
+                .unwrap();
+            let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+            assert!(
+                body_str.contains("inference"),
+                "{} 403 body must name the required scope, got: {}",
+                path,
+                body_str
+            );
+        }
+
+        // 3. Inference-scoped key → 200 on both routes.
+        for path in ["/v1/model/info", "/model/info"] {
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .header("Authorization", format!("Bearer {}", inference_key))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::OK,
+                "{} with an inference-scoped key must be 200",
+                path
+            );
+        }
     }
 }

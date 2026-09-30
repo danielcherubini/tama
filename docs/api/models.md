@@ -317,6 +317,95 @@ Recompute SHA-256 for every tracked file and compare against stored LFS hashes. 
 }
 ```
 
+## LiteLLM-compatible discovery
+
+`GET /v1/model/info` and `GET /model/info` (same handler) serve models in
+LiteLLM's `model_info_v1` discovery shape, so plugins written against
+LiteLLM's discovery API (e.g. `pi-provider-litellm`) work against Tama
+unchanged: one `GET /v1/model/info` call returns every model with the full
+`model_info` metadata.
+
+**Auth:** `tama_` Bearer API key. Both routes require the `Inference` scope —
+`/model/info` is the LiteLLM-compatible twin of `/v1/model/info` (same handler,
+same data) and carries the same authorization contract. The auth middleware
+still gates both when API keys are enabled.
+
+**Query filter:** `?litellm_model_id=<name>` filters to the single entry whose
+`model_name` matches (LiteLLM's per-model lookup). An unknown id yields an
+empty `data` array; an absent or empty value returns the full list.
+
+**Response (200 OK):**
+
+```json
+{
+  "data": [
+    {
+      "model_name": "qwen3-8b",
+      "litellm_params": {
+        "model": "qwen3-8b",
+        "provider": "llama.cpp"
+      },
+      "model_info": {
+        "id": "qwen3-8b",
+        "mode": "chat",
+        "litellm_provider": "llama.cpp",
+        "max_input_tokens": 262144,
+        "max_output_tokens": 32768,
+        "max_tokens": 32768,
+        "supports_function_calling": true,
+        "supports_reasoning": true,
+        "supports_vision": true,
+        "supports_audio_input": false,
+        "supports_pdf_input": false,
+        "input_cost_per_token": 0.0,
+        "output_cost_per_token": 0.0,
+        "cache_read_input_token_cost": 0.0,
+        "cache_creation_input_token_cost": 0.0,
+        "reasoning_effort_levels": ["none", "low", "medium", "xhigh"],
+        "supports_none_reasoning_effort": true,
+        "supports_minimal_reasoning_effort": false,
+        "supports_low_reasoning_effort": true,
+        "supports_xhigh_reasoning_effort": true,
+        "supports_max_reasoning_effort": false
+      }
+    }
+  ]
+}
+```
+
+One entry per enabled model plus alias entries (same set and inheritance rules
+as `/v1/opencode/models`). The example above is a Qwen3.8-shaped entry with
+`reasoning_levels: ["off", "low", "medium", "xhigh"]` stored — note the
+`off` → `none` conversion (ADR-0009) in `reasoning_effort_levels` and the
+matching `supports_none_reasoning_effort: true`.
+
+**Field mapping:**
+
+| LiteLLM field | Tama source |
+|---------------|-------------|
+| `model_name` | `api_name` / `model` (or alias name) |
+| `litellm_params.model` / `model_info.id` | Same |
+| `litellm_params.provider` / `model_info.litellm_provider` | Backend name |
+| `max_input_tokens` | Context-length resolution chain: config override → vLLM `max_model_len` → live backend → HF metadata → model TOML |
+| `max_output_tokens` | 1/8 of context, clamped 16K–32K (same heuristic as the opencode `limit.output`) |
+| `max_tokens` | `max_output_tokens` else `max_input_tokens` (LiteLLM's legacy field) |
+| `supports_function_calling` | Backend `/props` |
+| `supports_reasoning` | `/props` reasoning OR non-empty `reasoning_levels` (ADR-0008) |
+| `supports_vision` / `supports_audio_input` / `supports_pdf_input` | `modalities.input` (`image` / `audio` / `pdf`) |
+| Cost fields (all four) | `0.0` (local inference — no per-token pricing) |
+| Effort fields (`reasoning_effort_levels`, `supports_*_reasoning_effort`) | `reasoning_levels` with `off` → `none` (ADR-0009); **absent** when no levels are configured (LiteLLM treats absent as "unknown — advertise nothing") |
+
+Note the `off`/`none` duality (ADR-0009): Tama stores levels in the pi
+vocabulary (`off`) and converts to the wire vocabulary (`none`) at
+serialization only. `medium` and `high` have no per-level flag in LiteLLM's
+schema — they appear only inside `reasoning_effort_levels`.
+
+**Known limitation:** `GET /health` is a liveness probe
+(`{ "status": "ok", "service": "tama-proxy" }`), **not** LiteLLM's
+`{ "healthy_endpoints": [...] }` — plugins whose discovery falls back to
+`/health` (only reached when `/v1/model/info` is unreachable or empty) get
+zero models from Tama. The `/v1/model/info` primary path is fully supported.
+
 ## Model Lifecycle (Load / Unload / Cancel)
 
 Local (self-hosted) model processes are owned by a **tamad** (ADR-0010): the

@@ -21,10 +21,16 @@ use crate::proxy::api_keys::{AuthSubject, Scope};
 ///
 /// Route mapping:
 /// - `/v1/*` → `Inference` scope
+/// - `/model/info` (GET) → `Inference` scope (LiteLLM-compatible twin of `/v1/model/info`)
 /// - `GET/HEAD/DELETE /tama/v1/*` → `ManagementRead` scope
 /// - `POST/PUT/PATCH /tama/v1/*` → `ManagementWrite` scope
 pub fn required_scope(path: &str, method: &Method) -> Option<Scope> {
     if path.starts_with("/v1/") || path == "/v1" {
+        return Some(Scope::Inference);
+    }
+    if path == "/model/info" {
+        // LiteLLM-compatible twin of `/v1/model/info` — same handler, same data,
+        // so it must carry the same authorization contract.
         return Some(Scope::Inference);
     }
     if path.starts_with("/tama/v1/") {
@@ -431,6 +437,25 @@ mod tests {
     fn test_required_scope_v1_opencode_returns_inference() {
         assert_eq!(
             required_scope("/v1/opencode/models", &Method::GET),
+            Some(Scope::Inference)
+        );
+    }
+
+    #[test]
+    fn test_required_scope_v1_model_info_returns_inference() {
+        assert_eq!(
+            required_scope("/v1/model/info", &Method::GET),
+            Some(Scope::Inference)
+        );
+    }
+
+    #[test]
+    fn test_required_scope_model_info_returns_inference() {
+        // The non-prefixed /model/info is the LiteLLM-compatible twin of
+        // /v1/model/info (same handler, same data) and must require the
+        // same Inference scope; the auth middleware still gates it.
+        assert_eq!(
+            required_scope("/model/info", &Method::GET),
             Some(Scope::Inference)
         );
     }

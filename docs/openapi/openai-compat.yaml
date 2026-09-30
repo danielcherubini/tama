@@ -15,8 +15,8 @@ info:
        (see `tama-api.yaml`).
 
     **Base URL:** Point your OpenAI client at `http://localhost:8080` and set
-    `OPENAI_API_KEY` to any non-empty string (Tama does not currently enforce
-    authentication).
+    `OPENAI_API_KEY` to a `tama_` API key (or any non-empty string when API
+    keys are disabled).
   version: 1.0.0
   license:
     name: MIT
@@ -246,8 +246,109 @@ paths:
                 created: 1712000000
                 owned_by: llama-cpp
                 ready: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /v1/model/info:
+    get:
+      operationId: getLiteLLMModelInfo
+      summary: List model info (LiteLLM-compatible discovery)
+      description: |
+        Returns all enabled models (plus alias entries) in LiteLLM's
+        `model_info_v1` discovery shape: `{ "data": [ { model_name,
+        litellm_params, model_info } ] }` — one entry per enabled model plus
+        alias entries (same set and inheritance rules as the opencode
+        discovery endpoint). `?litellm_model_id=<name>` filters to the single
+        entry whose `model_name` matches (an unknown id yields an empty
+        `data` array; an absent or empty value returns the full list).
+
+        Requires the `Inference` scope. The same handler is served at
+        `GET /model/info` (also requires the `Inference` scope).
+      tags: [models]
+      parameters:
+        - name: litellm_model_id
+          in: query
+          required: false
+          schema:
+            type: string
+            example: qwen3-8b
+          description: |
+            Filter to the single entry whose `model_name` matches. Unknown id
+            → empty `data`; absent/empty → full list.
+      responses:
+        "200":
+          description: Model info entries in the LiteLLM `data` array shape
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiteLLMModelInfoList"
+              example:
+                data:
+                  - model_name: qwen3-8b
+                    litellm_params:
+                      model: qwen3-8b
+                      provider: llama.cpp
+                    model_info:
+                      id: qwen3-8b
+                      mode: chat
+                      litellm_provider: llama.cpp
+                      max_input_tokens: 262144
+                      max_output_tokens: 32768
+                      max_tokens: 32768
+                      supports_function_calling: true
+                      supports_reasoning: true
+                      supports_vision: true
+                      supports_audio_input: false
+                      supports_pdf_input: false
+                      input_cost_per_token: 0.0
+                      output_cost_per_token: 0.0
+                      cache_read_input_token_cost: 0.0
+                      cache_creation_input_token_cost: 0.0
+                      reasoning_effort_levels: [none, low, medium, xhigh]
+                      supports_none_reasoning_effort: true
+                      supports_minimal_reasoning_effort: false
+                      supports_low_reasoning_effort: true
+                      supports_xhigh_reasoning_effort: true
+                      supports_max_reasoning_effort: false
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /model/info:
+    get:
+      operationId: getLiteLLMModelInfoAlt
+      summary: List model info (LiteLLM-compatible)
+      description: |
+        Identical handler and response to `GET /v1/model/info`, served at the
+        non-prefixed path. Requires a valid API key (auth middleware) and the
+        `Inference` scope — the same authorization contract as its `/v1` twin.
+      tags: [models]
+      parameters:
+        - name: litellm_model_id
+          in: query
+          required: false
+          schema:
+            type: string
+            example: qwen3-8b
+          description: |
+            Filter to the single entry whose `model_name` matches. Unknown id
+            → empty `data`; absent/empty → full list.
+      responses:
+        "200":
+          description: Model info entries in the LiteLLM `data` array shape
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiteLLMModelInfoList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   # ===========================================================================
   # Root utility endpoints
@@ -419,6 +520,28 @@ components:
             error:
               message: "Failed to load model: timeout after 60s"
               type: LoadModelError
+
+    Unauthorized:
+      description: "Missing or invalid API key (or a `tama_` key provided while API keys are disabled)"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              message: "Invalid or missing API key"
+              type: UnauthorizedError
+
+    Forbidden:
+      description: "API key lacks the required scope for this route (e.g. `Inference` for `/v1/*`)"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              message: "missing required scope: inference"
+              type: ForbiddenError
 
   schemas:
 
@@ -624,6 +747,158 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Model"
+
+    # -------------------------------------------------------------------------
+    # LiteLLM-compatible model info schemas (`/v1/model/info`, `/model/info`)
+    # -------------------------------------------------------------------------
+
+    LiteLLMParams:
+      type: object
+      required: [model, provider]
+      properties:
+        model:
+          type: string
+          description: "The name the client calls the model with (same as `model_name`)"
+          example: qwen3-8b
+        provider:
+          type: string
+          description: The backend serving the model
+          example: llama.cpp
+
+    LiteLLMModelInfo:
+      type: object
+      required: [id, mode, litellm_provider, supports_function_calling, supports_reasoning, supports_vision, supports_audio_input, supports_pdf_input, input_cost_per_token, output_cost_per_token, cache_read_input_token_cost, cache_creation_input_token_cost]
+      properties:
+        id:
+          type: string
+          description: "Model identifier (same as `model_name`)"
+          example: qwen3-8b
+        mode:
+          type: string
+          enum: [chat]
+          description: "Always `chat`"
+        litellm_provider:
+          type: string
+          description: The backend serving the model
+          example: llama.cpp
+        max_input_tokens:
+          type: integer
+          format: int32
+          nullable: true
+          description: "Context length (config override → vLLM `max_model_len` → live backend → HF metadata → model TOML)"
+          example: 262144
+        max_output_tokens:
+          type: integer
+          format: int32
+          nullable: true
+          description: "1/8 of context, clamped 16K–32K (same heuristic as the opencode `limit.output`)"
+          example: 32768
+        max_tokens:
+          type: integer
+          format: int32
+          nullable: true
+          description: LiteLLM legacy field — `max_output_tokens` when known, else `max_input_tokens`
+          example: 32768
+        supports_function_calling:
+          type: boolean
+          description: "From the backend `/props` (defaults to `true` when no /props data exists)"
+          example: true
+        supports_reasoning:
+          type: boolean
+          description: "`/props` reasoning OR non-empty `reasoning_levels` (ADR-0008)"
+          example: true
+        supports_vision:
+          type: boolean
+          description: "`modalities.input` contains `image`"
+          example: true
+        supports_audio_input:
+          type: boolean
+          description: "`modalities.input` contains `audio`"
+          example: false
+        supports_pdf_input:
+          type: boolean
+          description: "`modalities.input` contains `pdf`"
+          example: false
+        input_cost_per_token:
+          type: number
+          format: float
+          description: "Always `0` — local inference, no per-token pricing"
+          example: 0.0
+        output_cost_per_token:
+          type: number
+          format: float
+          description: "Always `0` — local inference, no per-token pricing"
+          example: 0.0
+        cache_read_input_token_cost:
+          type: number
+          format: float
+          description: "Always `0` — local inference, no per-token pricing"
+          example: 0.0
+        cache_creation_input_token_cost:
+          type: number
+          format: float
+          description: "Always `0` — local inference, no per-token pricing"
+          example: 0.0
+        reasoning_effort_levels:
+          type: array
+          nullable: true
+          items:
+            type: string
+            enum: [none, minimal, low, medium, high, xhigh, max]
+          description: |
+            Stored `reasoning_levels` with `off` → `none` (ADR-0009). **Absent**
+            when the model has no configured levels (LiteLLM treats absent as
+            "unknown — advertise nothing"). `medium`/`high` appear only here —
+            they have no per-level flag.
+          example: [none, low, medium, xhigh]
+        supports_minimal_reasoning_effort:
+          type: boolean
+          nullable: true
+          description: "Present only when levels are configured; `true` when the list contains `minimal`"
+          example: false
+        supports_low_reasoning_effort:
+          type: boolean
+          nullable: true
+          description: "Present only when levels are configured; `true` when the list contains `low`"
+          example: true
+        supports_none_reasoning_effort:
+          type: boolean
+          nullable: true
+          description: "Present only when levels are configured; `true` when the list contains `none` (the ADR-0009 wire form of stored `off`)"
+          example: true
+        supports_xhigh_reasoning_effort:
+          type: boolean
+          nullable: true
+          description: "Present only when levels are configured; `true` when the list contains `xhigh`"
+          example: true
+        supports_max_reasoning_effort:
+          type: boolean
+          nullable: true
+          description: "Present only when levels are configured; `true` when the list contains `max`"
+          example: false
+
+    LiteLLMModelInfoEntry:
+      type: object
+      required: [model_name, litellm_params, model_info]
+      properties:
+        model_name:
+          type: string
+          description: "`api_name` / `model` (or alias name)"
+          example: qwen3-8b
+        litellm_params:
+          $ref: "#/components/schemas/LiteLLMParams"
+        model_info:
+          $ref: "#/components/schemas/LiteLLMModelInfo"
+
+    LiteLLMModelInfoList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          description: "One entry per enabled model plus alias entries; empty when `?litellm_model_id` matches nothing"
+          items:
+            $ref: "#/components/schemas/LiteLLMModelInfoEntry"
 
     # -------------------------------------------------------------------------
     # Root utility schemas
